@@ -5,3 +5,4 @@ test-results
 playwright-report
 .wrangler
 .dev.vars
+dist-e2e

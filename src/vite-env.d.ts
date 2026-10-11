@@ -3,4 +3,6 @@
 interface ImportMetaEnv {
   /** Origin of the TURN credential worker; TURN is skipped when unset. */
   readonly VITE_TURN_URL?: string
+  /** Comma-separated Nostr relay URLs, for local testing; the public defaults are used when unset. */
+  readonly VITE_NOSTR_RELAYS?: string
 }

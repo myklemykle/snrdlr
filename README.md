@@ -16,9 +16,11 @@ An experimental chat app where the only way to add someone is to meet them: one 
 npm install
 npm run dev      # local dev server
 npm test         # unit tests (key derivation, invite encoding)
-npm run e2e      # two-browser pairing test; needs network access to public relays
+npm run e2e      # two-browser pairing test, against a relay started on this machine
 npm run build    # typecheck and build to dist/
 ```
+
+For manual testing in desktop browsers without touching public relays, run `npm run relay` in one terminal and `npm run dev:local` in another. The local relay (`scripts/local-relay.mjs`) is in-memory and unauthenticated, and only listens on localhost.
 
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 

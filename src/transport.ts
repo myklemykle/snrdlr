@@ -4,6 +4,10 @@ import type {ChatKeys} from './keys'
 const APP_ID = 'snrdlr-v1'
 const MAX_TEXT_LENGTH = 4000
 
+// Set for local testing against scripts/local-relay.mjs; unset, Trystero picks from its public relay list.
+const relayUrls = import.meta.env.VITE_NOSTR_RELAYS?.split(',').map(url => url.trim()).filter(Boolean)
+const relayConfig = relayUrls?.length ? {urls: relayUrls} : undefined
+
 export type ChatHandlers = {
   onText: (text: string, peerId: string) => void
   onPeersChange: (peerIds: string[]) => void
@@ -18,7 +22,7 @@ export type Chat = {
 
 export function joinChat(keys: ChatKeys, handlers: ChatHandlers, turnServers: TurnServerConfig[] = []): Chat {
   const peers = new Set<string>()
-  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers}, keys.roomId, {
+  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers, relayConfig}, keys.roomId, {
     // Trystero's error text is aimed at developers; keep it in the console.
     onJoinError: ({error}) => {
       console.warn(error)
