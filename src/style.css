@@ -1,0 +1,206 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fafaf7;
+  --fg: #1c1c1a;
+  --muted: #6b6b66;
+  --line: #deded8;
+  --accent: #1f6feb;
+  --accent-fg: #fff;
+  --bubble: #ececE6;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --fg: #ededea;
+    --muted: #9a9a94;
+    --line: #33332f;
+    --accent: #4c8dff;
+    --accent-fg: #0b0b0a;
+    --bubble: #2a2a27;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main {
+  max-width: 40rem;
+  height: 100dvh;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+input,
+button {
+  font: inherit;
+  /* 16px minimum stops iOS Safari zooming the page on focus. */
+  font-size: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button[type='submit'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.home {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.home h1 {
+  font-size: 2rem;
+}
+
+.home p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.home form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat header h1 {
+  overflow-wrap: anywhere;
+}
+
+.status {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.status.on::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: #2da44e;
+}
+
+.error {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #cf222e;
+  border-radius: 0.6rem;
+  color: #cf222e;
+}
+
+.invite {
+  padding: 1rem 0;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.invite p {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.qr {
+  width: min(100%, 18rem);
+  height: auto;
+  border-radius: 0.5rem;
+}
+
+.log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.75rem 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.log li {
+  max-width: 80%;
+  padding: 0.5rem 0.8rem;
+  border-radius: 1rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.log .mine {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.log .theirs {
+  align-self: flex-start;
+  background: var(--bubble);
+}
+
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+}
