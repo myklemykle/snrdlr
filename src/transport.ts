@@ -1,4 +1,4 @@
-import {joinRoom, selfId} from 'trystero/nostr'
+import {joinRoom, selfId, type TurnServerConfig} from 'trystero/nostr'
 import type {ChatKeys} from './keys'
 
 const APP_ID = 'snrdlr-v1'
@@ -16,10 +16,14 @@ export type Chat = {
   leave: () => Promise<void>
 }
 
-export function joinChat(keys: ChatKeys, handlers: ChatHandlers): Chat {
+export function joinChat(keys: ChatKeys, handlers: ChatHandlers, turnServers: TurnServerConfig[] = []): Chat {
   const peers = new Set<string>()
-  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword}, keys.roomId, {
-    onJoinError: ({error}) => handlers.onError(error)
+  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers}, keys.roomId, {
+    // Trystero's error text is aimed at developers; keep it in the console.
+    onJoinError: ({error}) => {
+      console.warn(error)
+      handlers.onError("Couldn't connect to the other device over this network.")
+    }
   })
 
   const text = room.makeAction<string>('text', {

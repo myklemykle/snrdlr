@@ -1,0 +1,9 @@
+name = "snrdlr-turn"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Browser origins allowed to request TURN credentials.
+ALLOWED_ORIGINS = "https://myklemykle.github.io,http://localhost:5173,http://localhost:4173"
+
+# Secrets, set with `wrangler secret put`: TURN_KEY_ID, TURN_KEY_API_TOKEN

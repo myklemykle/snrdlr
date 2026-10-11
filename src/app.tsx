@@ -3,6 +3,7 @@ import {inviteFromFragment, inviteToFragment, type Invite} from './invite'
 import {deriveChatKeys, generateGroupSecret} from './keys'
 import {QrCode} from './qr'
 import {joinChat, type Chat} from './transport'
+import {fetchTurnServers} from './turn'
 
 type Message = {id: number; mine: boolean; text: string}
 
@@ -61,18 +62,31 @@ function ChatScreen({invite}: {invite: Invite}) {
     setMessages(previous => [...previous, {id: nextId.current++, mine, text}])
 
   useEffect(() => {
-    const joined = joinChat(deriveChatKeys(invite.secret), {
-      onText: text => append(false, text),
-      onPeersChange: peerIds => {
-        setPeers(peerIds)
-        if (peerIds.length > 0) setShowQr(false)
-      },
-      onError: setError
+    let cancelled = false
+    let joined: Chat | null = null
+    void fetchTurnServers().then(turnServers => {
+      if (cancelled) return
+      joined = joinChat(
+        deriveChatKeys(invite.secret),
+        {
+          onText: text => append(false, text),
+          onPeersChange: peerIds => {
+            setPeers(peerIds)
+            if (peerIds.length > 0) {
+              setShowQr(false)
+              setError(null)
+            }
+          },
+          onError: setError
+        },
+        turnServers
+      )
+      chat.current = joined
     })
-    chat.current = joined
     return () => {
+      cancelled = true
       chat.current = null
-      void joined.leave()
+      void joined?.leave()
     }
   }, [invite])
 
