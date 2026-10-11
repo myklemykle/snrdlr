@@ -2,10 +2,13 @@ import {useEffect, useRef, useState} from 'preact/hooks'
 import {inviteFromFragment, inviteToFragment, type Invite} from './invite'
 import {deriveChatKeys, generateGroupSecret} from './keys'
 import {QrCode} from './qr'
+import {describeRoutes, type Route} from './route'
 import {joinChat, type Chat} from './transport'
 import {fetchTurnServers} from './turn'
 
 type Message = {id: number; mine: boolean; text: string}
+
+const ROUTE_POLL_MS = 3000
 
 function useInvite(): Invite | null {
   const [invite, setInvite] = useState(() => inviteFromFragment(location.hash))
@@ -51,6 +54,7 @@ function HomeScreen() {
 function ChatScreen({invite}: {invite: Invite}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [peers, setPeers] = useState<string[]>([])
+  const [routes, setRoutes] = useState<Route[]>([])
   const [error, setError] = useState<string | null>(null)
   const [showQr, setShowQr] = useState(true)
   const [draft, setDraft] = useState('')
@@ -90,6 +94,19 @@ function ChatScreen({invite}: {invite: Invite}) {
     }
   }, [invite])
 
+  // Polled, because the route can change mid-connection and browsers fire no event for it.
+  useEffect(() => {
+    if (peers.length === 0) return setRoutes([])
+    let cancelled = false
+    const refresh = () => void chat.current?.routes().then(found => !cancelled && setRoutes(found))
+    refresh()
+    const timer = setInterval(refresh, ROUTE_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [peers])
+
   useEffect(() => logEnd.current?.scrollIntoView({block: 'end'}), [messages])
 
   const send = (event: Event) => {
@@ -102,6 +119,7 @@ function ChatScreen({invite}: {invite: Invite}) {
   }
 
   const connected = peers.length > 0
+  const routeSummary = describeRoutes(routes)
   const inviteUrl = location.origin + location.pathname + inviteToFragment(invite)
 
   return (
@@ -110,7 +128,7 @@ function ChatScreen({invite}: {invite: Invite}) {
         <div>
           <h1>{invite.name}</h1>
           <p class={connected ? 'status on' : 'status'}>
-            {connected ? `Connected to ${peers.length}` : 'Waiting for someone to join…'}
+            {connected ? `Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}` : 'Waiting for someone to join…'}
           </p>
         </div>
         <button type="button" onClick={() => setShowQr(!showQr)}>

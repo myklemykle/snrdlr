@@ -1,5 +1,6 @@
 import {joinRoom, selfId, type TurnServerConfig} from 'trystero/nostr'
 import type {ChatKeys} from './keys'
+import {routeFromStats, type Route} from './route'
 
 const APP_ID = 'snrdlr-v1'
 const MAX_TEXT_LENGTH = 4000
@@ -17,6 +18,8 @@ export type ChatHandlers = {
 export type Chat = {
   selfId: string
   send: (text: string) => Promise<void>
+  /** The route currently in use to each connected peer whose route is known. */
+  routes: () => Promise<Route[]>
   leave: () => Promise<void>
 }
 
@@ -48,6 +51,13 @@ export function joinChat(keys: ChatKeys, handlers: ChatHandlers, turnServers: Tu
   return {
     selfId,
     send: message => text.send(message.slice(0, MAX_TEXT_LENGTH)),
+    routes: async () => {
+      const connections = Object.entries(room.getPeers()).filter(([peerId]) => peers.has(peerId))
+      const routes = await Promise.all(
+        connections.map(([, connection]) => connection.getStats().then(routeFromStats, () => null))
+      )
+      return routes.filter(route => route !== null)
+    },
     leave: () => room.leave()
   }
 }

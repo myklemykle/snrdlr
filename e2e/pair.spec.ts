@@ -16,6 +16,9 @@ test('two browsers pair through the invite link and exchange messages', async ({
   await expect(anne.getByText('Connected to 1')).toBeVisible({timeout: 60_000})
   await expect(bob.getByText('Connected to 1')).toBeVisible({timeout: 60_000})
 
+  // Two profiles on one machine connect without leaving it; the exact label depends on the browser.
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1 · (local network|direct)/, {timeout: 10_000})
+
   await anne.getByLabel('Message').fill('hello from anne')
   await anne.getByRole('button', {name: 'Send'}).click()
   await expect(bob.locator('.theirs', {hasText: 'hello from anne'})).toBeVisible()
