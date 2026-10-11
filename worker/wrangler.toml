@@ -5,5 +5,16 @@ compatibility_date = "2026-10-01"
 [vars]
 # Browser origins allowed to request TURN credentials.
 ALLOWED_ORIGINS = "https://myklemykle.github.io,http://localhost:5173,http://localhost:4173"
+# Turnstile site key for the challenge page. Public; the matching secret is TURNSTILE_SECRET_KEY.
+TURNSTILE_SITE_KEY = "0x4AAAAAAFUH7TjgdBHKXYAK"
 
-# Secrets, set with `wrangler secret put`: TURN_KEY_ID, TURN_KEY_API_TOKEN
+# Secrets, set with `wrangler secret put`: TURN_KEY_ID, TURN_KEY_API_TOKEN, TURNSTILE_SECRET_KEY
+
+# Per-IP limit on credential requests (per Cloudflare location, approximate).
+[[ratelimits]]
+name = "CREDENTIAL_LIMITER"
+namespace_id = "1001"
+
+[ratelimits.simple]
+limit = 10
+period = 60
