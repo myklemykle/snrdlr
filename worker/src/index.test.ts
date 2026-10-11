@@ -66,7 +66,9 @@ describe('TURN credential worker', () => {
     const response = await worker.fetch(request('http://localhost:5173'), env)
 
     expect(response.status).toBe(502)
-    expect(await response.text()).not.toContain('key-token')
+    const body = await response.text()
+    expect(body).toContain('upstream 401')
+    expect(body).not.toContain('key-token')
   })
 
   it('rejects methods other than GET', async () => {

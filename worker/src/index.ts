@@ -34,7 +34,10 @@ export default {
         body: JSON.stringify({ttl: CREDENTIAL_TTL_SECONDS})
       }
     )
-    if (!upstream.ok) return new Response('TURN credentials unavailable', {status: 502, headers: cors})
+    if (!upstream.ok) {
+      // Status only: the upstream body could echo details of the key.
+      return new Response(`TURN credentials unavailable (upstream ${upstream.status})`, {status: 502, headers: cors})
+    }
 
     const {iceServers} = (await upstream.json()) as {iceServers: IceServer[]}
     const filtered = iceServers
