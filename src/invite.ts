@@ -1,9 +1,9 @@
 import {decode, encode} from 'cbor-x'
 import {fromBase64Url, toBase64Url} from './bytes'
+import {MAX_NAME_LENGTH} from './identity'
 import {SECRET_BYTES} from './keys'
 
 export const INVITE_VERSION = 1
-const MAX_NAME_LENGTH = 64
 const FRAGMENT_PREFIX = '#i='
 
 export type Invite = {

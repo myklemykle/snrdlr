@@ -1,172 +1,184 @@
-import {useEffect, useRef, useState} from 'preact/hooks'
-import {inviteFromFragment, inviteToFragment, type Invite} from './invite'
+import {useEffect, useState} from 'preact/hooks'
+import {ChatScreen} from './chat-screen'
+import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
+import {inviteFromFragment} from './invite'
 import {deriveChatKeys, generateGroupSecret} from './keys'
-import {QrCode} from './qr'
-import {describeRoutes, type Route} from './route'
-import {joinChat, type Chat} from './transport'
-import {fetchTurnServers} from './turn'
+import {openStore, type ChatRecord, type Store} from './store'
 
-type Message = {id: number; mine: boolean; text: string}
+const CHAT_PREFIX = '#c='
+const INVITE_PREFIX = '#i='
 
-const ROUTE_POLL_MS = 3000
-
-function useInvite(): Invite | null {
-  const [invite, setInvite] = useState(() => inviteFromFragment(location.hash))
-  useEffect(() => {
-    const onHashChange = () => setInvite(inviteFromFragment(location.hash))
-    addEventListener('hashchange', onHashChange)
-    return () => removeEventListener('hashchange', onHashChange)
-  }, [])
-  return invite
-}
+type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity | null}
 
 export function App() {
-  const invite = useInvite()
-  // Keyed by the fragment so a different invite gets a fresh chat.
-  return invite ? <ChatScreen key={location.hash} invite={invite} /> : <HomeScreen />
+  const [boot, setBoot] = useState<Boot>({status: 'loading'})
+
+  useEffect(() => {
+    openStore()
+      .then(async store => {
+        const secrets = await store.getIdentity()
+        setBoot({status: 'ready', store, identity: secrets ? loadIdentity(secrets) : null})
+      })
+      .catch(() => setBoot({status: 'failed'}))
+  }, [])
+
+  if (boot.status === 'loading') return null
+  if (boot.status === 'failed') {
+    return (
+      <main class="home">
+        <h1>snrdlr</h1>
+        <p class="error">This browser won't let the app store anything, so it can't keep your chats. Private browsing often causes this.</p>
+      </main>
+    )
+  }
+  const {store, identity} = boot
+  if (!identity) return <Welcome onCreate={created => setBoot({status: 'ready', store, identity: created})} store={store} />
+  return <Router store={store} identity={identity} />
 }
 
-function HomeScreen() {
+function Welcome({store, onCreate}: {store: Store; onCreate: (identity: Identity) => void}) {
   const [name, setName] = useState('')
-  const start = (event: Event) => {
+  const joining = location.hash.startsWith(INVITE_PREFIX)
+  const create = async (event: Event) => {
     event.preventDefault()
-    // Phase 1 keeps nothing on the device; the fragment is the only copy of the secret.
-    location.hash = inviteToFragment({secret: generateGroupSecret(), name: name.trim() || 'Chat'})
+    const identity = createIdentity(name)
+    await store.saveIdentity({name: identity.name, signSecret: identity.signSecret, dhSecret: identity.dhSecret})
+    // Asks the browser not to evict our data under storage pressure; it may say no.
+    void navigator.storage?.persist?.()
+    onCreate(identity)
   }
   return (
     <main class="home">
       <h1>snrdlr</h1>
-      <p>Start a chat, then let someone scan your code to join it.</p>
-      <form onSubmit={start}>
+      <p>{joining ? 'You have been invited to a chat. What should people call you?' : 'What should people call you?'}</p>
+      <form onSubmit={create}>
         <input
           value={name}
           onInput={event => setName(event.currentTarget.value)}
-          placeholder="Chat name (optional)"
-          maxLength={64}
-          aria-label="Chat name"
+          placeholder="Your name"
+          maxLength={MAX_NAME_LENGTH}
+          aria-label="Your name"
+          autocomplete="off"
         />
-        <button type="submit">Start a chat</button>
+        <button type="submit" disabled={!cleanName(name)}>
+          Continue
+        </button>
       </form>
+      <p class="note">Your name and keys stay on this device. There is no account, so they can't be recovered if you clear this site's data.</p>
     </main>
   )
 }
 
-function ChatScreen({invite}: {invite: Invite}) {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [peers, setPeers] = useState<string[]>([])
-  const [routes, setRoutes] = useState<Route[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [showQr, setShowQr] = useState(true)
-  const [draft, setDraft] = useState('')
-  const chat = useRef<Chat | null>(null)
-  const nextId = useRef(0)
-  const logEnd = useRef<HTMLDivElement>(null)
-
-  const append = (mine: boolean, text: string) =>
-    setMessages(previous => [...previous, {id: nextId.current++, mine, text}])
+function Router({store, identity}: {store: Store; identity: Identity}) {
+  const [hash, setHash] = useState(location.hash)
+  const [chat, setChat] = useState<ChatRecord | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
-    let cancelled = false
-    let joined: Chat | null = null
-    void fetchTurnServers().then(turnServers => {
-      if (cancelled) return
-      joined = joinChat(
-        deriveChatKeys(invite.secret),
-        {
-          onText: text => append(false, text),
-          onPeersChange: peerIds => {
-            setPeers(peerIds)
-            if (peerIds.length > 0) {
-              setShowQr(false)
-              setError(null)
-            }
-          },
-          onError: setError
-        },
-        turnServers
-      )
-      chat.current = joined
-    })
-    return () => {
-      cancelled = true
-      chat.current = null
-      void joined?.leave()
-    }
-  }, [invite])
+    const onHashChange = () => setHash(location.hash)
+    addEventListener('hashchange', onHashChange)
+    return () => removeEventListener('hashchange', onHashChange)
+  }, [])
 
-  // Polled, because the route can change mid-connection and browsers fire no event for it.
-  useEffect(() => {
-    if (peers.length === 0) return setRoutes([])
-    let cancelled = false
-    const refresh = () => void chat.current?.routes().then(found => !cancelled && setRoutes(found))
-    refresh()
-    const timer = setInterval(refresh, ROUTE_POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [peers])
-
-  useEffect(() => logEnd.current?.scrollIntoView({block: 'end'}), [messages])
-
-  const send = (event: Event) => {
-    event.preventDefault()
-    const text = draft.trim()
-    if (!text || !chat.current) return
-    append(true, text)
-    setDraft('')
-    chat.current.send(text).catch(() => setError('Message could not be sent.'))
+  const openChat = (id: string, replace = false) => {
+    // Replacing drops the invite, and with it the chat's secret, from the address bar and history.
+    if (replace) history.replaceState(null, '', CHAT_PREFIX + id)
+    else history.pushState(null, '', CHAT_PREFIX + id)
+    setHash(CHAT_PREFIX + id)
+  }
+  const goHome = () => {
+    history.pushState(null, '', location.pathname + location.search)
+    setHash('')
   }
 
-  const connected = peers.length > 0
-  const routeSummary = describeRoutes(routes)
-  const inviteUrl = location.origin + location.pathname + inviteToFragment(invite)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (hash.startsWith(INVITE_PREFIX)) {
+        const invite = inviteFromFragment(hash)
+        if (!invite) {
+          setNotice("That invite link isn't valid.")
+          return goHome()
+        }
+        const saved = await store.saveChat({
+          id: deriveChatKeys(invite.secret).roomId,
+          secret: invite.secret,
+          name: invite.name,
+          createdAt: Date.now()
+        })
+        if (!cancelled) openChat(saved.id, true)
+      } else if (hash.startsWith(CHAT_PREFIX)) {
+        const found = await store.getChat(hash.slice(CHAT_PREFIX.length))
+        if (cancelled) return
+        if (found) setChat(found)
+        else goHome()
+      } else {
+        setChat(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [hash])
+
+  if (hash.startsWith(INVITE_PREFIX)) return null
+  if (hash.startsWith(CHAT_PREFIX)) {
+    const current = chat?.id === hash.slice(CHAT_PREFIX.length) ? chat : null
+    return current && <ChatScreen key={current.id} chat={current} identity={identity} store={store} onBack={goHome} />
+  }
+  return <Home store={store} identity={identity} notice={notice} onOpen={openChat} />
+}
+
+function Home(props: {store: Store; identity: Identity; notice: string | null; onOpen: (id: string) => void}) {
+  const {store, identity, notice, onOpen} = props
+  const [chats, setChats] = useState<ChatRecord[] | null>(null)
+  const [name, setName] = useState('')
+
+  useEffect(() => void store.listChats().then(setChats), [])
+
+  const start = async (event: Event) => {
+    event.preventDefault()
+    const secret = generateGroupSecret()
+    const chat = await store.saveChat({
+      id: deriveChatKeys(secret).roomId,
+      secret,
+      name: cleanName(name) || 'Chat',
+      createdAt: Date.now()
+    })
+    onOpen(chat.id)
+  }
 
   return (
-    <main class="chat">
-      <header>
-        <div>
-          <h1>{invite.name}</h1>
-          <p class={connected ? 'status on' : 'status'}>
-            {connected ? `Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}` : 'Waiting for someone to join…'}
-          </p>
-        </div>
-        <button type="button" onClick={() => setShowQr(!showQr)}>
-          {showQr ? 'Hide code' : 'Show code'}
-        </button>
-      </header>
+    <main class="home">
+      <h1>snrdlr</h1>
+      <p>Hello, {identity.name}.</p>
+      {notice && <p class="error">{notice}</p>}
 
-      {error && <p class="error">{error}</p>}
-
-      {showQr && (
-        <section class="invite">
-          <QrCode text={inviteUrl} label="Invite code for this chat" />
-          <p>Scan with a phone camera to join. Anyone who sees this code can join.</p>
-        </section>
+      {chats && chats.length > 0 && <h2>Your chats</h2>}
+      {chats && chats.length > 0 && (
+        <ul class="chats" aria-label="Your chats">
+          {chats.map(chat => (
+            <li key={chat.id}>
+              <button type="button" onClick={() => onOpen(chat.id)}>
+                {chat.name}
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
 
-      <ol class="log">
-        {messages.map(message => (
-          <li key={message.id} class={message.mine ? 'mine' : 'theirs'}>
-            {message.text}
-          </li>
-        ))}
-        <div ref={logEnd} />
-      </ol>
-
-      <form class="composer" onSubmit={send}>
+      <h2>New chat</h2>
+      <form onSubmit={start}>
         <input
-          value={draft}
-          onInput={event => setDraft(event.currentTarget.value)}
-          placeholder={connected ? 'Message' : 'Nobody is here yet'}
-          maxLength={4000}
-          aria-label="Message"
-          autocomplete="off"
+          value={name}
+          onInput={event => setName(event.currentTarget.value)}
+          placeholder="Name (optional)"
+          maxLength={MAX_NAME_LENGTH}
+          aria-label="Chat name"
         />
-        <button type="submit" disabled={!connected || !draft.trim()}>
-          Send
-        </button>
+        <button type="submit">Start a chat</button>
       </form>
+      <p class="note">To join someone else's chat, scan their code with your camera.</p>
     </main>
   )
 }

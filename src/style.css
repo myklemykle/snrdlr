@@ -204,3 +204,86 @@ button:disabled {
   flex: 1;
   min-width: 0;
 }
+
+.note {
+  font-size: 0.85rem;
+}
+
+.chats {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.chats button {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chat header .title {
+  flex: 1;
+  min-width: 0;
+}
+
+.back {
+  padding: 0.4rem 0.8rem;
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.invite button {
+  margin-top: 0.75rem;
+}
+
+.log .event {
+  align-self: center;
+  max-width: 100%;
+  padding: 0.2rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.author {
+  display: block;
+  margin-bottom: 0.1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.home .error {
+  color: #cf222e;
+}
+
+.home h2 {
+  margin: 1rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.home h2 + form,
+.home h2 + .chats {
+  margin-top: 0;
+}
+
+.chats button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: var(--bubble);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.chats button::after {
+  content: '›';
+  color: var(--muted);
+}
