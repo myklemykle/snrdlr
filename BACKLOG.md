@@ -11,6 +11,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
   - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
+- **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
 - **Message context menu** (hover on desktop, press and hold on touch):
   - Reply. See "How reply would work" below.

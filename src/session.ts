@@ -57,6 +57,9 @@ const RESYNC_INTERVAL_MS = 30_000
 const STALE_AFTER_MS = 30_000
 // After joining, how long to say "looking for others" before concluding nobody is there.
 const SEARCH_GRACE_MS = 8_000
+// Connection attempts often fail once and then succeed, for example while a phone changes network.
+// A failure is only reported if nobody has connected this long after it.
+const ERROR_DELAY_MS = 15_000
 
 const compare = (a: MessageRecord, b: MessageRecord) =>
   a.lamport - b.lamport || a.author.localeCompare(b.author) || a.seq - b.seq
@@ -92,6 +95,7 @@ export async function openSession(options: {
   store: Store
   connect: (keys: ChatKeys, handlers: WireHandlers) => Wire | Promise<Wire>
   handlers: SessionHandlers
+  errorDelayMs?: number
 }): Promise<Session> {
   const {chat, identity, store, handlers} = options
   const keys = deriveChatKeys(chat.secret)
@@ -105,6 +109,12 @@ export async function openSession(options: {
   let reconnecting = false
   let status: ConnectionStatus = 'connecting'
   let searchTimer: ReturnType<typeof setTimeout> | undefined
+  let errorTimer: ReturnType<typeof setTimeout> | undefined
+  const reportUnlessSomeoneConnects = (message: string) => {
+    clearTimeout(errorTimer)
+    if (peers.length === 0) setStatus('searching')
+    errorTimer = setTimeout(() => !closed && handlers.onError(message), options.errorDelayMs ?? ERROR_DELAY_MS)
+  }
   const setStatus = (next: ConnectionStatus) => {
     clearTimeout(searchTimer)
     if (closed) return
@@ -183,13 +193,14 @@ export async function openSession(options: {
         void ready.then(via => {
           if (!live()) return
           const newcomers = peerIds.filter(peerId => !peers.includes(peerId))
+          if (newcomers.length > 0) clearTimeout(errorTimer)
           peers = peerIds
           handlers.onPeersChange(peerIds)
           if (peerIds.length > 0 && status === 'searching') setStatus('idle')
           for (const peerId of newcomers) void via.sendSync(versionVector(messages), peerId).catch(() => {})
         }),
       onError: message => {
-        if (live()) handlers.onError(message)
+        if (live()) reportUnlessSomeoneConnects(message)
       }
     })
     if (!live()) return void opened.leave().catch(() => {})
@@ -253,6 +264,7 @@ export async function openSession(options: {
       closed = true
       clearInterval(resync)
       clearTimeout(searchTimer)
+      clearTimeout(errorTimer)
       await wire?.leave().catch(() => {})
     }
   }

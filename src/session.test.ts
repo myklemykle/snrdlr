@@ -24,6 +24,8 @@ function makeNetwork() {
     inject: (to: string, envelope: Uint8Array) => members.get(to)!.onEnvelope(envelope, 'injected'),
     /** Silently breaks a member's connections, as a phone does when the app is in the background. */
     kill: (peerId: string) => dead.add(peerId),
+    /** Reports a failed connection attempt to one member, as the transport does. */
+    fail: (peerId: string) => members.get(peerId)!.onError('could not connect'),
     connect(peerId: string) {
       return (_keys: unknown, handlers: WireHandlers): Wire => {
         this.joins++
@@ -60,7 +62,7 @@ function makeChat(): ChatRecord {
 }
 
 async function join(network: Network, chat: ChatRecord, identity: Identity, store?: Store) {
-  const state = {messages: [] as MessageRecord[], peers: [] as string[], statuses: [] as ConnectionStatus[]}
+  const state = {messages: [] as MessageRecord[], peers: [] as string[], statuses: [] as ConnectionStatus[], errors: [] as string[]}
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
     chat,
@@ -71,8 +73,9 @@ async function join(network: Network, chat: ChatRecord, identity: Identity, stor
       onMessages: messages => (state.messages = messages),
       onStatus: status => state.statuses.push(status),
       onPeersChange: peers => (state.peers = peers),
-      onError: () => {}
-    }
+      onError: message => state.errors.push(message)
+    },
+    errorDelayMs: 60
   })
   return {
     session,
@@ -84,7 +87,8 @@ async function join(network: Network, chat: ChatRecord, identity: Identity, stor
     get peers() {
       return state.peers
     },
-    statuses: state.statuses
+    statuses: state.statuses,
+    errors: state.errors
   }
 }
 
@@ -360,6 +364,33 @@ describe('session', () => {
 
     expect(texts(anne.view)).toEqual(['before leaving', 'written straight after rejoining'])
     expect(texts(back.view)).toEqual(['before leaving', 'written straight after rejoining'])
+  })
+
+  it('keeps quiet about a failed connection attempt if someone connects soon after', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    await settle()
+    anne.statuses.length = 0
+
+    network.fail(anne.identity.id)
+    await join(network, chat, createIdentity('Bob'))
+    await new Promise(resolve => setTimeout(resolve, 120))
+
+    expect(anne.errors).toEqual([])
+    expect(anne.statuses.at(-1)).toBe('idle')
+  })
+
+  it('reports a failed connection attempt if nobody connects', async () => {
+    const network = makeNetwork()
+    const anne = await join(network, makeChat(), createIdentity('Anne'))
+    await settle()
+
+    network.fail(anne.identity.id)
+    expect(anne.errors).toEqual([])
+    await new Promise(resolve => setTimeout(resolve, 120))
+
+    expect(anne.errors).toEqual(['could not connect'])
   })
 
   it('leaves healthy connections alone when it comes back', async () => {
