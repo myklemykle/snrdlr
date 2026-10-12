@@ -117,6 +117,11 @@ Cheapest thing to do early: settle the custom domain before there are users to s
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
 - **Unknown message types.** Today an unrecognised type is dropped. Decide whether to store it for later display once the app is updated.
+- **Remote wipe / kill switch.** Whoever publishes the site can ship a version that deletes the identity, keys and chats on each device the next time it opens the app. Decide whether to build this deliberately (a "this app has shut down" release, or a wipe for a lost phone) and how it behaves once the app is installable:
+  - Today every launch loads from the site, so a wipe release takes effect at next open. It cannot reach a device that never opens the app, and cannot remove a Home Screen icon.
+  - An installed app (Phase 3) starts from its own cached copy and updates in the background, so a wipe lands a launch or two later unless the update step is written to take over at once. Unpublishing the site probably leaves installed copies running from cache; test this.
+  - With push (Phase 6), a push message could trigger the wipe on devices that have not opened the app.
+- **Protect the publishing account.** The same power in the wrong hands steals keys instead of wiping them: anyone who can publish to the site's address can read everything stored under it. Before there are users: two-factor sign-in on the GitHub account, no other accounts with push access, branch protection on `main`, and never give up the account name the address hangs from (a new owner of the name could publish at the old address).
 - **Custom domain.** Keys and history are tied to `myklemykle.github.io`; moving later strands existing installs.
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the certificate check.
 
