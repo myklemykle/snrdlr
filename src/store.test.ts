@@ -55,6 +55,29 @@ describe('store', () => {
     expect(await store.listMessages('chat-none')).toEqual([])
   })
 
+  it('forgets a left chat and its history, but not how far our own numbering got', async () => {
+    const store = await openStore(freshName())
+    const chat = {id: 'chat-a', secret: new Uint8Array(32), name: 'A', createdAt: 1}
+    await store.saveChat(chat)
+    await store.saveChat({id: 'chat-b', secret: new Uint8Array(32), name: 'B', createdAt: 2})
+    await store.addMessage(message({author: 'me', seq: 1}))
+    await store.addMessage(message({author: 'me', seq: 2, lamport: 2}))
+    await store.addMessage(message({author: 'them', seq: 7, lamport: 3}))
+    await store.addMessage(message({chatId: 'chat-b', author: 'me', seq: 1}))
+
+    await store.deleteChat('chat-a', 'me')
+
+    expect((await store.listChats()).map(c => c.name)).toEqual(['B'])
+    expect(await store.listMessages('chat-a')).toEqual([])
+    expect(await store.listMessages('chat-b')).toHaveLength(1)
+
+    // Rejoining picks the numbering back up, once; leaving again without writing keeps it.
+    expect((await store.saveChat(chat)).ownSeqFloor).toBe(2)
+    await store.deleteChat('chat-a', 'me')
+    expect((await store.saveChat(chat)).ownSeqFloor).toBe(2)
+    expect((await store.getChat('chat-a'))!.ownSeqFloor).toBe(2)
+  })
+
   it('refuses a second message with the same author and sequence number', async () => {
     const store = await openStore(freshName())
     expect(await store.addMessage(message({content: {type: 'text', text: 'original'}}))).toBe(true)

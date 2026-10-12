@@ -29,8 +29,15 @@ export type Wire = {
   leave: () => Promise<void>
 }
 
+/**
+ * What the connection is doing: joining the room, waiting for others to appear after joining, testing
+ * whether old connections survived, rejoining, or settled.
+ */
+export type ConnectionStatus = 'connecting' | 'searching' | 'checking' | 'reconnecting' | 'idle'
+
 export type SessionHandlers = {
   onMessages: (messages: MessageRecord[]) => void
+  onStatus: (status: ConnectionStatus) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
 }
@@ -48,6 +55,8 @@ const MAX_VECTOR_AUTHORS = 1024
 const RESYNC_INTERVAL_MS = 30_000
 // With nobody connected there is no one to ping, so after this long away assume the connection is dead.
 const STALE_AFTER_MS = 30_000
+// After joining, how long to say "looking for others" before concluding nobody is there.
+const SEARCH_GRACE_MS = 8_000
 
 const compare = (a: MessageRecord, b: MessageRecord) =>
   a.lamport - b.lamport || a.author.localeCompare(b.author) || a.seq - b.seq
@@ -94,6 +103,14 @@ export async function openSession(options: {
   let peers: string[] = []
   let closed = false
   let reconnecting = false
+  let status: ConnectionStatus = 'connecting'
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
+  const setStatus = (next: ConnectionStatus) => {
+    clearTimeout(searchTimer)
+    if (closed) return
+    if (next === 'searching') searchTimer = setTimeout(() => setStatus('idle'), SEARCH_GRACE_MS)
+    if (next !== status) handlers.onStatus((status = next))
+  }
   const publish = () => handlers.onMessages(messages)
 
   const insert = (record: MessageRecord) => {
@@ -103,7 +120,8 @@ export async function openSession(options: {
     publish()
   }
   const lamportNow = () => messages.reduce((max, message) => Math.max(max, message.lamport), 0)
-  const ownSeq = () => messages.reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), 0)
+  const ownSeq = () =>
+    messages.reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
 
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
   async function post(content: Content): Promise<void> {
@@ -167,6 +185,7 @@ export async function openSession(options: {
           const newcomers = peerIds.filter(peerId => !peers.includes(peerId))
           peers = peerIds
           handlers.onPeersChange(peerIds)
+          if (peerIds.length > 0 && status === 'searching') setStatus('idle')
           for (const peerId of newcomers) void via.sendSync(versionVector(messages), peerId).catch(() => {})
         }),
       onError: message => {
@@ -175,12 +194,14 @@ export async function openSession(options: {
     })
     if (!live()) return void opened.leave().catch(() => {})
     wire = opened
+    setStatus('searching')
     wireReady(opened)
   }
 
   /** Leaves the room and joins it afresh; used when the old connections are probably dead. */
   async function reconnect() {
     reconnecting = true
+    setStatus('reconnecting')
     try {
       const old = wire
       wire = null
@@ -195,8 +216,12 @@ export async function openSession(options: {
   }
 
   publish()
+  handlers.onStatus(status)
   // Not awaited: connecting can take seconds, and messages can be written and queued meanwhile.
-  void openWire().catch(() => handlers.onError("Couldn't connect to this chat."))
+  void openWire().catch(() => {
+    setStatus('idle')
+    handlers.onError("Couldn't connect to this chat.")
+  })
   if (!messages.some(message => message.author === identity.id && message.content.type === 'profile')) {
     await post({type: 'profile', name: identity.name})
   }
@@ -215,15 +240,19 @@ export async function openSession(options: {
         return
       }
       const current = wire
+      setStatus('checking')
       const answers = await Promise.all(peers.map(peerId => current.ping(peerId).then(() => true, () => false)))
       if (closed || wire !== current) return
-      if (answers.every(Boolean)) void current.sendSync(versionVector(messages)).catch(() => {})
-      else await reconnect()
+      if (answers.every(Boolean)) {
+        setStatus('idle')
+        void current.sendSync(versionVector(messages)).catch(() => {})
+      } else await reconnect()
     },
     routes: async () => (await wire?.routes()) ?? [],
     async close() {
       closed = true
       clearInterval(resync)
+      clearTimeout(searchTimer)
       await wire?.leave().catch(() => {})
     }
   }

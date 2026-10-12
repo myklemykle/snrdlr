@@ -274,7 +274,14 @@ button:disabled {
   margin-top: 0;
 }
 
-.chats button {
+.chats li {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.chats .open {
+  flex: 1;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
@@ -283,9 +290,75 @@ button:disabled {
   font-weight: 600;
 }
 
-.chats button::after {
+.chats .open::after {
   content: '›';
   color: var(--muted);
+}
+
+.chats .leave {
+  width: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.chats .confirm {
+  flex-wrap: wrap;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+.chats .confirm p {
+  flex-basis: 100%;
+  margin: 0 0 0.25rem;
+  color: var(--fg);
+  font-size: 0.9rem;
+}
+
+.chats .confirm button {
+  flex: 1;
+  text-align: center;
+}
+
+.danger {
+  background: #cf222e;
+  border-color: #cf222e;
+  color: #fff;
+}
+
+.status.busy::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+  background: #d4a72c;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status.busy::before {
+    animation: none;
+  }
+}
+
+.emoji {
+  font-size: 1.35em;
+  line-height: 1;
+  vertical-align: -0.1em;
+}
+
+.log .jumbo .emoji {
+  font-size: 2.6em;
+  line-height: 1.15;
+  vertical-align: baseline;
 }
 
 .chat .note {

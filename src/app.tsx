@@ -4,6 +4,7 @@ import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity}
 import {inviteFromFragment, isInviteFragment} from './invite'
 import {redeemInvite} from './invite-room'
 import {deriveChatKeys, generateGroupSecret} from './keys'
+import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {openStore, type ChatRecord, type Store} from './store'
 import {fetchTurnServers} from './turn'
 
@@ -58,12 +59,10 @@ function useJoin(store: Store, hash: string): [Join, () => void] {
     void (async () => {
       try {
         const grant = await redeemInvite(invite, await fetchTurnServers(), JOIN_TIMEOUT_MS)
-        const chat = await store.saveChat({
-          id: deriveChatKeys(grant.secret).roomId,
-          secret: grant.secret,
-          name: grant.name,
-          createdAt: Date.now()
-        })
+        const id = deriveChatKeys(grant.secret).roomId
+        // The name is ours to adjust: it only labels the chat on this device.
+        const others = (await store.listChats()).filter(chat => chat.id !== id).map(chat => chat.name)
+        const chat = await store.saveChat({id, secret: grant.secret, name: uniqueChatName(grant.name, others), createdAt: Date.now()})
         if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
       } catch {
         if (!cancelled) setJoin({status: 'failed'})
@@ -215,16 +214,25 @@ function Home(props: {
   const {store, identity, notice, onOpen, onCreate} = props
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
   const [name, setName] = useState('')
+  const [leaving, setLeaving] = useState<string | null>(null)
 
-  useEffect(() => void store.listChats().then(setChats), [])
+  const refresh = () => store.listChats().then(setChats)
+  useEffect(() => void refresh(), [])
+
+  const leave = async (id: string) => {
+    await store.deleteChat(id, identity.id)
+    setLeaving(null)
+    await refresh()
+  }
 
   const start = async (event: Event) => {
     event.preventDefault()
     const secret = generateGroupSecret()
+    const taken = (await store.listChats()).map(chat => chat.name)
     const chat = await store.saveChat({
       id: deriveChatKeys(secret).roomId,
       secret,
-      name: cleanName(name) || 'Chat',
+      name: uniqueChatName(cleanName(name) || DEFAULT_CHAT_NAME, taken),
       createdAt: Date.now()
     })
     onCreate(chat.id)
@@ -239,13 +247,30 @@ function Home(props: {
       {chats && chats.length > 0 && <h2>Your chats</h2>}
       {chats && chats.length > 0 && (
         <ul class="chats" aria-label="Your chats">
-          {chats.map(chat => (
-            <li key={chat.id}>
-              <button type="button" onClick={() => onOpen(chat.id)}>
-                {chat.name}
-              </button>
-            </li>
-          ))}
+          {chats.map(chat =>
+            leaving === chat.id ? (
+              <li key={chat.id} class="confirm">
+                <p>
+                  Leave "{chat.name}"? The chat and its history will be deleted from this device. Other members keep their copies.
+                </p>
+                <button type="button" class="danger" onClick={() => leave(chat.id)}>
+                  Leave chat
+                </button>
+                <button type="button" onClick={() => setLeaving(null)}>
+                  Cancel
+                </button>
+              </li>
+            ) : (
+              <li key={chat.id}>
+                <button type="button" class="open" onClick={() => onOpen(chat.id)}>
+                  {chat.name}
+                </button>
+                <button type="button" class="leave" onClick={() => setLeaving(chat.id)} aria-label={`Leave ${chat.name}`}>
+                  Leave
+                </button>
+              </li>
+            )
+          )}
         </ul>
       )}
 

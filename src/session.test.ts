@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import {describe, expect, it, vi} from 'vitest'
 import {createIdentity, type Identity} from './identity'
 import {deriveChatKeys, generateGroupSecret} from './keys'
-import {openSession, versionVector, type Wire, type WireHandlers} from './session'
+import {openSession, versionVector, type ConnectionStatus, type Wire, type WireHandlers} from './session'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 
 let counter = 0
@@ -60,14 +60,19 @@ function makeChat(): ChatRecord {
 }
 
 async function join(network: Network, chat: ChatRecord, identity: Identity, store?: Store) {
-  const state = {messages: [] as MessageRecord[], peers: [] as string[]}
+  const state = {messages: [] as MessageRecord[], peers: [] as string[], statuses: [] as ConnectionStatus[]}
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
     chat,
     identity,
     store: ownStore,
     connect: network.connect(identity.id),
-    handlers: {onMessages: messages => (state.messages = messages), onPeersChange: peers => (state.peers = peers), onError: () => {}}
+    handlers: {
+      onMessages: messages => (state.messages = messages),
+      onStatus: status => state.statuses.push(status),
+      onPeersChange: peers => (state.peers = peers),
+      onError: () => {}
+    }
   })
   return {
     session,
@@ -78,7 +83,8 @@ async function join(network: Network, chat: ChatRecord, identity: Identity, stor
     },
     get peers() {
       return state.peers
-    }
+    },
+    statuses: state.statuses
   }
 }
 
@@ -309,6 +315,51 @@ describe('session', () => {
 
     expect(texts(bob.view)).toEqual(['one', 'two', 'three'])
     now.mockRestore()
+  })
+
+  it('reports what the connection is doing while it joins, checks and rejoins', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+    expect(bob.statuses).toEqual(['connecting', 'searching', 'idle'])
+
+    bob.statuses.length = 0
+    await bob.session.resume(60_000)
+    expect(bob.statuses).toEqual(['checking', 'idle'])
+
+    bob.statuses.length = 0
+    network.kill(bob.identity.id)
+    await bob.session.resume(60_000)
+    await settle()
+    expect(bob.statuses).toEqual(['checking', 'reconnecting', 'searching', 'idle'])
+    expect(anne.peers).toEqual([bob.identity.id])
+  })
+
+  it('carries on its own numbering when rejoining a chat it had left', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bobIdentity = createIdentity('Bob')
+    const bob = await join(network, chat, bobIdentity)
+    await settle()
+    await bob.session.sendText('before leaving')
+    await settle()
+    await bob.session.close()
+    await bob.store.deleteChat(chat.id, bobIdentity.id)
+    expect(await bob.store.listMessages(chat.id)).toEqual([])
+
+    // Invited back: the chat is saved again, and Bob writes before sync has returned his old messages.
+    const rejoined = await bob.store.saveChat({...chat})
+    const again = await join(makeNetwork(), rejoined, bobIdentity, bob.store)
+    await again.session.sendText('written straight after rejoining')
+    await again.session.close()
+    const back = await join(network, rejoined, bobIdentity, bob.store)
+    await settle()
+
+    expect(texts(anne.view)).toEqual(['before leaving', 'written straight after rejoining'])
+    expect(texts(back.view)).toEqual(['before leaving', 'written straight after rejoining'])
   })
 
   it('leaves healthy connections alone when it comes back', async () => {

@@ -11,6 +11,9 @@ async function introduce(page: Page, name: string) {
   await page.getByRole('button', {name: 'Continue'}).click()
 }
 
+/** A chat's row on the home screen. */
+const chatEntry = (page: Page, name: string) => page.locator('.chats .open', {hasText: name})
+
 async function send(page: Page, text: string) {
   await page.getByLabel('Message').fill(text)
   await page.getByRole('button', {name: 'Send'}).click()
@@ -64,7 +67,7 @@ test('two people pair by invite, chat, and keep their history across reloads', a
 
   // The chat is listed on the home screen and reopens with its history.
   await anne.getByRole('button', {name: 'Back to chats'}).click()
-  await anne.getByRole('button', {name: 'Test chat'}).click()
+  await chatEntry(anne, 'Test chat').click()
   await expect(anne.locator('.mine', {hasText: 'still here'})).toBeVisible()
 })
 
@@ -85,7 +88,7 @@ test('messages written while the other person is away arrive when they return', 
   await send(anne, 'while you were out')
   await send(anne, 'and another')
 
-  await bob.getByRole('button', {name: /Catch up/}).click()
+  await chatEntry(bob, 'Catch up').click()
   await expect(bob.locator('.theirs', {hasText: 'while you were out'})).toBeVisible({timeout: 15_000})
   await expect(bob.locator('.theirs', {hasText: 'and another'})).toBeVisible()
   await expect(bob.locator('.log li:not(.event)')).toHaveText(['Annefirst one here', 'Annewhile you were out', 'Anneand another'])
@@ -131,7 +134,7 @@ test('a code stops working once the inviter closes it, and a new showing gets a 
   await dave.goto(firstInvite)
   await introduce(dave, 'Dave')
   await expect(dave.getByText(STALE)).toBeVisible({timeout: 15_000})
-  await expect(dave.getByRole('button', {name: 'Private'})).toHaveCount(0)
+  await expect(chatEntry(dave, 'Private')).toHaveCount(0)
   expect(dave.url()).not.toContain('#i=')
 
   await anne.getByRole('button', {name: 'Invite', exact: true}).click()
@@ -146,6 +149,56 @@ test('a code stops working once the inviter closes it, and a new showing gets a 
   await introduce(bob, 'Bob')
   await expect(bob.getByRole('heading', {name: 'Private'})).toBeVisible()
   await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+})
+
+test('chats get distinct names, show in the page title, and can be left', async ({browser}) => {
+  const page = await newPerson(browser)
+  await page.goto('/')
+  await introduce(page, 'Anne')
+  await expect(page).toHaveTitle('snrdlr')
+
+  for (const expected of ['Chat', 'Chat 2']) {
+    await page.getByRole('button', {name: 'Start a chat'}).click()
+    await expect(page.getByRole('heading', {name: expected, exact: true})).toBeVisible()
+    await expect(page).toHaveTitle(`${expected} · snrdlr`)
+    await page.getByRole('button', {name: 'Back to chats'}).click()
+  }
+  await expect(page).toHaveTitle('snrdlr')
+  await expect(page.locator('.chats .open')).toHaveText(['Chat 2', 'Chat'])
+
+  // Leaving asks first, and cancelling keeps the chat.
+  await page.getByRole('button', {name: 'Leave Chat 2'}).click()
+  await page.getByRole('button', {name: 'Cancel'}).click()
+  await expect(page.locator('.chats .open')).toHaveCount(2)
+
+  await page.getByRole('button', {name: 'Leave Chat 2'}).click()
+  await page.getByRole('button', {name: 'Leave chat', exact: true}).click()
+  // The confirmation row goes away once the chat has actually been deleted.
+  await expect(page.locator('.chats .confirm')).toHaveCount(0)
+  await expect(page.locator('.chats .open')).toHaveText(['Chat'])
+  await page.reload()
+  await expect(page.locator('.chats .open')).toHaveText(['Chat'])
+})
+
+test('the header shows connection progress, and emoji are shown larger', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Party')
+  await expect(anne.locator('.status.busy')).toHaveText('Looking for others…')
+
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  await send(anne, '🎉')
+  await send(anne, 'see you there 👍🏽')
+  await expect(bob.locator('.theirs.jumbo .emoji')).toHaveText('🎉')
+  const mixed = bob.locator('.theirs:not(.jumbo)', {hasText: 'see you there'})
+  await expect(mixed.locator('.emoji')).toHaveText('👍🏽')
+  await expect(mixed).toContainText('see you there 👍🏽')
+
+  // Alone again: after a moment of looking, the header settles on saying so.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 15_000})
 })
 
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {

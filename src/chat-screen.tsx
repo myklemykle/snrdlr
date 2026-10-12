@@ -1,11 +1,12 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
+import {isJumboEmoji, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
 import type {Identity} from './identity'
 import {createInvite, inviteToFragment, sealGrant, type Invite} from './invite'
 import {hostInvite} from './invite-room'
 import {QrCode} from './qr'
 import {describeRoutes, type Route} from './route'
-import {openSession, type Session} from './session'
+import {openSession, type ConnectionStatus, type Session} from './session'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -13,6 +14,13 @@ import {fetchTurnServers} from './turn'
 const ROUTE_POLL_MS = 3000
 // A forgotten invite screen should not stay open indefinitely.
 const INVITE_LIFETIME_MS = 10 * 60 * 1000
+
+const BUSY_LABELS: Record<Exclude<ConnectionStatus, 'idle'>, string> = {
+  connecting: 'Connecting…',
+  searching: 'Looking for others…',
+  checking: 'Checking connection…',
+  reconnecting: 'Reconnecting…'
+}
 
 const messageKey = (message: MessageRecord) => `${message.author}:${message.seq}`
 
@@ -28,6 +36,7 @@ export function ChatScreen(props: {
   const [messages, setMessages] = useState<MessageRecord[] | null>(null)
   const [peers, setPeers] = useState<string[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen ? createInvite(identity) : null))
   const [inviteNote, setInviteNote] = useState<string | null>(null)
@@ -48,6 +57,7 @@ export function ChatScreen(props: {
         connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers()),
         handlers: {
           onMessages: next => !cancelled && setMessages(next),
+          onStatus: next => !cancelled && setStatus(next),
           onPeersChange: peerIds => {
             if (cancelled) return
             setPeers(peerIds)
@@ -65,6 +75,15 @@ export function ChatScreen(props: {
       void opened?.close()
     }
   }, [chat.id])
+
+  // Shows the chat's name in tabs and browser history.
+  useEffect(() => {
+    const before = document.title
+    document.title = `${chat.name} · snrdlr`
+    return () => {
+      document.title = before
+    }
+  }, [chat.name])
 
   // Phones drop connections when the app is in the background, so check on them when it comes back.
   useEffect(() => {
@@ -170,9 +189,13 @@ export function ChatScreen(props: {
         </button>
         <div class="title">
           <h1>{chat.name}</h1>
-          <p class={connected ? 'status on' : 'status'}>
-            {connected ? `Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}` : 'Nobody else is here right now'}
-          </p>
+          {connected ? (
+            <p class="status on">{`Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}`}</p>
+          ) : status === 'idle' ? (
+            <p class="status">Nobody else is here right now</p>
+          ) : (
+            <p class="status busy">{BUSY_LABELS[status]}</p>
+          )}
         </div>
         <button type="button" onClick={toggleInvite}>
           {invite ? 'Stop inviting' : 'Invite'}
@@ -203,10 +226,11 @@ export function ChatScreen(props: {
               </li>
             )
           }
+          const {text} = message.content
           return (
-            <li key={messageKey(message)} class={mine ? 'mine' : 'theirs'}>
+            <li key={messageKey(message)} class={`${mine ? 'mine' : 'theirs'}${isJumboEmoji(text) ? ' jumbo' : ''}`}>
               {!mine && <span class="author">{nameOf(message.author)}</span>}
-              {message.content.text}
+              {splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
             </li>
           )
         })}
