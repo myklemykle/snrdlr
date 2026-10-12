@@ -26,7 +26,7 @@ This changes the message format, so it needs a rule for how older app versions t
 ## Engineering follow-ups
 
 - **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
-- **Update the proposal doc.** Its QR payload and joining sections still describe the secret travelling in the code.
+- **Bring the rest of the proposal doc up to date.** The invite sections now match the app. Still behind: the message signature also covering the chat, the `profile` message type, Turnstile on the TURN Worker, and which phases are done.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
