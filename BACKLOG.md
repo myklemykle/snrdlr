@@ -8,8 +8,12 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Browsers only allow audio after a tap, so the first sound needs unlocking on a user gesture.
   - Only works while the app is open; notifications when closed are Phase 6 (push).
 - **Names and nicknames.**
-  - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation. Renaming needs a new message type (`rename` in the proposal).
+  - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
+  - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.
+  - Unique chat names. The default name "Chat" gets duplicated in the chat list; pick a distinct default (for example "Chat 2", or one based on the date or members) and warn on a duplicate.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
+- **Leave a chat.** A "leave" button on each entry in the chat list that forgets the chat: its secret and its history on this device. Other members keep their copies, and until Phase 4 they are not told you left.
+- **Larger emoji** in chat messages, especially messages that are only emoji.
 - **Message context menu** (hover on desktop, press and hold on touch):
   - Reply. See "How reply would work" below.
   - DM this user. The proposal's default is in-person pairing only for v1; starting a DM from inside a group needs each member's X25519 public key, which profile messages do not carry yet.
