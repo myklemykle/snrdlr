@@ -26,6 +26,22 @@ A reply is an ordinary message whose encrypted payload also names the message it
 
 This changes the message format, so it needs a rule for how older app versions treat message types they do not know.
 
+## Images and audio messages
+
+Wanted after Phase 4. The proposal doc lists file transfer as a non-goal for v1, so this extends the plan. No foundation work is needed first, provided media stays out of the message log:
+
+- A media message is a small signed message holding a reference: the file's hash, size, type, its own encryption key and a tiny thumbnail. The file is fetched separately, on demand, from any member who has it.
+- Files get their own table in storage, and their own fetch-by-hash request next to sync.
+- Depends on "keep message types the app does not recognise" (going into Phase 4), so older app versions do not lose the messages.
+
+To settle when building it:
+
+- Do the automatic TURN cut-off first; relayed media uses real data.
+- Strip location and other metadata from photos, and downscale them, before sending.
+- Audio formats: iPhones and Android/desktop browsers record differently; test on real devices that each can play the other's.
+- The bot (Phase 5) would need to hold encrypted files as well as messages.
+- Images first, then audio.
+
 ## Notifications on iPhone without deciding up front
 
 Goal: people start chatting in Safari with no install step, and can turn on notifications later. iOS only delivers notifications to an app installed to the Home Screen, and that app's storage is separate from Safari's. Android needs none of this. Belongs with Phase 6.
