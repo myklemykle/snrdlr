@@ -30,6 +30,13 @@ describe('envelope', () => {
 
     const cert = {...hello, seq: 3, content: {type: 'member-cert', cert: new Uint8Array([1, 2, 3])}} as const
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, cert))).toEqual({...cert, author: anne.id})
+
+    const groupInvite: Omit<Message, 'author'> = {
+      ...hello,
+      seq: 4,
+      content: {type: 'group-invite', secret: new Uint8Array(32).fill(3), name: 'Group', founder: anne.signPublic, chain: [new Uint8Array([7])]}
+    }
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, groupInvite))).toEqual({...groupInvite, author: anne.id})
   })
 
   it('hides the content from anyone without the chat key', async () => {

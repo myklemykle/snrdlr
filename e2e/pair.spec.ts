@@ -26,7 +26,7 @@ test('two people pair by invite, chat, and keep their history across reloads', a
   await anne.goto('/')
   await introduce(anne, 'Anne')
   await anne.getByLabel('Chat name').fill('Test chat')
-  await anne.getByRole('button', {name: 'Start a chat'}).click()
+  await anne.getByRole('button', {name: 'Start a group'}).click()
   await expect(anne.getByRole('img', {name: 'Invite code for this chat'})).toBeVisible()
 
   // Stands in for scanning the QR code, which encodes this same link.
@@ -99,7 +99,7 @@ async function startChat(page: Page, name: string, chatName: string): Promise<st
   await page.goto('/')
   await introduce(page, name)
   await page.getByLabel('Chat name').fill(chatName)
-  await page.getByRole('button', {name: 'Start a chat'}).click()
+  await page.getByRole('button', {name: 'Start a group'}).click()
   return copyInvite(page)
 }
 
@@ -228,7 +228,7 @@ test('chats get distinct names, show in the page title, and can be left', async 
   await expect(page).toHaveTitle('snrdlr')
 
   for (const expected of ['Chat', 'Chat 2']) {
-    await page.getByRole('button', {name: 'Start a chat'}).click()
+    await page.getByRole('button', {name: 'Start a group'}).click()
     await expect(page.getByRole('heading', {name: expected, exact: true})).toBeVisible()
     await expect(page).toHaveTitle(`${expected} · snrdlr`)
     await page.getByRole('button', {name: 'Back to chats'}).click()
@@ -301,6 +301,82 @@ test('chats that are not open catch up at launch and show how much is unread', a
   await bob.getByRole('button', {name: 'Back to chats'}).click()
   await expect(chatEntry(bob, 'Updates')).toBeVisible()
   await expect(bob.locator('.unread')).toHaveCount(0)
+})
+
+test('two people start a direct chat from a "chat with me" code, and it cannot be invited into', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await bob.goto('/')
+  await introduce(bob, 'Bob')
+
+  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await expect(anne.getByRole('img', {name: 'Code to chat with me'})).toBeVisible()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const code = await anne.evaluate(() => navigator.clipboard.readText())
+
+  // Bob lands straight in a chat named after Anne; Anne's list gains one named after Bob.
+  await bob.goto(code)
+  await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
+  await expect(chatEntry(anne, 'Bob')).toContainText('direct')
+  await anne.getByRole('button', {name: 'Hide my code'}).click()
+  await chatEntry(anne, 'Bob').click()
+
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'just us two')
+  await expect(bob.locator('.theirs', {hasText: 'just us two'})).toBeVisible()
+  await send(bob, 'yes')
+  await expect(anne.locator('.theirs', {hasText: 'yes'})).toBeVisible()
+
+  // No invite button here; pairing again reopens the same chat instead of making another.
+  await expect(anne.getByRole('button', {name: 'Invite', exact: true})).toHaveCount(0)
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await bob.getByRole('button', {name: 'Show my code'}).click()
+  await bob.getByRole('button', {name: 'Copy link'}).click()
+  const bobsCode = await bob.evaluate(() => navigator.clipboard.readText())
+  await anne.goto(bobsCode)
+  await expect(anne.locator('.theirs', {hasText: 'yes'})).toBeVisible({timeout: 15_000})
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.chats .open')).toHaveCount(1)
+})
+
+test('"add someone" in a direct chat starts a new group with both people, and a third joins by code', async ({browser}) => {
+  const [anne, bob, cindy] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await bob.goto('/')
+  await introduce(bob, 'Bob')
+  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
+  await chatEntry(anne, 'Bob').click()
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'private note')
+  await expect(bob.locator('.theirs', {hasText: 'private note'})).toBeVisible()
+
+  // Anne adds someone: she lands in a new, empty group with its code showing for the newcomer.
+  await anne.getByRole('button', {name: 'Add someone'}).click()
+  await expect(anne.getByRole('heading', {name: 'Group with Bob'})).toBeVisible()
+  await expect(anne.getByRole('img', {name: 'Invite code for this chat'})).toBeVisible()
+  const groupCode = await copyInvite(anne)
+
+  // Bob is let in through the direct chat, without scanning anything.
+  await bob.getByRole('button', {name: 'Open'}).click()
+  await expect(bob.getByRole('heading', {name: 'Group with Bob'})).toBeVisible()
+  await cindy.goto(groupCode)
+  await introduce(cindy, 'Cindy')
+  await expect(cindy.getByRole('heading', {name: 'Group with Bob'})).toBeVisible()
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 2/, {timeout: 30_000})
+
+  await send(cindy, 'hello both')
+  await expect(anne.locator('.theirs', {hasText: 'hello both'})).toBeVisible()
+  await expect(bob.locator('.theirs', {hasText: 'hello both'})).toBeVisible()
+  // The group starts empty: the direct chat's history stays where it was.
+  await expect(cindy.getByText('private note')).toHaveCount(0)
+  await expect(bob.getByText('private note')).toHaveCount(0)
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(bob.locator('.chats .open')).toHaveCount(2)
 })
 
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {

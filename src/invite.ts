@@ -22,11 +22,15 @@ export type Invite = {
   inviter: Uint8Array
 }
 
-/** What a joiner tells the inviter: the keys to admit. */
-export type JoinRequest = {signPublic: Uint8Array; dhPublic: Uint8Array}
+/** What a joiner tells the inviter: the keys to admit, and their name if they have chosen one yet. */
+export type JoinRequest = {signPublic: Uint8Array; dhPublic: Uint8Array; name: string}
 
 /** What a joiner receives: enough to enter the chat and prove they belong. */
-export type Grant = {secret: Uint8Array; name: string; founder: Uint8Array; chain: Uint8Array[]}
+export type Grant =
+  /** Membership of a group: its secret, and certificates from its founder down to the joiner. */
+  | {kind: 'group'; secret: Uint8Array; name: string; founder: Uint8Array; chain: Uint8Array[]}
+  /** A direct chat with the inviter: no secret travels; both sides derive it from each other's keys. */
+  | {kind: 'dm'; dhPublic: Uint8Array; name: string}
 
 type Signer = {signSecret: Uint8Array; signPublic: Uint8Array}
 
@@ -79,21 +83,22 @@ export function inviteFromFragment(fragment: string): Invite | null {
 
 // Fixed-length fields first, so each concatenation is unambiguous.
 const requestBytes = (token: Uint8Array, request: JoinRequest) =>
-  concatBytes(utf8('snrdlr/v1/join\0'), token, request.signPublic, request.dhPublic)
+  concatBytes(utf8('snrdlr/v1/join\0'), token, request.signPublic, request.dhPublic, utf8(request.name))
 
 /** The joiner's request. Signing it shows the signing key is theirs and the X25519 key goes with it. */
-export function sealJoinRequest(joiner: Signer & {dhPublic: Uint8Array}, invite: Invite): Uint8Array {
-  const request = {signPublic: joiner.signPublic, dhPublic: joiner.dhPublic}
+export function sealJoinRequest(joiner: Signer & {dhPublic: Uint8Array; name: string}, invite: Invite): Uint8Array {
+  const request = {signPublic: joiner.signPublic, dhPublic: joiner.dhPublic, name: joiner.name}
   const signature = ed25519.sign(requestBytes(invite.token, request), joiner.signSecret)
-  return new Uint8Array(encode({k: request.signPublic, d: request.dhPublic, s: signature}))
+  return new Uint8Array(encode({k: request.signPublic, d: request.dhPublic, n: request.name, s: signature}))
 }
 
 export function openJoinRequest(invite: Invite, sealed: Uint8Array): JoinRequest {
   const raw = decode(sealed) as Record<string, unknown> | null
   if (typeof raw !== 'object' || raw === null) throw new Error('malformed join request')
-  const {k, d, s} = raw
+  const {k, d, n, s} = raw
   if (!isKey(k) || !isKey(d) || !isSignature(s)) throw new Error('malformed join request')
-  const request = {signPublic: new Uint8Array(k), dhPublic: new Uint8Array(d)}
+  if (typeof n !== 'string' || n.length > MAX_NAME_LENGTH) throw new Error('malformed join request')
+  const request = {signPublic: new Uint8Array(k), dhPublic: new Uint8Array(d), name: n}
   if (!verify(s, requestBytes(invite.token, request), request.signPublic)) throw new Error('join request is not signed by its key')
   return request
 }
@@ -103,7 +108,13 @@ const grantBytes = (token: Uint8Array, body: Uint8Array) => concatBytes(utf8('sn
 /** Signs the grant for this one invite. Signing over the token stops a grant being reused for another. */
 export function sealGrant(inviter: Signer, invite: Invite, grant: Grant): Uint8Array {
   // The signed body travels as bytes, so verifying never depends on re-encoding it identically.
-  const body = new Uint8Array(encode({g: grant.secret, n: grant.name, f: grant.founder, c: grant.chain}))
+  const body = new Uint8Array(
+    encode(
+      grant.kind === 'dm'
+        ? {t: 'dm', d: grant.dhPublic, n: grant.name}
+        : {t: 'group', g: grant.secret, n: grant.name, f: grant.founder, c: grant.chain}
+    )
+  )
   const signature = ed25519.sign(grantBytes(invite.token, body), inviter.signSecret)
   return new Uint8Array(encode({b: body, s: signature}))
 }
@@ -118,14 +129,20 @@ export function openGrant(invite: Invite, sealed: Uint8Array): Grant {
 
   const body = decode(b) as Record<string, unknown> | null
   if (typeof body !== 'object' || body === null) throw new Error('malformed grant body')
-  const {g, n, f, c} = body
-  if (!(g instanceof Uint8Array) || g.length !== SECRET_BYTES) throw new Error('malformed grant secret')
+  const {t, g, n, f, c, d} = body
   if (typeof n !== 'string' || n.length === 0 || n.length > MAX_NAME_LENGTH) throw new Error('malformed grant name')
+  if (t === 'dm') {
+    if (!isKey(d)) throw new Error('malformed grant key')
+    return {kind: 'dm', dhPublic: new Uint8Array(d), name: n}
+  }
+  if (t !== 'group') throw new Error('unknown grant kind')
+  if (!(g instanceof Uint8Array) || g.length !== SECRET_BYTES) throw new Error('malformed grant secret')
   if (!isKey(f)) throw new Error('malformed grant founder')
   if (!Array.isArray(c) || c.length > MAX_CHAIN_LENGTH || !c.every(entry => entry instanceof Uint8Array)) {
     throw new Error('malformed grant chain')
   }
   return {
+    kind: 'group',
     secret: new Uint8Array(g),
     name: n,
     founder: new Uint8Array(f),

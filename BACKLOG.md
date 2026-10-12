@@ -15,7 +15,7 @@ Things noted along the way that are not part of the current phase. The phased pl
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
 - **Message context menu** (hover on desktop, press and hold on touch):
   - Reply. See "How reply would work" below.
-  - DM this user. The proposal's default is in-person pairing only for v1; starting a DM from inside a group needs each member's X25519 public key, which profile messages do not carry yet.
+  - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
 - **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
 - **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.
@@ -62,8 +62,11 @@ To test on a real iPhone before choosing:
 
 ## Engineering follow-ups
 
+- **Check membership of message authors, not only of connections.** A message is accepted if its signature is valid, whoever its author is. Non-members cannot deliver anything today because members ignore their connections, but once a bot relays stored messages (Phase 5) the log itself should refuse authors without a certificate.
+- **Removing a member.** Still impossible: a member keeps the chat's secret and their certificate. Needs key rotation.
+- **An uninvited device sees itself as connected.** Someone holding a stolen copy of a chat can verify the real members, so their own screen says "Connected", although the members ignore them and send them nothing.
+- **Direct chat placeholder names.** If someone scans a "chat with me" code before choosing a name, the chat is called "Direct chat" until it is next opened or synced.
 - **Keep the chat list fresh while it is on screen.** Chats that are not open only sync when the app is opened or returned to, so the unread counts do not change while you sit on the list.
-- **Rest of Phase 4.** Invite certificates and handshake verification, DMs, and "add someone" starting a new group.
 - **Phase 3 (installable app, in-app scanner) is postponed** until just before push notifications, which are what make installing worthwhile on iOS.
 - **Sync resends around a permanent gap.** If one of an author's messages is held by nobody online, everything they wrote after it is offered again on each 30-second sync round. Rare, and only costs bandwidth; fix by having the vector list what is held beyond the gap.
 - **Sync sends duplicates in large groups.** A returning member asks every connected peer for what it lacks, and each of them answers. Fine for a handful of people; worth narrowing later.

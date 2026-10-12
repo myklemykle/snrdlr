@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {admit, authFor, chatFromGrant, dmContext, newGroupChat} from './chats'
+import {admit, authFor, chatFromGrant, chatFromGroupInvite, chatKeys, dmContext, groupFromDirect, newGroupChat, pairDirect} from './chats'
 import {createIdentity} from './identity'
 import {createInvite, sealJoinRequest} from './invite'
 
@@ -74,5 +74,80 @@ describe('dmContext', () => {
 
   it('refuses a chat with oneself', () => {
     expect(() => dmContext(anne.signPublic, anne.signPublic)).toThrow()
+  })
+})
+
+/** Runs the "chat with me" exchange: `shower` shows a code, `scanner` redeems it. Returns each side's chat. */
+function pair(shower: typeof anne, scanner: typeof bob) {
+  const code = createInvite(shower)
+  const {chat, sealedGrant} = pairDirect(shower, code, sealJoinRequest(scanner, code), [], 1)
+  return {showers: chat, scanners: chatFromGrant(code, sealedGrant, scanner, 2)}
+}
+
+describe('direct chats', () => {
+  it('give both people the same chat, named after the other, without a secret ever being sent', () => {
+    const {showers, scanners} = pair(anne, bob)
+    expect(scanners.id).toBe(showers.id)
+    expect([...chatKeys(scanners).msgKey]).toEqual([...chatKeys(showers).msgKey])
+    expect(showers).toMatchObject({kind: 'dm', name: 'Bob', chain: []})
+    expect(scanners).toMatchObject({kind: 'dm', name: 'Anne', chain: []})
+  })
+
+  it('are the same chat however many times, and whichever way round, the two pair', () => {
+    expect(pair(bob, anne).showers.id).toBe(pair(anne, bob).showers.id)
+  })
+
+  it('differ for every pair of people', () => {
+    expect(pair(anne, cindy).showers.id).not.toBe(pair(anne, bob).showers.id)
+  })
+
+  it('admit only the two of them, and nobody by certificate', () => {
+    const {showers, scanners} = pair(anne, bob)
+    expect(authFor(showers, anne).verify(authFor(scanners, bob).prove(binding), binding)).toBe(bob.id)
+    expect(authFor(scanners, bob).verify(authFor(showers, anne).prove(binding), binding)).toBe(anne.id)
+    // Mallory copies Bob's record of the chat; her key is neither of the two.
+    expect(authFor(showers, anne).verify(authFor({...scanners}, mallory).prove(binding), binding)).toBeNull()
+    // A direct chat has no invites to redeem.
+    const code = createInvite(anne)
+    expect(() => admit(showers, anne, code, sealJoinRequest(cindy, code), 3)).toThrow(/only groups/)
+  })
+
+  it('use a placeholder name until the scanner has chosen one, avoiding names in use', () => {
+    const code = createInvite(anne)
+    const nameless = {...bob, name: ''}
+    expect(pairDirect(anne, code, sealJoinRequest(nameless, code), ['Direct chat'], 1).chat.name).toBe('Direct chat 2')
+  })
+
+  it('cannot be made with oneself', () => {
+    const code = createInvite(anne)
+    expect(() => pairDirect(anne, code, sealJoinRequest(anne, code), [], 1)).toThrow()
+  })
+})
+
+describe('adding someone from a direct chat', () => {
+  const {showers: annesDm} = pair(anne, bob)
+
+  it('founds a new group that the other person can enter from the message', () => {
+    const {chat: group, invite: message} = groupFromDirect(anne, annesDm, 'Group with Bob', [], 5)
+    expect(group).toMatchObject({kind: 'group', name: 'Group with Bob', chain: []})
+    expect(group.id).not.toBe(annesDm.id)
+
+    const bobs = chatFromGroupInvite(message, anne.signPublic, bob, 6)
+    expect(bobs.id).toBe(group.id)
+    expect(authFor(group, anne).verify(authFor(bobs, bob).prove(binding), binding)).toBe(bob.id)
+
+    // The third person then joins the group through its own code, from either member.
+    const cindys = invite(bobs, bob, cindy)
+    expect(authFor(group, anne).verify(authFor(cindys, cindy).prove(binding), binding)).toBe(cindy.id)
+  })
+
+  it('refuses an invite that names a founder other than its sender, or admits someone else', () => {
+    const {invite: message} = groupFromDirect(anne, annesDm, 'Group', [], 5)
+    expect(() => chatFromGroupInvite(message, mallory.signPublic, bob, 6)).toThrow(/founder/)
+    expect(() => chatFromGroupInvite(message, anne.signPublic, cindy, 6)).toThrow(/does not admit/)
+  })
+
+  it('is only possible from a direct chat', () => {
+    expect(() => groupFromDirect(anne, newGroupChat(anne, 'Cabin', [], 0), 'Group', [], 5)).toThrow(/not a direct chat/)
   })
 })

@@ -20,6 +20,8 @@ export type Content =
   | {type: 'profile'; name: string; dh: Uint8Array}
   /** A membership certificate, posted by the member who admitted someone. */
   | {type: 'member-cert'; cert: Uint8Array}
+  /** In a direct chat: the sender has started a group that includes the recipient, and this lets them in. */
+  | {type: 'group-invite'; secret: Uint8Array; name: string; founder: Uint8Array; chain: Uint8Array[]}
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -65,6 +67,8 @@ function encodeContent(content: Content): [string, unknown] {
       return ['profile', {name: content.name, dh: content.dh}]
     case 'member-cert':
       return ['member-cert', content.cert]
+    case 'group-invite':
+      return ['group-invite', {g: content.secret, n: content.name, f: content.founder, c: content.chain}]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -84,6 +88,22 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'member-cert') {
     if (!(body instanceof Uint8Array) || body.length === 0 || body.length > MAX_CERT_BYTES) throw new Error('bad certificate body')
     return {type, cert: new Uint8Array(body)}
+  }
+  if (type === 'group-invite') {
+    const {g, n, f, c} = (body ?? {}) as Record<string, unknown>
+    const isBytes = (value: unknown, length: number) => value instanceof Uint8Array && value.length === length
+    if (!isBytes(g, 32) || !isBytes(f, 32)) throw new Error('bad group invite body')
+    if (typeof n !== 'string' || n.length === 0 || n.length > MAX_NAME_LENGTH) throw new Error('bad group invite body')
+    if (!Array.isArray(c) || c.length > 32 || !c.every(cert => cert instanceof Uint8Array && cert.length <= MAX_CERT_BYTES)) {
+      throw new Error('bad group invite body')
+    }
+    return {
+      type,
+      secret: new Uint8Array(g as Uint8Array),
+      name: n,
+      founder: new Uint8Array(f as Uint8Array),
+      chain: (c as Uint8Array[]).map(cert => new Uint8Array(cert))
+    }
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
   if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}

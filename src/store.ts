@@ -11,6 +11,8 @@ export type ChatRecord = {
   context: Uint8Array
   /** Our certificates, from the founder down to us. Empty for the founder and in direct chats. */
   chain: Uint8Array[]
+  /** In a direct chat, the other person's keys. */
+  peer?: {signPublic: Uint8Array; dhPublic: Uint8Array}
   name: string
   createdAt: number
   /** When this chat was last looked at; messages received after it count as unread. */
@@ -98,6 +100,12 @@ function wrap(db: IDBPDatabase<Schema>) {
       await tx.done
     },
 
+    async renameChat(id: string, name: string): Promise<void> {
+      const tx = db.transaction('chats', 'readwrite')
+      const chat = await tx.store.get(id)
+      if (chat && chat.name !== name) await tx.store.put({...chat, name})
+      await tx.done
+    },
     /** Replaces a stored message's decoded content, once a newer app version can read it. */
     async updateContent(message: MessageRecord): Promise<void> {
       await db.put('messages', message)

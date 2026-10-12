@@ -401,3 +401,24 @@ button:disabled {
   text-align: right;
   opacity: 0.7;
 }
+
+.home > button {
+  align-self: stretch;
+}
+
+.home .invite {
+  border-bottom: 0;
+  padding-top: 0.25rem;
+}
+
+.tag {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.inline {
+  padding: 0.15rem 0.6rem;
+  font-size: inherit;
+  color: var(--fg);
+}

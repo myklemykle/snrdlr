@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
-import {admit, authFor} from './chats'
+import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {emojiSize, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
 import {memberId, type Identity} from './identity'
@@ -9,6 +9,7 @@ import {hostInvite} from './invite-room'
 import {openCert} from './membership'
 import {QrCode} from './qr'
 import {describeRoutes, type Route} from './route'
+import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
@@ -35,14 +36,18 @@ export function ChatScreen(props: {
   /** Start with the invite code showing, as when the chat was just created. */
   inviteOnOpen: boolean
   onBack: () => void
+  /** Go to another chat, optionally with its invite code showing. */
+  onOpenChat: (id: string, showInvite: boolean) => void
 }) {
-  const {chat, identity, store, inviteOnOpen, onBack} = props
+  const {chat, identity, store, inviteOnOpen, onBack, onOpenChat} = props
+  const direct = chat.kind === 'dm'
+  const [chatName, setChatName] = useState(chat.name)
   const [messages, setMessages] = useState<MessageRecord[] | null>(null)
   const [peers, setPeers] = useState<string[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [error, setError] = useState<string | null>(null)
-  const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen ? createInvite(identity) : null))
+  const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen && !direct ? createInvite(identity) : null))
   const [inviteNote, setInviteNote] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState('')
@@ -64,6 +69,7 @@ export function ChatScreen(props: {
         connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity)),
         handlers: {
           onMessages: next => !cancelled && setMessages(next),
+          onChatName: next => !cancelled && setChatName(next),
           onStatus: next => !cancelled && setStatus(next),
           onPeersChange: peerIds => {
             if (cancelled) return
@@ -91,11 +97,11 @@ export function ChatScreen(props: {
   // Shows the chat's name in tabs and browser history.
   useEffect(() => {
     const before = document.title
-    document.title = `${chat.name} · snrdlr`
+    document.title = `${chatName} · snrdlr`
     return () => {
       document.title = before
     }
-  }, [chat.name])
+  }, [chatName])
 
   // Phones drop connections when the app is in the background, so check on them when it comes back.
   useEffect(() => {
@@ -208,6 +214,33 @@ export function ChatScreen(props: {
     setInvite(invite ? null : createInvite(identity))
   }
 
+  // "Add someone" in a direct chat: start a group that already includes the other person, tell them
+  // through this chat, and go to the group with its invite code up for whoever is being added.
+  const addSomeone = async () => {
+    if (!session.current) return
+    try {
+      const taken = (await store.listChats()).map(stored => stored.name)
+      const started = groupFromDirect(identity, chat, `Group with ${chatName}`, taken, Date.now())
+      await store.saveChat(started.chat)
+      await session.current.postGroupInvite(started.invite)
+      onOpenChat(started.chat.id, true)
+    } catch {
+      setError("Couldn't start a group.")
+    }
+  }
+
+  const openGroupInvite = async (message: MessageRecord) => {
+    if (message.content.type !== 'group-invite' || !chat.peer) return
+    try {
+      const group = chatFromGroupInvite(message.content, chat.peer.signPublic, identity, Date.now())
+      const others = (await store.listChats()).filter(stored => stored.id !== group.id).map(stored => stored.name)
+      const saved = await store.saveChat({...group, name: uniqueChatName(group.name, others)})
+      onOpenChat(saved.id, false)
+    } catch {
+      setError("That group invite isn't valid.")
+    }
+  }
+
   const copyInvite = async () => {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -225,7 +258,7 @@ export function ChatScreen(props: {
           ‹
         </button>
         <div class="title">
-          <h1>{chat.name}</h1>
+          <h1>{chatName}</h1>
           {connected ? (
             <p class="status on">{`Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}`}</p>
           ) : status === 'idle' ? (
@@ -234,9 +267,15 @@ export function ChatScreen(props: {
             <p class="status busy">{BUSY_LABELS[status]}</p>
           )}
         </div>
-        <button type="button" onClick={toggleInvite}>
-          {invite ? 'Stop inviting' : 'Invite'}
-        </button>
+        {direct ? (
+          <button type="button" onClick={addSomeone} disabled={!messages}>
+            Add someone
+          </button>
+        ) : (
+          <button type="button" onClick={toggleInvite}>
+            {invite ? 'Stop inviting' : 'Invite'}
+          </button>
+        )}
       </header>
 
       {error && <p class="error">{error}</p>}
@@ -274,6 +313,23 @@ export function ChatScreen(props: {
                     : `${message.content.name} joined${inviter ? ` · invited by ${nameOf(inviter)}` : ''}`}
                 </li>
               )
+            ]
+          }
+          if (message.content.type === 'group-invite') {
+            return [
+              separator,
+              <li key={messageKey(message)} class="event">
+                {mine ? (
+                  `You started the group "${message.content.name}" with ${chatName}`
+                ) : (
+                  <>
+                    {nameOf(message.author)} added you to the group "{message.content.name}"{' '}
+                    <button type="button" class="inline" onClick={() => openGroupInvite(message)}>
+                      Open
+                    </button>
+                  </>
+                )}
+              </li>
             ]
           }
           // Certificates are shown through the "joined" lines; unknown kinds wait for a newer app version.

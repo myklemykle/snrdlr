@@ -1,11 +1,12 @@
-import {useEffect, useState} from 'preact/hooks'
+import {useEffect, useRef, useState} from 'preact/hooks'
 import {onBackgroundActivity, sweepChats} from './background'
 import {ChatScreen} from './chat-screen'
-import {authFor, chatFromGrant, newGroupChat} from './chats'
+import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
-import {inviteFromFragment, isInviteFragment, sealJoinRequest} from './invite'
-import {redeemInvite} from './invite-room'
+import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
+import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
+import {QrCode} from './qr'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -14,6 +15,8 @@ const CHAT_PREFIX = '#c='
 const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
 // How long after one background sync of the other chats before returning to the app starts another.
 const SWEEP_INTERVAL_MS = 30_000
+// A forgotten "chat with me" code should not stay live indefinitely.
+const PAIRING_LIFETIME_MS = 10 * 60 * 1000
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
 
 type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
@@ -184,6 +187,10 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
           store={store}
           inviteOnOpen={inviteOnOpen === current.id}
           onBack={() => goHome()}
+          onOpenChat={(id, showInvite) => {
+            setInviteOnOpen(showInvite ? id : null)
+            openChat(id)
+          }}
         />
       )
     )
@@ -252,6 +259,48 @@ function Home(props: {
   const [unread, setUnread] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
+  const [pairing, setPairing] = useState<Invite | null>(null)
+  const [copied, setCopied] = useState(false)
+  const takenNames = useRef<string[]>([])
+  takenNames.current = (chats ?? []).map(chat => chat.name)
+
+  // While the "chat with me" code is showing, everyone who scans it gets a direct chat with us.
+  // Hiding it forgets the token, so the code stops working.
+  useEffect(() => {
+    if (!pairing) return
+    let cancelled = false
+    let host: {close: () => void} | null = null
+    void fetchTurnServers().then(turnServers => {
+      if (cancelled) return
+      host = hostInvite(
+        pairing,
+        request => {
+          const {chat, sealedGrant} = pairDirect(identity, pairing, request, takenNames.current, Date.now())
+          takenNames.current = [...takenNames.current, chat.name]
+          void store.saveChat(chat).then(() => refresh())
+          return sealedGrant
+        },
+        turnServers
+      )
+    })
+    const timer = setTimeout(() => setPairing(null), PAIRING_LIFETIME_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      host?.close()
+    }
+  }, [pairing])
+
+  const pairingUrl = pairing ? location.origin + location.pathname + inviteToFragment(pairing) : ''
+  const copyPairing = async () => {
+    try {
+      await navigator.clipboard.writeText(pairingUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Copying is a convenience; the code itself still works.
+    }
+  }
 
   const refresh = async () => {
     const stored = await store.listChats()
@@ -303,6 +352,7 @@ function Home(props: {
               <li key={chat.id}>
                 <button type="button" class="open" onClick={() => onOpen(chat.id)}>
                   <span class="name">{chat.name}</span>
+                  {chat.kind === 'dm' && <span class="tag">direct</span>}
                   {unread[chat.id] > 0 && (
                     <span class="unread" aria-label={`${unread[chat.id]} unread`}>
                       {unread[chat.id]}
@@ -318,7 +368,31 @@ function Home(props: {
         </ul>
       )}
 
-      <h2>New chat</h2>
+      <h2>Chat with one person</h2>
+      {pairing ? (
+        <section class="invite">
+          <QrCode text={pairingUrl} label="Code to chat with me" />
+          <p>Anyone who scans this while it is on your screen starts a direct chat with you. It stops working when you hide it.</p>
+          <button type="button" onClick={copyPairing}>
+            {copied ? 'Copied' : 'Copy link'}
+          </button>{' '}
+          <button type="button" onClick={() => setPairing(null)}>
+            Hide my code
+          </button>
+        </section>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setCopied(false)
+            setPairing(createInvite(identity))
+          }}
+        >
+          Show my code
+        </button>
+      )}
+
+      <h2>New group</h2>
       <form onSubmit={start}>
         <input
           value={name}
@@ -327,9 +401,9 @@ function Home(props: {
           maxLength={MAX_NAME_LENGTH}
           aria-label="Chat name"
         />
-        <button type="submit">Start a chat</button>
+        <button type="submit">Start a group</button>
       </form>
-      <p class="note">To join someone else's chat, scan their code with your camera while they have it on screen.</p>
+      <p class="note">To join someone else's group or chat with them, scan their code with your camera while they have it on screen.</p>
     </main>
   )
 }

@@ -65,11 +65,14 @@ describe('join request', () => {
     const request = openJoinRequest(invite, sealJoinRequest(bob, invite))
     expect([...request.signPublic]).toEqual([...bob.signPublic])
     expect([...request.dhPublic]).toEqual([...bob.dhPublic])
+    expect(request.name).toBe('Bob')
+    // Someone who has not chosen a name yet can still redeem an invite.
+    expect(openJoinRequest(invite, sealJoinRequest(createIdentity(), invite)).name).toBe('')
   })
 
   it('cannot name a key the sender does not hold', () => {
     const invite = createInvite(anne)
-    const forged = sealJoinRequest({signSecret: mallory.signSecret, signPublic: bob.signPublic, dhPublic: mallory.dhPublic}, invite)
+    const forged = sealJoinRequest({signSecret: mallory.signSecret, signPublic: bob.signPublic, dhPublic: mallory.dhPublic, name: 'Bob'}, invite)
     expect(() => openJoinRequest(invite, forged)).toThrow(/not signed/)
   })
 
@@ -86,7 +89,8 @@ describe('join request', () => {
 })
 
 describe('grant', () => {
-  const grant: Grant = {
+  const grant: Extract<Grant, {kind: 'group'}> = {
+    kind: 'group',
     secret: generateGroupSecret(),
     name: 'Cabin weekend ⛰️',
     founder: anne.signPublic,
@@ -96,10 +100,17 @@ describe('grant', () => {
   it('delivers the chat secret, name, founder and certificates to the joiner', () => {
     const invite = createInvite(anne)
     const opened = openGrant(invite, sealGrant(anne, invite, grant))
+    if (opened.kind !== 'group') throw new Error('expected a group grant')
     expect([...opened.secret]).toEqual([...grant.secret])
     expect(opened.name).toBe(grant.name)
     expect([...opened.founder]).toEqual([...grant.founder])
     expect(opened.chain.map(cert => [...cert])).toEqual([[1, 2, 3], [4, 5]])
+  })
+
+  it('for a direct chat, carries the inviter\'s key and name but no secret', () => {
+    const invite = createInvite(anne)
+    const opened = openGrant(invite, sealGrant(anne, invite, {kind: 'dm', dhPublic: anne.dhPublic, name: 'Anne'}))
+    expect(opened).toEqual({kind: 'dm', dhPublic: anne.dhPublic, name: 'Anne'})
   })
 
   it('rejects a grant from anyone but the inviter named in the code', () => {

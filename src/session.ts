@@ -38,6 +38,8 @@ export type ConnectionStatus = 'connecting' | 'searching' | 'checking' | 'reconn
 
 export type SessionHandlers = {
   onMessages: (messages: MessageRecord[]) => void
+  /** A direct chat is named after the other person, once they have said what they are called. */
+  onChatName?: (name: string) => void
   onStatus: (status: ConnectionStatus) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
@@ -47,6 +49,8 @@ export type Session = {
   sendText: (text: string) => Promise<void>
   /** Records in the chat's log that we admitted someone. */
   postCert: (cert: Uint8Array) => Promise<void>
+  /** In a direct chat: lets the other person into a group we have started. */
+  postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -133,7 +137,17 @@ export async function openSession(options: {
     if (next === 'searching') searchTimer = setTimeout(() => setStatus('idle'), SEARCH_GRACE_MS)
     if (next !== status) handlers.onStatus((status = next))
   }
-  const publish = () => handlers.onMessages(messages)
+  let chatName = chat.name
+  const publish = () => {
+    handlers.onMessages(messages)
+    if (chat.kind !== 'dm') return
+    const theirs = messages.findLast(message => message.author !== identity.id && message.content.type === 'profile')
+    if (theirs?.content.type === 'profile' && theirs.content.name !== chatName) {
+      chatName = theirs.content.name
+      void store.renameChat(chat.id, chatName)
+      handlers.onChatName?.(chatName)
+    }
+  }
 
   const insert = (record: MessageRecord) => {
     const inOrder = messages.length === 0 || compare(messages[messages.length - 1], record) < 0
@@ -257,6 +271,7 @@ export async function openSession(options: {
   return {
     sendText: text => post({type: 'text', text}),
     postCert: cert => post({type: 'member-cert', cert}),
+    postGroupInvite: invite => post(invite),
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return
       if (peers.length === 0) {
