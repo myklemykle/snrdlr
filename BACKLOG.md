@@ -29,6 +29,24 @@ A reply is an ordinary message whose encrypted payload also names the message it
 
 This changes the message format, so it needs a rule for how older app versions treat message types they do not know.
 
+## Notifications on iPhone without deciding up front
+
+Goal: people start chatting in Safari with no install step, and can turn on notifications later. iOS only delivers notifications to an app installed to the Home Screen, and that app's storage is separate from Safari's. Android needs none of this. Belongs with Phase 6.
+
+Two candidate designs:
+
+- **Split.** Safari stays the real app; the installed part only receives notifications.
+  - For: camera scanning keeps working, so no in-app scanner is needed.
+  - Against: tapping a notification opens the installed part, and a second tap is needed to reach the chat in Safari; the two halves must be linked once, by a pasted code or a link, so the Safari side can register the subscription; Safari's 7-day storage wipe still applies.
+- **Migrate (preferred).** Start in Safari; on "Turn on notifications", guide the person through Add to Home Screen and move their identity and chat secrets into the installed app. History returns through sync.
+  - For: notifications open the chat directly; the 7-day wipe no longer applies.
+  - Against: the installed app needs its own way to join later chats (the Phase 3 in-app scanner, or pasting an invite link); a one-time transfer step.
+
+To test on a real iPhone before choosing:
+
+- Can an installed web app open a link in Safari proper, or only in an in-app browser view? The split design depends on it.
+- When a site has a manifest, does Add to Home Screen keep the current address, fragment included? If so, the keys could be carried across without a paste, at the cost of leaving them stored in the icon. Otherwise the transfer is "copy a code in Safari, paste it in the installed app".
+
 ## Engineering follow-ups
 
 - **Rest of Phase 4.** Invite certificates and handshake verification, DMs, and "add someone" starting a new group.
