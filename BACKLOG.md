@@ -76,6 +76,32 @@ To test on a real iPhone before choosing:
 - Can an installed web app open a link in Safari proper, or only in an in-app browser view? The split design depends on it.
 - When a site has a manifest, does Add to Home Screen keep the current address, fragment included? If so, the keys could be carried across without a paste, at the cost of leaving them stored in the icon. Otherwise the transfer is "copy a code in Safari, paste it in the installed app".
 
+## Forks and other domains
+
+Open question: if someone forks the project and hosts it elsewhere, should people on the two sites be able to chat, and how?
+
+What already carries across, and what does not:
+
+- **The wire is not tied to a domain.** Room IDs and keys come from the chat's secret plus the app ID (`snrdlr-v2`). Two sites with the same app ID, message format and at least one Nostr relay in common can already talk.
+- **Identity and history are tied to a domain.** The browser keeps them per site address, so the same person on two sites is two different people with no chats in common.
+- **An invite code is a link to the inviter's site.** Scanning it opens that site, not the one the scanner normally uses, and gives them a fresh identity there.
+- **The TURN Worker only serves listed sites.** A fork needs its own, or its users get direct connections only.
+
+Policy to decide:
+
+- Whether to welcome interoperating forks, tolerate them, or keep them out by treating the app ID as private. A fork that changes the app ID is simply a separate network.
+- A member running a hostile fork can leak a chat. That is no worse than a member with a modified copy of this app today, but people may trust "the same app" more than it deserves. Decide whether to show which site each member is using; it can only be self-reported.
+- Who owns the protocol: a written spec with a version number, and a rule for how sites on different versions treat each other. Unknown message kinds are already kept, which helps.
+
+Ways to build a bridge:
+
+- **Site-neutral invites.** Make the code's payload usable by any compatible site: a "use my usual app" choice on the landing page, a pasted code, or the Phase 3 in-app scanner.
+- **Moving an identity between sites.** Export on one, import on the other; history returns through sync. The same transfer step as the "Migrate" notification design below, and as moving to a custom domain.
+- **Linking two identities as one person.** Each key signs the other, so members see one name rather than two. Needs a new message type.
+- **Shared relay list.** Sites must agree on at least one relay; goes with pinning a vetted list.
+
+Cheapest thing to do early: settle the custom domain before there are users to strand, and write the protocol down.
+
 ## Engineering follow-ups
 
 - **Check membership of message authors, not only of connections.** A message is accepted if its signature is valid, whoever its author is. Non-members cannot deliver anything today because members ignore their connections, but once a bot relays stored messages (Phase 5) the log itself should refuse authors without a certificate.
