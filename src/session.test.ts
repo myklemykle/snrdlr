@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import {describe, expect, it, vi} from 'vitest'
 import {createIdentity, type Identity} from './identity'
-import {deriveChatKeys, generateGroupSecret} from './keys'
+import {newGroupChat} from './chats'
 import {openSession, versionVector, type ConnectionStatus} from './session'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 import {makeNetwork} from './test-network'
@@ -11,8 +11,7 @@ let counter = 0
 type Network = ReturnType<typeof makeNetwork>
 
 function makeChat(): ChatRecord {
-  const secret = generateGroupSecret()
-  return {id: deriveChatKeys(secret).roomId, secret, name: 'Test', createdAt: 0}
+  return newGroupChat(createIdentity('Founder'), 'Test', [], 0)
 }
 
 async function join(network: Network, chat: ChatRecord, identity: Identity, store?: Store) {
@@ -345,6 +344,37 @@ describe('session', () => {
     await new Promise(resolve => setTimeout(resolve, 120))
 
     expect(anne.errors).toEqual(['could not connect'])
+  })
+
+  it('shares a membership certificate through the chat like any other message', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+
+    await anne.session.postCert(new Uint8Array([9, 9, 9]))
+    await settle()
+
+    const received = bob.view.find(m => m.content.type === 'member-cert')!
+    expect(received.author).toBe(anne.identity.id)
+    expect(received.content).toEqual({type: 'member-cert', cert: new Uint8Array([9, 9, 9])})
+  })
+
+  it('reads messages it once stored as an unknown kind, now that it understands them', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    await anne.session.sendText('a newer kind of message')
+    const [, genuine] = await anne.store.listMessages(chat.id)
+
+    // As an older app version would have kept it.
+    const bobStore = await openStore(`session-${counter++}`)
+    await bobStore.addMessage({...genuine, content: {type: 'unknown', kind: 'text'}})
+    const bob = await join(makeNetwork(), chat, createIdentity('Bob'), bobStore)
+
+    expect(texts(bob.view)).toEqual(['a newer kind of message'])
+    expect(texts(await bobStore.listMessages(chat.id))).toEqual(['a newer kind of message'])
   })
 
   it('leaves healthy connections alone when it comes back', async () => {

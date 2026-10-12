@@ -1,28 +1,39 @@
-// The temporary room where an invite token is exchanged for a chat's secret.
+// The temporary room where an invite token is exchanged for membership of a chat.
 import {joinRoom, type TurnServerConfig} from 'trystero/nostr'
-import {openGrant, type Grant, type Invite} from './invite'
+import type {Invite} from './invite'
 import {deriveInviteKeys} from './keys'
 import {APP_ID, leaveWhenSettled, relayConfig} from './transport'
 
 const REQUEST_TIMEOUT_MS = 15_000
-const MAX_GRANT_BYTES = 1024
+const MAX_REQUEST_BYTES = 1024
+const MAX_GRANT_BYTES = 64 * 1024
+
+const toBytes = (data: unknown) => (data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer))
 
 function joinInviteRoom(invite: Invite, turnServers: TurnServerConfig[]) {
   const keys = deriveInviteKeys(invite.token)
   return joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers, relayConfig}, keys.roomId)
 }
 
-/** Waits in the invite's room and hands the sealed grant to everyone who arrives, until closed. */
-export function hostInvite(invite: Invite, sealedGrant: Uint8Array, turnServers: TurnServerConfig[]): {close: () => void} {
+/**
+ * Waits in the invite's room and answers everyone who arrives with whatever `respond` makes of their
+ * request, until closed. `respond` throws to turn a request down.
+ */
+export function hostInvite(
+  invite: Invite,
+  respond: (request: Uint8Array) => Uint8Array,
+  turnServers: TurnServerConfig[]
+): {close: () => void} {
   const joinedAt = Date.now()
   const room = joinInviteRoom(invite, turnServers)
   // Checked on every request, so a closed invite gives out nothing even if the room itself lingers.
   let open = true
-  room.makeAction<null, Uint8Array>('join', {
+  room.makeAction<Uint8Array, Uint8Array>('join', {
     kind: 'request',
-    onRequest: () => {
+    onReceive: ({byteLength}) => byteLength <= MAX_REQUEST_BYTES,
+    onRequest: request => {
       if (!open) throw new Error('invite closed')
-      return sealedGrant
+      return respond(toBytes(request))
     }
   })
   return {
@@ -34,14 +45,21 @@ export function hostInvite(invite: Invite, sealedGrant: Uint8Array, turnServers:
 }
 
 /**
- * Joins the invite's room and asks whoever is there for the grant. Rejects if nobody answers with one
- * signed by the inviter before the timeout, which is what a closed or expired invite looks like.
+ * Joins the invite's room and sends `request` to whoever is there. Resolves with what `accept` makes of
+ * the first answer it does not throw on. Rejects if no acceptable answer comes before the timeout, which
+ * is what a closed or expired invite looks like.
  */
-export function redeemInvite(invite: Invite, turnServers: TurnServerConfig[], timeoutMs: number): Promise<Grant> {
+export function redeemInvite<T>(
+  invite: Invite,
+  request: Uint8Array,
+  accept: (sealedGrant: Uint8Array) => T,
+  turnServers: TurnServerConfig[],
+  timeoutMs: number
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const joinedAt = Date.now()
     const room = joinInviteRoom(invite, turnServers)
-    const join = room.makeAction<null, Uint8Array>('join', {
+    const join = room.makeAction<Uint8Array, Uint8Array>('join', {
       kind: 'request',
       onReceive: ({byteLength}) => byteLength <= MAX_GRANT_BYTES
     })
@@ -55,10 +73,10 @@ export function redeemInvite(invite: Invite, turnServers: TurnServerConfig[], ti
     // Other people joining through the same code are in this room too; only the inviter can answer validly.
     room.onPeerJoin = peerId => {
       join
-        .request(null, {target: peerId, timeoutMs: REQUEST_TIMEOUT_MS})
+        .request(request, {target: peerId, timeoutMs: REQUEST_TIMEOUT_MS})
         .then(sealed => {
-          const grant = openGrant(invite, sealed instanceof Uint8Array ? sealed : new Uint8Array(sealed as ArrayBuffer))
-          finish(() => resolve(grant))
+          const accepted = accept(toBytes(sealed))
+          finish(() => resolve(accepted))
         })
         .catch(() => {})
     }

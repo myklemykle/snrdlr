@@ -3,6 +3,9 @@
 import type {Identity} from './identity'
 import type {ChatKeys} from './keys'
 import {openSession, type Wire, type WireHandlers} from './session'
+
+/** Makes the connection function for one chat; each chat has its own membership check. */
+export type ConnectFor = (chat: ChatRecord) => (keys: ChatKeys, handlers: WireHandlers) => Wire | Promise<Wire>
 import type {ChatRecord, Store} from './store'
 
 export type SweepTiming = {
@@ -48,7 +51,7 @@ function syncOnce(
   chat: ChatRecord,
   identity: Identity,
   store: Store,
-  connect: (keys: ChatKeys, handlers: WireHandlers) => Wire | Promise<Wire>,
+  connectFor: ConnectFor,
   timing: SweepTiming
 ): Running {
   let cancelled = false
@@ -61,7 +64,7 @@ function syncOnce(
       chat,
       identity,
       store,
-      connect,
+      connect: connectFor(chat),
       handlers: {
         onMessages: messages => {
           // Only other people's messages count; our own "joined" message is not news.
@@ -98,7 +101,7 @@ function syncOnce(
 export async function sweepChats(options: {
   store: Store
   identity: Identity
-  connect: (keys: ChatKeys, handlers: WireHandlers) => Wire | Promise<Wire>
+  connectFor: ConnectFor
   timing?: Partial<SweepTiming>
 }): Promise<void> {
   if (sweeping) return
@@ -109,7 +112,7 @@ export async function sweepChats(options: {
     const worker = async () => {
       for (let chat = queue.shift(); chat; chat = queue.shift()) {
         if (foreground.has(chat.id) || running.has(chat.id)) continue
-        const task = syncOnce(chat, options.identity, options.store, options.connect, timing)
+        const task = syncOnce(chat, options.identity, options.store, options.connectFor, timing)
         running.set(chat.id, task)
         await task.done
       }

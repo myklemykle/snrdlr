@@ -17,8 +17,8 @@ export function generateGroupSecret(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(SECRET_BYTES))
 }
 
-function derive(secret: Uint8Array, label: string): Uint8Array {
-  return hkdf(sha256, secret, undefined, utf8(`snrdlr/v1/${label}`), 32)
+function derive(secret: Uint8Array, label: string, salt?: Uint8Array): Uint8Array {
+  return hkdf(sha256, secret, salt, utf8(`snrdlr/v1/${label}`), 32)
 }
 
 /** Keys for the short-lived room where an invite token is exchanged for the chat's secret. */
@@ -30,11 +30,16 @@ export function deriveInviteKeys(token: Uint8Array): Pick<ChatKeys, 'roomId' | '
   }
 }
 
-export function deriveChatKeys(secret: Uint8Array): ChatKeys {
-  if (secret.length !== SECRET_BYTES) throw new Error('group secret must be 32 bytes')
+/**
+ * `context` fixes who anchors the chat: the founder's signing key for a group, both members' keys for a
+ * direct chat. Mixing it in means nobody can present the same secret with a different founder.
+ */
+export function deriveChatKeys(secret: Uint8Array, context: Uint8Array): ChatKeys {
+  if (secret.length !== SECRET_BYTES) throw new Error('chat secret must be 32 bytes')
+  if (context.length === 0) throw new Error('chat context is required')
   return {
-    roomId: toHex(derive(secret, 'room')),
-    sdpPassword: toBase64Url(derive(secret, 'sdp')),
-    msgKey: derive(secret, 'msg')
+    roomId: toHex(derive(secret, 'room', context)),
+    sdpPassword: toBase64Url(derive(secret, 'sdp', context)),
+    msgKey: derive(secret, 'msg', context)
   }
 }

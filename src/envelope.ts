@@ -14,7 +14,16 @@ export const MAX_TEXT_LENGTH = 4000
 export const MAX_ENVELOPE_BYTES = 32 * 1024
 const NONCE_BYTES = 12
 
-export type Content = {type: 'text'; text: string} | {type: 'profile'; name: string}
+export type Content =
+  | {type: 'text'; text: string}
+  /** A member's display name and X25519 key, posted when they join. */
+  | {type: 'profile'; name: string; dh: Uint8Array}
+  /** A membership certificate, posted by the member who admitted someone. */
+  | {type: 'member-cert'; cert: Uint8Array}
+  /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
+  | {type: 'unknown'; kind: string}
+
+const MAX_CERT_BYTES = 512
 
 export type Message = {
   /** Member ID of the author. */
@@ -49,7 +58,16 @@ const boundBytes = (label: string, chatId: string, author: Uint8Array, seq: numb
 const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 
 function encodeContent(content: Content): [string, unknown] {
-  return content.type === 'text' ? ['text', content.text] : ['profile', {name: content.name}]
+  switch (content.type) {
+    case 'text':
+      return ['text', content.text]
+    case 'profile':
+      return ['profile', {name: content.name, dh: content.dh}]
+    case 'member-cert':
+      return ['member-cert', content.cert]
+    case 'unknown':
+      throw new Error('cannot send a message of unknown type')
+  }
 }
 
 function decodeContent(type: unknown, body: unknown): Content {
@@ -58,11 +76,18 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {type, text: body}
   }
   if (type === 'profile') {
-    const name = (body as {name?: unknown} | null)?.name
+    const {name, dh} = (body ?? {}) as {name?: unknown; dh?: unknown}
     if (typeof name !== 'string' || name.length === 0 || name.length > MAX_NAME_LENGTH) throw new Error('bad profile body')
-    return {type, name}
+    if (!(dh instanceof Uint8Array) || dh.length !== 32) throw new Error('bad profile body')
+    return {type, name, dh: new Uint8Array(dh)}
   }
-  throw new Error(`unknown message type: ${String(type)}`)
+  if (type === 'member-cert') {
+    if (!(body instanceof Uint8Array) || body.length === 0 || body.length > MAX_CERT_BYTES) throw new Error('bad certificate body')
+    return {type, cert: new Uint8Array(body)}
+  }
+  // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
+  if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}
+  throw new Error('bad message type')
 }
 
 export async function sealEnvelope(context: ChatContext, author: Author, message: Omit<Message, 'author'>): Promise<Uint8Array> {

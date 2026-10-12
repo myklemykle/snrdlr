@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import {describe, expect, it} from 'vitest'
 import {claimChat, onBackgroundActivity, sweepChats, unclaimChat} from './background'
 import {createIdentity} from './identity'
-import {deriveChatKeys, generateGroupSecret, type ChatKeys} from './keys'
+import {newGroupChat} from './chats'
+import type {ChatKeys} from './keys'
 import {openSession, type WireHandlers} from './session'
 import {openStore, type ChatRecord, type MessageRecord} from './store'
 import {makeNetwork} from './test-network'
@@ -13,8 +14,7 @@ const texts = (messages: MessageRecord[]) => messages.flatMap(m => (m.content.ty
 const settle = (ms = 30) => new Promise(resolve => setTimeout(resolve, ms))
 
 function makeChat(name: string): ChatRecord {
-  const secret = generateGroupSecret()
-  return {id: deriveChatKeys(secret).roomId, secret, name, createdAt: 0}
+  return newGroupChat(createIdentity('Founder'), name, [], 0)
 }
 
 /** Anne, online in a chat with messages waiting for whoever syncs. */
@@ -46,7 +46,7 @@ describe('sweepChats', () => {
     const active: string[] = []
     const stop = onBackgroundActivity(chatId => active.push(chatId))
 
-    await sweepChats({store, identity: bob, connect: (keys, handlers) => networks.get(keys.roomId)!.connect(bob.id)(keys, handlers), timing})
+    await sweepChats({store, identity: bob, connectFor: () => (keys, handlers) => networks.get(keys.roomId)!.connect(bob.id)(keys, handlers), timing})
     stop()
 
     expect(texts(await store.listMessages(cabin.id))).toEqual(['bring the stove'])
@@ -69,7 +69,7 @@ describe('sweepChats', () => {
     const connect = (keys: ChatKeys, handlers: WireHandlers) => networks.get(keys.roomId)!.connect(bob.id)(keys, handlers)
 
     await claimChat(open.id)
-    const sweep = sweepChats({store, identity: bob, connect, timing: {...timing, minMs: 500, quietMs: 500}})
+    const sweep = sweepChats({store, identity: bob, connectFor: () => connect, timing: {...timing, minMs: 500, quietMs: 500}})
     await settle()
     expect(networks.get(open.id)!.present()).not.toContain(bob.id)
     expect(networks.get(other.id)!.present()).toContain(bob.id)

@@ -122,6 +122,76 @@ test('several people can join through one code while it is showing', async ({bro
   await send(cindy, 'hi all')
   await expect(anne.locator('.theirs', {hasText: 'hi all'})).toContainText('Cindy')
   await expect(bob.locator('.theirs', {hasText: 'hi all'})).toContainText('Cindy')
+
+  // Everyone can see who started the chat and who let each person in.
+  await expect(anne.getByText('Bob joined · invited by you')).toBeVisible()
+  await expect(cindy.getByText('Bob joined · invited by Anne')).toBeVisible()
+  await expect(bob.getByText('Anne started this chat')).toBeVisible()
+})
+
+test('someone holding a copy of the chat secret, but never invited, is kept out', async ({browser}) => {
+  const [anne, bob, mallory] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Members only')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await anne.getByRole('button', {name: 'Stop inviting'}).click()
+  await send(anne, 'for members')
+  await expect(bob.locator('.theirs', {hasText: 'for members'})).toBeVisible()
+
+  // Mallory has her own identity, and a copy of everything Bob's device stores about the chat:
+  // its secret, its founder, and Bob's certificates.
+  await mallory.goto('/')
+  await introduce(mallory, 'Mallory')
+  const stolen = await bob.evaluate(
+    () =>
+      new Promise<unknown[]>(resolve => {
+        const open = indexedDB.open('snrdlr')
+        open.onsuccess = () => {
+          const all = open.result.transaction('chats').objectStore('chats').getAll()
+          all.onsuccess = () =>
+            resolve(
+              all.result.map(chat => ({...chat, secret: [...chat.secret], context: [...chat.context], chain: chat.chain.map((cert: Uint8Array) => [...cert])}))
+            )
+        }
+      })
+  )
+  await mallory.evaluate(
+    chats =>
+      new Promise<void>(resolve => {
+        const open = indexedDB.open('snrdlr')
+        open.onsuccess = () => {
+          const tx = open.result.transaction('chats', 'readwrite')
+          for (const chat of chats as {secret: number[]; context: number[]; chain: number[][]}[]) {
+            tx.objectStore('chats').put({
+              ...chat,
+              secret: new Uint8Array(chat.secret),
+              context: new Uint8Array(chat.context),
+              chain: chat.chain.map(cert => new Uint8Array(cert))
+            })
+          }
+          tx.oncomplete = () => resolve()
+        }
+      }),
+    stolen
+  )
+  await mallory.reload()
+  await chatEntry(mallory, 'Members only').click()
+  await expect(mallory.getByRole('heading', {name: 'Members only'})).toBeVisible()
+
+  // She reaches the room and can tell the members are genuine, but neither of them accepts her:
+  // they do not count her as connected, and send her neither the history nor anything new.
+  await send(anne, 'still just us')
+  await expect(bob.locator('.theirs', {hasText: 'still just us'})).toBeVisible()
+  await mallory.waitForTimeout(12_000)
+  await expect(mallory.locator('.theirs')).toHaveCount(0)
+  await expect(mallory.locator('.log .event:not(.day)')).toHaveCount(0)
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1 /)
+  await expect(bob.locator('.status.on')).toHaveText(/Connected to 1 /)
+  // And nothing she writes gets in.
+  await send(mallory, 'let me in')
+  await mallory.waitForTimeout(2_000)
+  await expect(anne.getByText('let me in')).toHaveCount(0)
 })
 
 test('a code stops working once the inviter closes it, and a new showing gets a new code', async ({browser}) => {

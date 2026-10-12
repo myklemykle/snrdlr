@@ -6,10 +6,11 @@ export const MAX_NAME_LENGTH = 64
 
 /** The secrets that make up one person on one device. */
 export type IdentitySecrets = {
+  /** Empty until the person has been asked what to be called. */
   name: string
   /** Ed25519 key that signs every message. */
   signSecret: Uint8Array
-  /** X25519 key, used from Phase 4 to derive direct-message keys. */
+  /** X25519 key, from which direct-chat keys are derived. */
   dhSecret: Uint8Array
 }
 
@@ -29,7 +30,7 @@ export function loadIdentity(secrets: IdentitySecrets): Identity {
   return {...secrets, id: memberId(signPublic), signPublic, dhPublic: x25519.getPublicKey(secrets.dhSecret)}
 }
 
-export function createIdentity(name: string): Identity {
+export function createIdentity(name = ''): Identity {
   return loadIdentity({
     name: cleanName(name),
     signSecret: ed25519.utils.randomSecretKey(),

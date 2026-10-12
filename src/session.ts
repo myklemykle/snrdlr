@@ -5,7 +5,8 @@
 // are signed by their authors, so any member can pass on anyone's messages.
 import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content} from './envelope'
 import type {Identity} from './identity'
-import {deriveChatKeys, type ChatKeys} from './keys'
+import {chatKeys} from './chats'
+import type {ChatKeys} from './keys'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
 
@@ -44,6 +45,8 @@ export type SessionHandlers = {
 
 export type Session = {
   sendText: (text: string) => Promise<void>
+  /** Records in the chat's log that we admitted someone. */
+  postCert: (cert: Uint8Array) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -98,10 +101,19 @@ export async function openSession(options: {
   errorDelayMs?: number
 }): Promise<Session> {
   const {chat, identity, store, handlers} = options
-  const keys = deriveChatKeys(chat.secret)
+  const keys = chatKeys(chat)
   const context: ChatContext = {chatId: chat.id, msgKey: await importMsgKey(keys.msgKey)}
 
   let messages = await store.listMessages(chat.id)
+  // Messages stored by an older version of the app as "unknown" may be readable now.
+  for (const [index, stored] of messages.entries()) {
+    if (stored.content.type !== 'unknown') continue
+    const reread = await openEnvelope(context, stored.envelope).catch(() => null)
+    if (reread && reread.content.type !== 'unknown') {
+      messages[index] = {...stored, content: reread.content}
+      await store.updateContent(messages[index])
+    }
+  }
   let wire: Wire | null = null
   let generation = 0
   let peers: string[] = []
@@ -234,7 +246,7 @@ export async function openSession(options: {
     handlers.onError("Couldn't connect to this chat.")
   })
   if (!messages.some(message => message.author === identity.id && message.content.type === 'profile')) {
-    await post({type: 'profile', name: identity.name})
+    await post({type: 'profile', name: identity.name, dh: identity.dhPublic})
   }
 
   // Catches anything missed in between, for example when not every pair of members is directly connected.
@@ -244,6 +256,7 @@ export async function openSession(options: {
 
   return {
     sendText: text => post({type: 'text', text}),
+    postCert: cert => post({type: 'member-cert', cert}),
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return
       if (peers.length === 0) {

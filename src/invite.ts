@@ -1,16 +1,18 @@
 // Invites that only work while the inviter is showing them.
 //
 // The QR code carries a random one-time token and the inviter's public key, and nothing about the chat.
-// The inviter's app waits in a temporary room derived from the token; a joiner who connects there is sent
-// a signed "grant" holding the chat's secret. When the inviter closes the invite, their app leaves the
-// room and forgets the token, so an old code leads nowhere and reveals nothing.
+// The inviter's app waits in a temporary room derived from the token. A joiner who connects there sends
+// a signed request naming their keys, and is sent back a signed "grant": the chat's secret and the
+// certificates that make them a member. When the inviter closes the invite, their app leaves the room
+// and forgets the token, so an old code leads nowhere and reveals nothing.
 import {ed25519} from '@noble/curves/ed25519.js'
 import {decode, encode} from 'cbor-x'
 import {concatBytes, fromBase64Url, toBase64Url, utf8} from './bytes'
 import {MAX_NAME_LENGTH} from './identity'
 import {SECRET_BYTES} from './keys'
+import {MAX_CHAIN_LENGTH} from './membership'
 
-export const INVITE_VERSION = 2
+export const INVITE_VERSION = 3
 const FRAGMENT_PREFIX = '#i='
 
 export type Invite = {
@@ -20,10 +22,25 @@ export type Invite = {
   inviter: Uint8Array
 }
 
-/** What a joiner receives: enough to enter the chat. */
-export type Grant = {secret: Uint8Array; name: string}
+/** What a joiner tells the inviter: the keys to admit. */
+export type JoinRequest = {signPublic: Uint8Array; dhPublic: Uint8Array}
+
+/** What a joiner receives: enough to enter the chat and prove they belong. */
+export type Grant = {secret: Uint8Array; name: string; founder: Uint8Array; chain: Uint8Array[]}
 
 type Signer = {signSecret: Uint8Array; signPublic: Uint8Array}
+
+const isKey = (value: unknown): value is Uint8Array => value instanceof Uint8Array && value.length === 32
+const isSignature = (value: unknown): value is Uint8Array => value instanceof Uint8Array && value.length === 64
+
+function verify(signature: Uint8Array, message: Uint8Array, key: Uint8Array): boolean {
+  try {
+    return ed25519.verify(signature, message, key)
+  } catch {
+    // An invalid key or signature encoding is just a failed verification.
+    return false
+  }
+}
 
 export function createInvite(inviter: Signer): Invite {
   return {token: crypto.getRandomValues(new Uint8Array(SECRET_BYTES)), inviter: inviter.signPublic}
@@ -39,7 +56,7 @@ export function decodeInvite(payload: string): Invite {
   const {v, t, k} = raw as Record<string, unknown>
   if (v !== INVITE_VERSION) throw new Error(`unsupported invite version: ${String(v)}`)
   if (!(t instanceof Uint8Array) || t.length !== SECRET_BYTES) throw new Error('malformed invite token')
-  if (!(k instanceof Uint8Array) || k.length !== 32) throw new Error('malformed inviter key')
+  if (!isKey(k)) throw new Error('malformed inviter key')
   // Copy: cbor-x may hand back views into its decode buffer.
   return {token: new Uint8Array(t), inviter: new Uint8Array(k)}
 }
@@ -60,31 +77,58 @@ export function inviteFromFragment(fragment: string): Invite | null {
   }
 }
 
-// Token and secret have fixed lengths, so the name can follow without a separator.
-const grantBytes = (token: Uint8Array, grant: Grant) =>
-  concatBytes(utf8('snrdlr/v1/grant\0'), token, grant.secret, utf8(grant.name))
+// Fixed-length fields first, so each concatenation is unambiguous.
+const requestBytes = (token: Uint8Array, request: JoinRequest) =>
+  concatBytes(utf8('snrdlr/v1/join\0'), token, request.signPublic, request.dhPublic)
 
-/** Signs the chat's secret for this one invite. Signing over the token stops a grant being reused for another. */
+/** The joiner's request. Signing it shows the signing key is theirs and the X25519 key goes with it. */
+export function sealJoinRequest(joiner: Signer & {dhPublic: Uint8Array}, invite: Invite): Uint8Array {
+  const request = {signPublic: joiner.signPublic, dhPublic: joiner.dhPublic}
+  const signature = ed25519.sign(requestBytes(invite.token, request), joiner.signSecret)
+  return new Uint8Array(encode({k: request.signPublic, d: request.dhPublic, s: signature}))
+}
+
+export function openJoinRequest(invite: Invite, sealed: Uint8Array): JoinRequest {
+  const raw = decode(sealed) as Record<string, unknown> | null
+  if (typeof raw !== 'object' || raw === null) throw new Error('malformed join request')
+  const {k, d, s} = raw
+  if (!isKey(k) || !isKey(d) || !isSignature(s)) throw new Error('malformed join request')
+  const request = {signPublic: new Uint8Array(k), dhPublic: new Uint8Array(d)}
+  if (!verify(s, requestBytes(invite.token, request), request.signPublic)) throw new Error('join request is not signed by its key')
+  return request
+}
+
+const grantBytes = (token: Uint8Array, body: Uint8Array) => concatBytes(utf8('snrdlr/v1/grant\0'), token, body)
+
+/** Signs the grant for this one invite. Signing over the token stops a grant being reused for another. */
 export function sealGrant(inviter: Signer, invite: Invite, grant: Grant): Uint8Array {
-  const signature = ed25519.sign(grantBytes(invite.token, grant), inviter.signSecret)
-  return new Uint8Array(encode({g: grant.secret, n: grant.name, s: signature}))
+  // The signed body travels as bytes, so verifying never depends on re-encoding it identically.
+  const body = new Uint8Array(encode({g: grant.secret, n: grant.name, f: grant.founder, c: grant.chain}))
+  const signature = ed25519.sign(grantBytes(invite.token, body), inviter.signSecret)
+  return new Uint8Array(encode({b: body, s: signature}))
 }
 
 /** Checks a grant came from the person named in the invite. Throws otherwise. */
 export function openGrant(invite: Invite, sealed: Uint8Array): Grant {
-  const raw = decode(sealed) as Record<string, unknown> | null
-  if (typeof raw !== 'object' || raw === null) throw new Error('malformed grant')
-  const {g, n, s} = raw
+  const outer = decode(sealed) as Record<string, unknown> | null
+  if (typeof outer !== 'object' || outer === null) throw new Error('malformed grant')
+  const {b, s} = outer
+  if (!(b instanceof Uint8Array) || !isSignature(s)) throw new Error('malformed grant')
+  if (!verify(s, grantBytes(invite.token, b), invite.inviter)) throw new Error('grant was not signed by the inviter')
+
+  const body = decode(b) as Record<string, unknown> | null
+  if (typeof body !== 'object' || body === null) throw new Error('malformed grant body')
+  const {g, n, f, c} = body
   if (!(g instanceof Uint8Array) || g.length !== SECRET_BYTES) throw new Error('malformed grant secret')
   if (typeof n !== 'string' || n.length === 0 || n.length > MAX_NAME_LENGTH) throw new Error('malformed grant name')
-  if (!(s instanceof Uint8Array) || s.length !== 64) throw new Error('malformed grant signature')
-  const grant = {secret: new Uint8Array(g), name: n}
-  let signed = false
-  try {
-    signed = ed25519.verify(s, grantBytes(invite.token, grant), invite.inviter)
-  } catch {
-    // An invalid key or signature encoding is just a failed verification.
+  if (!isKey(f)) throw new Error('malformed grant founder')
+  if (!Array.isArray(c) || c.length > MAX_CHAIN_LENGTH || !c.every(entry => entry instanceof Uint8Array)) {
+    throw new Error('malformed grant chain')
   }
-  if (!signed) throw new Error('grant was not signed by the inviter')
-  return grant
+  return {
+    secret: new Uint8Array(g),
+    name: n,
+    founder: new Uint8Array(f),
+    chain: (c as Uint8Array[]).map(entry => new Uint8Array(entry))
+  }
 }

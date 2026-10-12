@@ -1,10 +1,12 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
+import {admit, authFor} from './chats'
 import {emojiSize, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
-import type {Identity} from './identity'
-import {createInvite, inviteToFragment, sealGrant, type Invite} from './invite'
+import {memberId, type Identity} from './identity'
+import {createInvite, inviteToFragment, type Invite} from './invite'
 import {hostInvite} from './invite-room'
+import {openCert} from './membership'
 import {QrCode} from './qr'
 import {describeRoutes, type Route} from './route'
 import {openSession, type ConnectionStatus, type Session} from './session'
@@ -59,7 +61,7 @@ export function ChatScreen(props: {
         identity,
         store,
         // Fetched on every (re)connect, so long-open chats never reuse expired TURN credentials.
-        connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers()),
+        connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity)),
         handlers: {
           onMessages: next => !cancelled && setMessages(next),
           onStatus: next => !cancelled && setStatus(next),
@@ -125,7 +127,16 @@ export function ChatScreen(props: {
     let host: {close: () => void} | null = null
     void fetchTurnServers().then(turnServers => {
       if (cancelled) return
-      host = hostInvite(invite, sealGrant(identity, invite, {secret: chat.secret, name: chat.name}), turnServers)
+      host = hostInvite(
+        invite,
+        request => {
+          // Admits whoever asks while the code is showing, and records it in the chat for the others.
+          const {sealedGrant, cert} = admit(chat, identity, invite, request, Date.now())
+          void session.current?.postCert(cert).catch(() => {})
+          return sealedGrant
+        },
+        turnServers
+      )
     })
     const timer = setTimeout(() => {
       setInvite(null)
@@ -161,7 +172,23 @@ export function ChatScreen(props: {
     }
     return found
   }, [messages])
-  const nameOf = (author: string) => names.get(author) ?? `Member ${author.slice(0, 6)}`
+  const nameOf = (author: string) => (author === identity.id ? 'you' : (names.get(author) ?? `Member ${author.slice(0, 6)}`))
+
+  // Who admitted whom, from the certificates members have posted. Only genuine ones count.
+  const invitedBy = useMemo(() => {
+    const found = new Map<string, string>()
+    for (const message of messages ?? []) {
+      if (message.content.type !== 'member-cert') continue
+      try {
+        const cert = openCert(chat.id, message.content.cert)
+        found.set(memberId(cert.subject), memberId(cert.issuer))
+      } catch {
+        // Not a valid certificate for this chat; ignore it.
+      }
+    }
+    return found
+  }, [messages])
+  const founderId = chat.kind === 'group' ? memberId(chat.context) : null
 
   const send = (event: Event) => {
     event.preventDefault()
@@ -237,15 +264,20 @@ export function ChatScreen(props: {
             </li>
           )
           if (message.content.type === 'profile') {
+            const inviter = invitedBy.get(message.author)
             return [
               separator,
               !mine && (
                 <li key={messageKey(message)} class="event">
-                  {message.content.name} joined
+                  {message.author === founderId
+                    ? `${message.content.name} started this chat`
+                    : `${message.content.name} joined${inviter ? ` · invited by ${nameOf(inviter)}` : ''}`}
                 </li>
               )
             ]
           }
+          // Certificates are shown through the "joined" lines; unknown kinds wait for a newer app version.
+          if (message.content.type !== 'text') return separator
           const {text} = message.content
           const size = emojiSize(text)
           return [

@@ -1,10 +1,10 @@
 import {useEffect, useState} from 'preact/hooks'
 import {onBackgroundActivity, sweepChats} from './background'
 import {ChatScreen} from './chat-screen'
+import {authFor, chatFromGrant, newGroupChat} from './chats'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
-import {inviteFromFragment, isInviteFragment} from './invite'
+import {inviteFromFragment, isInviteFragment, sealJoinRequest} from './invite'
 import {redeemInvite} from './invite-room'
-import {deriveChatKeys, generateGroupSecret} from './keys'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
@@ -16,7 +16,7 @@ const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
 const SWEEP_INTERVAL_MS = 30_000
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
 
-type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity | null}
+type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
 
 /** Progress of redeeming the invite in the address bar, if there is one. */
 type Join = {status: 'idle'} | {status: 'joining'} | {status: 'failed'} | {status: 'joined'; chatId: string}
@@ -27,8 +27,15 @@ export function App() {
   useEffect(() => {
     openStore()
       .then(async store => {
-        const secrets = await store.getIdentity()
-        setBoot({status: 'ready', store, identity: secrets ? loadIdentity(secrets) : null})
+        // Keys are made on first launch, before the person is asked for a name, so that an invite can
+        // be redeemed straight away while its code is still showing.
+        let secrets = await store.getIdentity()
+        if (!secrets) {
+          const {name, signSecret, dhSecret} = createIdentity()
+          secrets = {name, signSecret, dhSecret}
+          await store.saveIdentity(secrets)
+        }
+        setBoot({status: 'ready', store, identity: loadIdentity(secrets)})
       })
       .catch(() => setBoot({status: 'failed'}))
   }, [])
@@ -50,7 +57,7 @@ export function App() {
  * Redeems an invite as soon as it appears in the address bar, without waiting for the person to
  * finish setting up, because the code only works while the inviter is still showing it.
  */
-function useJoin(store: Store, hash: string): [Join, () => void] {
+function useJoin(store: Store, identity: Identity, hash: string): [Join, () => void] {
   const [join, setJoin] = useState<Join>({status: 'idle'})
 
   useEffect(() => {
@@ -62,11 +69,16 @@ function useJoin(store: Store, hash: string): [Join, () => void] {
     setJoin({status: 'joining'})
     void (async () => {
       try {
-        const grant = await redeemInvite(invite, await fetchTurnServers(), JOIN_TIMEOUT_MS)
-        const id = deriveChatKeys(grant.secret).roomId
+        const granted = await redeemInvite(
+          invite,
+          sealJoinRequest(identity, invite),
+          sealed => chatFromGrant(invite, sealed, identity, Date.now()),
+          await fetchTurnServers(),
+          JOIN_TIMEOUT_MS
+        )
         // The name is ours to adjust: it only labels the chat on this device.
-        const others = (await store.listChats()).filter(chat => chat.id !== id).map(chat => chat.name)
-        const chat = await store.saveChat({id, secret: grant.secret, name: uniqueChatName(grant.name, others), createdAt: Date.now()})
+        const others = (await store.listChats()).filter(chat => chat.id !== granted.id).map(chat => chat.name)
+        const chat = await store.saveChat({...granted, name: uniqueChatName(granted.name, others)})
         if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
       } catch {
         if (!cancelled) setJoin({status: 'failed'})
@@ -80,10 +92,11 @@ function useJoin(store: Store, hash: string): [Join, () => void] {
   return [join, () => setJoin({status: 'idle'})]
 }
 
-function Main(props: {store: Store; identity: Identity | null; onIdentity: (identity: Identity) => void}) {
+function Main(props: {store: Store; identity: Identity; onIdentity: (identity: Identity) => void}) {
   const {store, identity, onIdentity} = props
   const [hash, setHash] = useState(location.hash)
-  const [join, clearJoin] = useJoin(store, hash)
+  const [join, clearJoin] = useJoin(store, identity, hash)
+  const named = identity.name !== ''
   const [chat, setChat] = useState<ChatRecord | null>(null)
   const [inviteOnOpen, setInviteOnOpen] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -108,21 +121,25 @@ function Main(props: {store: Store; identity: Identity | null; onIdentity: (iden
 
   // Bring the chats that are not on screen up to date at launch and whenever the app comes back.
   useEffect(() => {
-    if (!identity) return
+    if (!named) return
     let lastSweep = 0
     const sweep = () => {
       if (document.hidden || Date.now() - lastSweep < SWEEP_INTERVAL_MS) return
       lastSweep = Date.now()
-      void sweepChats({store, identity, connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers())})
+      void sweepChats({
+        store,
+        identity,
+        connectFor: chat => async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity))
+      })
     }
     sweep()
     document.addEventListener('visibilitychange', sweep)
     return () => document.removeEventListener('visibilitychange', sweep)
-  }, [identity])
+  }, [named])
 
   // Once the invite has been dealt with, take it out of the address bar and history.
   useEffect(() => {
-    if (!identity) return
+    if (!named) return
     if (join.status === 'joined') {
       clearJoin()
       openChat(join.chatId, true)
@@ -131,7 +148,7 @@ function Main(props: {store: Store; identity: Identity | null; onIdentity: (iden
       setNotice(STALE_INVITE)
       goHome(true)
     }
-  }, [join, identity])
+  }, [join, named])
 
   useEffect(() => {
     if (!hash.startsWith(CHAT_PREFIX)) return setChat(null)
@@ -146,7 +163,7 @@ function Main(props: {store: Store; identity: Identity | null; onIdentity: (iden
     }
   }, [hash])
 
-  if (!identity) return <Welcome store={store} invited={join.status !== 'idle'} onCreate={onIdentity} />
+  if (!named) return <Welcome store={store} identity={identity} invited={join.status !== 'idle'} onNamed={onIdentity} />
   if (join.status !== 'idle' || isInviteFragment(hash)) {
     return (
       <main class="home">
@@ -190,15 +207,16 @@ function Main(props: {store: Store; identity: Identity | null; onIdentity: (iden
   )
 }
 
-function Welcome({store, invited, onCreate}: {store: Store; invited: boolean; onCreate: (identity: Identity) => void}) {
+function Welcome(props: {store: Store; identity: Identity; invited: boolean; onNamed: (identity: Identity) => void}) {
+  const {store, identity, invited, onNamed} = props
   const [name, setName] = useState('')
   const create = async (event: Event) => {
     event.preventDefault()
-    const identity = createIdentity(name)
-    await store.saveIdentity({name: identity.name, signSecret: identity.signSecret, dhSecret: identity.dhSecret})
+    const secrets = {name: cleanName(name), signSecret: identity.signSecret, dhSecret: identity.dhSecret}
+    await store.saveIdentity(secrets)
     // Asks the browser not to evict our data under storage pressure; it may say no.
     void navigator.storage?.persist?.()
-    onCreate(identity)
+    onNamed(loadIdentity(secrets))
   }
   return (
     <main class="home">
@@ -254,14 +272,8 @@ function Home(props: {
 
   const start = async (event: Event) => {
     event.preventDefault()
-    const secret = generateGroupSecret()
     const taken = (await store.listChats()).map(chat => chat.name)
-    const chat = await store.saveChat({
-      id: deriveChatKeys(secret).roomId,
-      secret,
-      name: uniqueChatName(cleanName(name) || DEFAULT_CHAT_NAME, taken),
-      createdAt: Date.now()
-    })
+    const chat = await store.saveChat(newGroupChat(identity, cleanName(name) || DEFAULT_CHAT_NAME, taken, Date.now()))
     onCreate(chat.id)
   }
 

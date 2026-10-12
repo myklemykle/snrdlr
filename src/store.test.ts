@@ -1,10 +1,21 @@
 import 'fake-indexeddb/auto'
 import {describe, expect, it} from 'vitest'
 import {createIdentity, loadIdentity} from './identity'
-import {openStore, type MessageRecord} from './store'
+import {openStore, type ChatRecord, type MessageRecord} from './store'
 
 let counter = 0
 const freshName = () => `test-${counter++}`
+
+const chat = (overrides: Partial<ChatRecord>): ChatRecord => ({
+  id: 'chat-a',
+  kind: 'group',
+  secret: new Uint8Array(32),
+  context: new Uint8Array(32).fill(1),
+  chain: [],
+  name: 'A',
+  createdAt: 0,
+  ...overrides
+})
 
 const message = (overrides: Partial<MessageRecord>): MessageRecord => ({
   chatId: 'chat-a',
@@ -33,9 +44,9 @@ describe('store', () => {
 
   it('saves chats once and lists the newest first', async () => {
     const store = await openStore(freshName())
-    await store.saveChat({id: 'old', secret: new Uint8Array(32), name: 'Old', createdAt: 1})
-    await store.saveChat({id: 'new', secret: new Uint8Array(32), name: 'New', createdAt: 2})
-    const kept = await store.saveChat({id: 'old', secret: new Uint8Array(32).fill(9), name: 'Renamed', createdAt: 3})
+    await store.saveChat(chat({id: 'old', name: 'Old', createdAt: 1}))
+    await store.saveChat(chat({id: 'new', name: 'New', createdAt: 2}))
+    const kept = await store.saveChat(chat({id: 'old', secret: new Uint8Array(32).fill(9), name: 'Renamed', createdAt: 3}))
 
     expect(kept.name).toBe('Old')
     expect((await store.listChats()).map(chat => chat.name)).toEqual(['New', 'Old'])
@@ -57,9 +68,9 @@ describe('store', () => {
 
   it('forgets a left chat and its history, but not how far our own numbering got', async () => {
     const store = await openStore(freshName())
-    const chat = {id: 'chat-a', secret: new Uint8Array(32), name: 'A', createdAt: 1}
-    await store.saveChat(chat)
-    await store.saveChat({id: 'chat-b', secret: new Uint8Array(32), name: 'B', createdAt: 2})
+    const chatA = chat({id: 'chat-a', name: 'A', createdAt: 1})
+    await store.saveChat(chatA)
+    await store.saveChat(chat({id: 'chat-b', name: 'B', createdAt: 2}))
     await store.addMessage(message({author: 'me', seq: 1}))
     await store.addMessage(message({author: 'me', seq: 2, lamport: 2}))
     await store.addMessage(message({author: 'them', seq: 7, lamport: 3}))
@@ -72,22 +83,22 @@ describe('store', () => {
     expect(await store.listMessages('chat-b')).toHaveLength(1)
 
     // Rejoining picks the numbering back up, once; leaving again without writing keeps it.
-    expect((await store.saveChat(chat)).ownSeqFloor).toBe(2)
+    expect((await store.saveChat(chatA)).ownSeqFloor).toBe(2)
     await store.deleteChat('chat-a', 'me')
-    expect((await store.saveChat(chat)).ownSeqFloor).toBe(2)
+    expect((await store.saveChat(chatA)).ownSeqFloor).toBe(2)
     expect((await store.getChat('chat-a'))!.ownSeqFloor).toBe(2)
   })
 
   it('counts unread text from other people since the chat was last looked at', async () => {
     const store = await openStore(freshName())
-    const chat = await store.saveChat({id: 'chat-a', secret: new Uint8Array(32), name: 'A', createdAt: 100})
+    const saved = await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 100}))
     await store.addMessage(message({author: 'them', seq: 1, receivedAt: 150}))
     await store.addMessage(message({author: 'them', seq: 2, receivedAt: 250}))
-    await store.addMessage(message({author: 'them', seq: 3, receivedAt: 260, content: {type: 'profile', name: 'Them'}}))
+    await store.addMessage(message({author: 'them', seq: 3, receivedAt: 260, content: {type: 'profile', name: 'Them', dh: new Uint8Array(32)}}))
     await store.addMessage(message({author: 'me', seq: 1, receivedAt: 270}))
     await store.addMessage(message({chatId: 'chat-b', author: 'them', seq: 1, receivedAt: 280}))
 
-    expect(await store.unreadCount(chat, 'me')).toBe(2)
+    expect(await store.unreadCount(saved, 'me')).toBe(2)
 
     await store.markRead('chat-a', 200)
     expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(1)

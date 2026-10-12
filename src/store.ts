@@ -3,9 +3,14 @@ import type {Message} from './envelope'
 import type {IdentitySecrets} from './identity'
 
 export type ChatRecord = {
-  /** The chat's room ID, derived from its secret. */
+  /** The chat's room ID, derived from its secret and context. */
   id: string
+  kind: 'group' | 'dm'
   secret: Uint8Array
+  /** What anchors the chat: the founder's signing key for a group, both members' keys for a direct chat. */
+  context: Uint8Array
+  /** Our certificates, from the founder down to us. Empty for the founder and in direct chats. */
+  chain: Uint8Array[]
   name: string
   createdAt: number
   /** When this chat was last looked at; messages received after it count as unread. */
@@ -39,7 +44,7 @@ interface Schema extends DBSchema {
 export type Store = ReturnType<typeof wrap>
 
 export async function openStore(name = 'snrdlr') {
-  const db = await openDB<Schema>(name, 3, {
+  const db = await openDB<Schema>(name, 4, {
     upgrade(db, oldVersion, _newVersion, upgrade) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
@@ -49,6 +54,11 @@ export async function openStore(name = 'snrdlr') {
       }
       if (oldVersion < 2) db.createObjectStore('left')
       if (oldVersion < 3) upgrade.objectStore('messages').createIndex('received', ['chatId', 'receivedAt'])
+      // Version 4 changed how chats are keyed and who may join them. Chats from before cannot be opened,
+      // so they are dropped; the identity is kept.
+      if (oldVersion > 0 && oldVersion < 4) {
+        for (const store of ['chats', 'messages', 'left'] as const) void upgrade.objectStore(store).clear()
+      }
     }
   })
   return wrap(db)
@@ -88,6 +98,10 @@ function wrap(db: IDBPDatabase<Schema>) {
       await tx.done
     },
 
+    /** Replaces a stored message's decoded content, once a newer app version can read it. */
+    async updateContent(message: MessageRecord): Promise<void> {
+      await db.put('messages', message)
+    },
     /** Records that the chat has been looked at up to `at`. */
     async markRead(id: string, at: number): Promise<void> {
       const tx = db.transaction('chats', 'readwrite')
