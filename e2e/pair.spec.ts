@@ -372,6 +372,11 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await send(cindy, 'hello both')
   await expect(anne.locator('.theirs', {hasText: 'hello both'})).toBeVisible()
   await expect(bob.locator('.theirs', {hasText: 'hello both'})).toBeVisible()
+  // Bob was let in through the direct chat, so nothing in the group's log records it except his own
+  // "joined" message. Cindy accepts him as a member from the certificate that message carries.
+  await send(bob, 'hello cindy')
+  await expect(cindy.locator('.theirs', {hasText: 'hello cindy'})).toBeVisible()
+  await expect(cindy.getByText('Bob joined · invited by Anne')).toBeVisible()
   // The group starts empty: the direct chat's history stays where it was.
   await expect(cindy.getByText('private note')).toHaveCount(0)
   await expect(bob.getByText('private note')).toHaveCount(0)

@@ -62,7 +62,8 @@ export function issueCert(
 
 /** Decodes a certificate and checks its signature for this chat. Throws if it is malformed or not genuine. */
 export function openCert(chatId: string, bytes: Uint8Array): Cert {
-  const raw = decode(bytes) as Record<string, unknown> | null
+  // Decoded from a copy: the decoder leaves a property behind on the array it is given.
+  const raw = decode(new Uint8Array(bytes)) as Record<string, unknown> | null
   if (typeof raw !== 'object' || raw === null) throw new Error('malformed certificate')
   const {k, d, i, t, s} = raw
   if (!isKey(k) || !isKey(d) || !isKey(i)) throw new Error('malformed certificate keys')
@@ -99,6 +100,53 @@ export function isMember(chatId: string, policy: Policy, key: Uint8Array, chain:
   if (policy.kind === 'dm') return chain.length === 0 && policy.members.some(member => bytesEqual(member, key))
   return verifyChain(chatId, policy.founder, chain, key)
 }
+
+const MAX_WAITING_CERTS = 256
+
+/**
+ * Who is known to belong to a chat, built up from certificates as they are seen. A certificate proves
+ * itself, so it counts wherever it was found; one whose issuer is not yet known waits until they are.
+ */
+export function makeRoster(chatId: string, policy: Policy) {
+  // Member ID to how many certificates separate them from the founder.
+  const depth = new Map<string, number>()
+  let waiting: Cert[] = []
+  if (policy.kind === 'dm') for (const member of policy.members) depth.set(memberId(member), 0)
+  else depth.set(memberId(policy.founder), 0)
+
+  const admit = (cert: Cert): boolean => {
+    const issuerDepth = depth.get(memberId(cert.issuer))
+    if (issuerDepth === undefined || issuerDepth >= MAX_CHAIN_LENGTH) return false
+    const subject = memberId(cert.subject)
+    if (!depth.has(subject)) depth.set(subject, issuerDepth + 1)
+    return true
+  }
+
+  return {
+    has: (id: string) => depth.has(id),
+    /** Takes in certificates, ignoring any that are not genuine. Returns true if someone new is now a member. */
+    add(certs: Uint8Array[]): boolean {
+      if (policy.kind === 'dm') return false
+      const before = depth.size
+      for (const bytes of certs) {
+        try {
+          waiting.push(openCert(chatId, bytes))
+        } catch {
+          // Not a valid certificate for this chat.
+        }
+      }
+      for (let progressed = true; progressed; ) {
+        const stillWaiting = waiting.filter(cert => !admit(cert))
+        progressed = stillWaiting.length < waiting.length
+        waiting = stillWaiting
+      }
+      waiting = waiting.slice(-MAX_WAITING_CERTS)
+      return depth.size > before
+    }
+  }
+}
+
+export type Roster = ReturnType<typeof makeRoster>
 
 const proofBytes = (chatId: string, binding: Uint8Array) => concatBytes(utf8('snrdlr/v1/auth\0'), utf8(chatId), binding)
 

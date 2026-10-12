@@ -16,8 +16,8 @@ const NONCE_BYTES = 12
 
 export type Content =
   | {type: 'text'; text: string}
-  /** A member's display name and X25519 key, posted when they join. */
-  | {type: 'profile'; name: string; dh: Uint8Array}
+  /** A member's display name and X25519 key, posted when they join, with the certificates that show they belong. */
+  | {type: 'profile'; name: string; dh: Uint8Array; chain?: Uint8Array[]}
   /** A membership certificate, posted by the member who admitted someone. */
   | {type: 'member-cert'; cert: Uint8Array}
   /** In a direct chat: the sender has started a group that includes the recipient, and this lets them in. */
@@ -26,6 +26,12 @@ export type Content =
   | {type: 'unknown'; kind: string}
 
 const MAX_CERT_BYTES = 512
+const MAX_CHAIN_LENGTH = 32
+
+const isChain = (value: unknown): value is Uint8Array[] =>
+  Array.isArray(value) &&
+  value.length <= MAX_CHAIN_LENGTH &&
+  value.every(cert => cert instanceof Uint8Array && cert.length > 0 && cert.length <= MAX_CERT_BYTES)
 
 export type Message = {
   /** Member ID of the author. */
@@ -64,7 +70,7 @@ function encodeContent(content: Content): [string, unknown] {
     case 'text':
       return ['text', content.text]
     case 'profile':
-      return ['profile', {name: content.name, dh: content.dh}]
+      return ['profile', {name: content.name, dh: content.dh, ...(content.chain?.length ? {c: content.chain} : {})}]
     case 'member-cert':
       return ['member-cert', content.cert]
     case 'group-invite':
@@ -80,10 +86,11 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {type, text: body}
   }
   if (type === 'profile') {
-    const {name, dh} = (body ?? {}) as {name?: unknown; dh?: unknown}
+    const {name, dh, c} = (body ?? {}) as {name?: unknown; dh?: unknown; c?: unknown}
     if (typeof name !== 'string' || name.length === 0 || name.length > MAX_NAME_LENGTH) throw new Error('bad profile body')
     if (!(dh instanceof Uint8Array) || dh.length !== 32) throw new Error('bad profile body')
-    return {type, name, dh: new Uint8Array(dh)}
+    if (c !== undefined && !isChain(c)) throw new Error('bad profile body')
+    return {type, name, dh: new Uint8Array(dh), ...(c?.length ? {chain: c.map(cert => new Uint8Array(cert))} : {})}
   }
   if (type === 'member-cert') {
     if (!(body instanceof Uint8Array) || body.length === 0 || body.length > MAX_CERT_BYTES) throw new Error('bad certificate body')
@@ -94,9 +101,7 @@ function decodeContent(type: unknown, body: unknown): Content {
     const isBytes = (value: unknown, length: number) => value instanceof Uint8Array && value.length === length
     if (!isBytes(g, 32) || !isBytes(f, 32)) throw new Error('bad group invite body')
     if (typeof n !== 'string' || n.length === 0 || n.length > MAX_NAME_LENGTH) throw new Error('bad group invite body')
-    if (!Array.isArray(c) || c.length > 32 || !c.every(cert => cert instanceof Uint8Array && cert.length <= MAX_CERT_BYTES)) {
-      throw new Error('bad group invite body')
-    }
+    if (!isChain(c)) throw new Error('bad group invite body')
     return {
       type,
       secret: new Uint8Array(g as Uint8Array),

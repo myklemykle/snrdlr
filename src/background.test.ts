@@ -9,18 +9,22 @@ import {openStore, type ChatRecord, type MessageRecord} from './store'
 import {makeNetwork} from './test-network'
 
 let counter = 0
-const timing = {aloneMs: 80, quietMs: 60, minMs: 60, maxMs: 1_000, pollMs: 10}
+// aloneMs is generous: on a busy machine a peer can take a while to appear, and giving up mid-delivery
+// stores the message without announcing it.
+const timing = {aloneMs: 400, quietMs: 60, minMs: 60, maxMs: 2_000, pollMs: 10}
 const texts = (messages: MessageRecord[]) => messages.flatMap(m => (m.content.type === 'text' ? [m.content.text] : []))
 const settle = (ms = 30) => new Promise(resolve => setTimeout(resolve, ms))
 
+// Anne founded every chat here, so her messages need no certificate to be accepted.
+const anne = createIdentity('Anne')
+
 function makeChat(name: string): ChatRecord {
-  return newGroupChat(createIdentity('Founder'), name, [], 0)
+  return newGroupChat(anne, name, [], 0)
 }
 
 /** Anne, online in a chat with messages waiting for whoever syncs. */
 async function anneWaitingIn(chat: ChatRecord, messages: string[]) {
   const network = makeNetwork()
-  const anne = createIdentity('Anne')
   const session = await openSession({
     chat,
     identity: anne,

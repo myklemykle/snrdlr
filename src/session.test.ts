@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto'
 import {describe, expect, it, vi} from 'vitest'
 import {createIdentity, type Identity} from './identity'
-import {newGroupChat} from './chats'
+import {chatKeys, newGroupChat} from './chats'
+import {importMsgKey, sealEnvelope} from './envelope'
+import {issueCert} from './membership'
 import {openSession, versionVector, type ConnectionStatus} from './session'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 import {makeNetwork} from './test-network'
@@ -10,11 +12,23 @@ let counter = 0
 
 type Network = ReturnType<typeof makeNetwork>
 
+const founders = new Map<string, Identity>()
+
 function makeChat(): ChatRecord {
-  return newGroupChat(createIdentity('Founder'), 'Test', [], 0)
+  const founder = createIdentity('Founder')
+  const chat = newGroupChat(founder, 'Test', [], 0)
+  founders.set(chat.id, founder)
+  return chat
 }
 
-async function join(network: Network, chat: ChatRecord, identity: Identity, store?: Store) {
+/** The chat as held by someone the founder admitted. */
+const admitted = (chat: ChatRecord, identity: Identity): ChatRecord => ({
+  ...chat,
+  chain: [issueCert(chat.id, founders.get(chat.id)!, identity, 0)]
+})
+
+async function join(network: Network, shared: ChatRecord, identity: Identity, store?: Store, asHeld?: ChatRecord) {
+  const chat = asHeld ?? admitted(shared, identity)
   const state = {messages: [] as MessageRecord[], peers: [] as string[], statuses: [] as ConnectionStatus[], errors: [] as string[]}
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
@@ -451,5 +465,114 @@ describe('session', () => {
 
     expect(network.sent.filter(entry => entry.to === 'mallory')).toHaveLength(0)
     expect(bob.view.length).toBeGreaterThan(0)
+  })
+
+  it('refuses messages from someone who holds the chat secret but was never invited', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    // Eve has a copy of the chat's secret and nothing else. This network has no connection check, so
+    // what she sends arrives the way a relay would deliver it.
+    const eve = await join(network, chat, createIdentity('Eve'), undefined, {...chat, chain: []})
+    await settle()
+
+    await eve.session.sendText('let me in')
+    await anne.session.sendText('members only')
+    await settle()
+
+    expect(texts(anne.view)).toEqual(['members only'])
+    expect(names(anne.view)).not.toContain('Eve')
+    expect((await anne.store.listMessages(chat.id)).some(m => m.author === eve.identity.id)).toBe(false)
+
+    // Nor does Anne pass Eve's messages on to a member who arrives later.
+    await eve.session.close()
+    network.sent.length = 0
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+    expect(texts(bob.view)).toEqual(['members only'])
+    expect(bob.view.some(m => m.author === eve.identity.id)).toBe(false)
+  })
+
+  it('refuses someone who certifies themselves', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const eveIdentity = createIdentity('Eve')
+    const selfMade = {...chat, chain: [issueCert(chat.id, eveIdentity, eveIdentity, 0)]}
+    const eve = await join(network, chat, eveIdentity, undefined, selfMade)
+    await settle()
+
+    await eve.session.sendText('I vouch for myself')
+    await settle()
+
+    expect(anne.view.some(m => m.author === eveIdentity.id)).toBe(false)
+  })
+
+  it('accepts a member admitted by another member, not only by the founder', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bobIdentity = createIdentity('Bob')
+    const bobChat = admitted(chat, bobIdentity)
+    const carolIdentity = createIdentity('Carol')
+    const carolChat = {...chat, chain: [...bobChat.chain, issueCert(chat.id, bobIdentity, carolIdentity, 0)]}
+    // Bob is not in the room: Carol's own "joined" message has to carry the whole chain.
+    const carol = await join(network, chat, carolIdentity, undefined, carolChat)
+    await settle()
+
+    await carol.session.sendText('bob sent me')
+    await settle()
+
+    expect(texts(anne.view)).toEqual(['bob sent me'])
+    expect(names(anne.view)).toContain('Carol')
+  })
+
+  it('holds a message that arrives before its author is known, and shows it once they are', async () => {
+    const chat = makeChat()
+    const elsewhere = makeNetwork()
+    const carol = await join(elsewhere, chat, createIdentity('Carol'))
+    await carol.session.sendText('early')
+    const [joined, early] = elsewhere.sent.map(entry => entry.envelope)
+
+    const network = makeNetwork()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    await settle()
+    network.inject(anne.identity.id, early)
+    await settle()
+    expect(texts(anne.view)).toEqual([])
+    expect(await anne.store.listMessages(chat.id)).toHaveLength(1)
+
+    network.inject(anne.identity.id, joined)
+    await settle()
+    expect(texts(anne.view)).toEqual(['early'])
+    expect(names(anne.view)).toContain('Carol')
+  })
+
+  it('posts its joined message again, with certificates, if an older version posted it without', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const bobIdentity = createIdentity('Bob')
+    const bobChat = admitted(chat, bobIdentity)
+
+    // As the previous version of the app left it: a profile with no certificates.
+    const bobStore = await openStore(`session-${counter++}`)
+    const context = {chatId: chat.id, msgKey: await importMsgKey(chatKeys(chat).msgKey)}
+    const old = {seq: 1, lamport: 1, sentAt: 1, content: {type: 'profile', name: 'Bob', dh: bobIdentity.dhPublic}} as const
+    const envelope = await sealEnvelope(context, bobIdentity, old)
+    await bobStore.addMessage({...old, author: bobIdentity.id, chatId: chat.id, receivedAt: 1, envelope})
+
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bob = await join(network, chat, bobIdentity, bobStore, bobChat)
+    await settle()
+    await bob.session.sendText('still here')
+    await settle()
+
+    expect(texts(anne.view)).toEqual(['still here'])
+    expect(bob.view.filter(m => m.author === bobIdentity.id && m.content.type === 'profile')).toHaveLength(2)
+
+    // Once is enough: reopening does not post a third.
+    await bob.session.close()
+    const again = await join(makeNetwork(), chat, bobIdentity, bobStore, bobChat)
+    expect(again.view.filter(m => m.author === bobIdentity.id && m.content.type === 'profile')).toHaveLength(2)
   })
 })

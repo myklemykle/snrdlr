@@ -184,15 +184,28 @@ export function ChatScreen(props: {
   const invitedBy = useMemo(() => {
     const found = new Map<string, string>()
     for (const message of messages ?? []) {
-      if (message.content.type !== 'member-cert') continue
+      const {content} = message
+      const bytes = content.type === 'member-cert' ? content.cert : content.type === 'profile' ? content.chain?.at(-1) : undefined
+      if (!bytes) continue
       try {
-        const cert = openCert(chat.id, message.content.cert)
+        const cert = openCert(chat.id, bytes)
         found.set(memberId(cert.subject), memberId(cert.issuer))
       } catch {
         // Not a valid certificate for this chat; ignore it.
       }
     }
     return found
+  }, [messages])
+  // A member can post their profile more than once; only the first is shown as joining.
+  const firstProfiles = useMemo(() => {
+    const seen = new Set<string>()
+    const first = new Set<MessageRecord>()
+    for (const message of messages ?? []) {
+      if (message.content.type !== 'profile' || seen.has(message.author)) continue
+      seen.add(message.author)
+      first.add(message)
+    }
+    return first
   }, [messages])
   const founderId = chat.kind === 'group' ? memberId(chat.context) : null
 
@@ -306,7 +319,7 @@ export function ChatScreen(props: {
             const inviter = invitedBy.get(message.author)
             return [
               separator,
-              !mine && (
+              !mine && firstProfiles.has(message) && (
                 <li key={messageKey(message)} class="event">
                   {message.author === founderId
                     ? `${message.content.name} started this chat`

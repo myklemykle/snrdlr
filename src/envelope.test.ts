@@ -28,6 +28,9 @@ describe('envelope', () => {
     const profile = {...hello, seq: 2, content: {type: 'profile', name: 'Anne', dh: anne.dhPublic}} as const
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, profile))).toEqual({...profile, author: anne.id})
 
+    const proven = {...profile, content: {...profile.content, chain: [new Uint8Array([1, 2]), new Uint8Array([3])]}}
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, proven))).toEqual({...proven, author: anne.id})
+
     const cert = {...hello, seq: 3, content: {type: 'member-cert', cert: new Uint8Array([1, 2, 3])}} as const
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, cert))).toEqual({...cert, author: anne.id})
 
@@ -125,6 +128,9 @@ describe('envelope', () => {
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'text', text: 'x'.repeat(4001)}}))).rejects.toThrow(/text/)
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: '', dh: anne.dhPublic}}))).rejects.toThrow(/profile/)
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: 'A', dh: new Uint8Array(5)}}))).rejects.toThrow(/profile/)
+    const longChain = Array.from({length: 33}, () => new Uint8Array([1]))
+    await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: 'A', dh: anne.dhPublic, chain: longChain}}))).rejects.toThrow(/profile/)
+    await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: 'A', dh: anne.dhPublic, chain: [new Uint8Array(600)]}}))).rejects.toThrow(/profile/)
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'member-cert', cert: new Uint8Array(600)}}))).rejects.toThrow(/certificate/)
     await expect(seal({...hello, content: {type: 'unknown', kind: 'reply'}})).rejects.toThrow(/unknown/)
     await expect(openEnvelope(chat, new Uint8Array(encode('junk')))).rejects.toThrow()

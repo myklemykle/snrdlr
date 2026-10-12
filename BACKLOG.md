@@ -48,7 +48,7 @@ Wanted after Phase 4. The proposal doc lists file transfer as a non-goal for v1,
 
 - A media message is a small signed message holding a reference: the file's hash, size, type, its own encryption key and a tiny thumbnail. The file is fetched separately, on demand, from any member who has it.
 - Files get their own table in storage, and their own fetch-by-hash request next to sync.
-- Depends on "keep message types the app does not recognise" (going into Phase 4), so older app versions do not lose the messages.
+- Older app versions keep message types they do not recognise, so they will not lose these messages.
 
 To settle when building it:
 
@@ -104,7 +104,7 @@ Cheapest thing to do early: settle the custom domain before there are users to s
 
 ## Engineering follow-ups
 
-- **Check membership of message authors, not only of connections.** A message is accepted if its signature is valid, whoever its author is. Non-members cannot deliver anything today because members ignore their connections, but once a bot relays stored messages (Phase 5) the log itself should refuse authors without a certificate.
+- **A relay holding a non-member's messages keeps offering them.** Phones refuse a message whose author has no certificate, but do not tell the sender, so it is offered again on every sync round. Only a blind bot could hold such messages. Costs bandwidth only.
 - **Removing a member.** Still impossible: a member keeps the chat's secret and their certificate. Needs key rotation.
 - **An uninvited device sees itself as connected.** Someone holding a stolen copy of a chat can verify the real members, so their own screen says "Connected", although the members ignore them and send them nothing.
 - **Direct chat placeholder names.** If someone scans a "chat with me" code before choosing a name, the chat is called "Direct chat" until it is next opened or synced.
@@ -116,14 +116,9 @@ Cheapest thing to do early: settle the custom domain before there are users to s
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
-- **Unknown message types.** Today an unrecognised type is dropped. Decide whether to store it for later display once the app is updated.
-- **Remote wipe / kill switch.** Whoever publishes the site can ship a version that deletes the identity, keys and chats on each device the next time it opens the app. Decide whether to build this deliberately (a "this app has shut down" release, or a wipe for a lost phone) and how it behaves once the app is installable:
-  - Today every launch loads from the site, so a wipe release takes effect at next open. It cannot reach a device that never opens the app, and cannot remove a Home Screen icon.
-  - An installed app (Phase 3) starts from its own cached copy and updates in the background, so a wipe lands a launch or two later unless the update step is written to take over at once. Unpublishing the site probably leaves installed copies running from cache; test this.
-  - With push (Phase 6), a push message could trigger the wipe on devices that have not opened the app.
-- **Protect the publishing account.** The same power in the wrong hands steals keys instead of wiping them: anyone who can publish to the site's address can read everything stored under it. Before there are users: two-factor sign-in on the GitHub account, no other accounts with push access, branch protection on `main`, and never give up the account name the address hangs from (a new owner of the name could publish at the old address).
 - **Custom domain.** Keys and history are tied to `myklemykle.github.io`; moving later strands existing installs.
-- **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the certificate check.
+- **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the connection check. It cannot check authors itself, since it cannot read certificates; members do that when they receive what it stored.
+- **Stay connected on desktop.** A mode for desktop browsers that keeps every chat connected while the tab is open, so one awake computer passes messages between members who are never online together. Any member already relays for the chat on screen; this extends it to all of them. Comes before the blind bot. Check how browsers throttle or discard a background tab (Chrome's Memory Saver, timers while no peer is connected), and ask for persistent storage.
 
 ## Testing still owed
 

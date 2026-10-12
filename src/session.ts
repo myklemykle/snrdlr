@@ -3,10 +3,15 @@
 // Sync: whenever a peer connects (and every so often after), each side sends a version vector saying how
 // much of every author's log it holds, and the other replies with the envelopes it is missing. Envelopes
 // are signed by their authors, so any member can pass on anyone's messages.
-import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content} from './envelope'
+//
+// Authors: a message is only kept if its author is known to be a member. Members show that through the
+// certificates in their own "joined" message, so a message can arrive before the proof that its author
+// belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
+import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type Message} from './envelope'
 import type {Identity} from './identity'
-import {chatKeys} from './chats'
+import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
+import {makeRoster} from './membership'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
 
@@ -60,6 +65,8 @@ export type Session = {
 const MAX_SEQ_RETRIES = 5
 const MAX_VECTOR_AUTHORS = 1024
 const RESYNC_INTERVAL_MS = 30_000
+// Messages held while their author is not yet known to be a member. Anything dropped is offered again by sync.
+const MAX_HELD = 256
 // With nobody connected there is no one to ping, so after this long away assume the connection is dead.
 const STALE_AFTER_MS = 30_000
 // After joining, how long to say "looking for others" before concluding nobody is there.
@@ -118,6 +125,17 @@ export async function openSession(options: {
       await store.updateContent(messages[index])
     }
   }
+  const roster = makeRoster(chat.id, policyOf(chat))
+  roster.add(chat.chain)
+  /** Takes in any certificates a message carries. Returns true if that made someone new a member. */
+  const learnFrom = (content: Content) => {
+    if (content.type === 'member-cert') return roster.add([content.cert])
+    if (content.type === 'profile' && content.chain) return roster.add(content.chain)
+    return false
+  }
+  for (const stored of messages) learnFrom(stored.content)
+  let held: {message: Message; envelope: Uint8Array}[] = []
+
   let wire: Wire | null = null
   let generation = 0
   let peers: string[] = []
@@ -177,11 +195,22 @@ export async function openSession(options: {
     throw new Error('could not allocate a sequence number')
   }
 
+  async function keep(message: Message, envelope: Uint8Array) {
+    const record: MessageRecord = {...message, chatId: chat.id, receivedAt: Date.now(), envelope}
+    if ((await store.addMessage(record)) && !closed) insert(record)
+  }
+
   async function receive(envelope: Uint8Array) {
     try {
       const message = await openEnvelope(context, envelope)
-      const record: MessageRecord = {...message, chatId: chat.id, receivedAt: Date.now(), envelope}
-      if ((await store.addMessage(record)) && !closed) insert(record)
+      // A certificate proves itself, so it counts even if the message carrying it cannot be kept yet.
+      const someoneNew = learnFrom(message.content)
+      if (roster.has(message.author)) await keep(message, envelope)
+      else held = [...held, {message, envelope}].slice(-MAX_HELD)
+      if (!someoneNew) return
+      const ready = held.filter(entry => roster.has(entry.message.author))
+      held = held.filter(entry => !roster.has(entry.message.author))
+      for (const entry of ready) await keep(entry.message, entry.envelope)
     } catch (error) {
       console.warn('dropped a message:', error instanceof Error ? error.message : error)
     }
@@ -259,8 +288,14 @@ export async function openSession(options: {
     setStatus('idle')
     handlers.onError("Couldn't connect to this chat.")
   })
-  if (!messages.some(message => message.author === identity.id && message.content.type === 'profile')) {
-    await post({type: 'profile', name: identity.name, dh: identity.dhPublic})
+  // Our "joined" message carries our certificates, so anyone who gets our messages can check we belong.
+  // Posted again if an earlier one, from an older version of the app, went out without them.
+  const introduced = messages.some(
+    ({author, content}) =>
+      author === identity.id && content.type === 'profile' && (chat.chain.length === 0 || (content.chain?.length ?? 0) > 0)
+  )
+  if (!introduced) {
+    await post({type: 'profile', name: identity.name, dh: identity.dhPublic, ...(chat.chain.length > 0 ? {chain: chat.chain} : {})})
   }
 
   // Catches anything missed in between, for example when not every pair of members is directly connected.
