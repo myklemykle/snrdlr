@@ -13,6 +13,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Unique chat names. The default name "Chat" gets duplicated in the chat list; pick a distinct default (for example "Chat 2", or one based on the date or members) and warn on a duplicate.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Show when the app is re-establishing communication.** A small indicator in the chat header while it checks its connections or rejoins after coming back, since that takes a moment.
+- **Chat name in the page title**, so a chat can be found in browser history and tabs. Note that this puts chat names into the browser's history, which some people sync to Google or Apple.
 - **Leave a chat.** A "leave" button on each entry in the chat list that forgets the chat: its secret and its history on this device. Other members keep their copies and are not told you left.
 - **Larger emoji** in chat messages, especially messages that are only emoji.
 - **Message context menu** (hover on desktop, press and hold on touch):
