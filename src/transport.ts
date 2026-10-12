@@ -2,9 +2,11 @@ import {joinRoom, type TurnServerConfig} from 'trystero/nostr'
 import {MAX_ENVELOPE_BYTES} from './envelope'
 import type {ChatKeys} from './keys'
 import {routeFromStats} from './route'
-import type {Wire, WireHandlers} from './session'
+import type {VersionVector, Wire, WireHandlers} from './session'
 
 export const APP_ID = 'snrdlr-v1'
+const MAX_SYNC_BYTES = 128 * 1024
+const PING_TIMEOUT_MS = 4000
 
 // Set for local testing against scripts/local-relay.mjs; unset, Trystero picks from its public relay list.
 const relayUrls = import.meta.env.VITE_NOSTR_RELAYS?.split(',').map(url => url.trim()).filter(Boolean)
@@ -37,6 +39,11 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     }
   })
 
+  const syncs = room.makeAction<VersionVector>('sync', {
+    onReceive: ({byteLength}) => byteLength <= MAX_SYNC_BYTES,
+    onMessage: (data, {peerId}) => handlers.onSync(data, peerId)
+  })
+
   room.onPeerJoin = peerId => {
     peers.add(peerId)
     handlers.onPeersChange([...peers])
@@ -48,6 +55,12 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
 
   return {
     send: (envelope, peerId) => envelopes.send(envelope, peerId ? {target: peerId} : undefined),
+    sendSync: (have, peerId) => syncs.send(have, peerId ? {target: peerId} : undefined),
+    ping: peerId =>
+      Promise.race([
+        room.ping(peerId).then(() => undefined),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('ping timed out')), PING_TIMEOUT_MS))
+      ]),
     routes: async () => {
       const connections = Object.entries(room.getPeers()).filter(([peerId]) => peers.has(peerId))
       const routes = await Promise.all(

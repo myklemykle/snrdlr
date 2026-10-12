@@ -2,7 +2,7 @@
 
 An experimental chat app where the only way to add someone is to meet them: one person shows a QR code, the other scans it, and they chat peer to peer over WebRTC. No account and no install.
 
-**Status: Phase 2, plus live invites.** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text, and keep their chats and history on the device. Messages sent while the other person is away are not delivered yet (sync is Phase 4), and nobody has reviewed the cryptography. Do not rely on it for anything private.
+**Status: Phase 2, live invites, and the first half of Phase 4 (sync and reconnect).** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text, and keep their chats and history on the device. Messages written while someone is away reach them the next time they are online together with any member who has them. Nobody has reviewed the cryptography. Do not rely on it for anything private.
 
 ## How it works
 
@@ -11,6 +11,7 @@ An experimental chat app where the only way to add someone is to meet them: one 
 - Everyone derives a room ID, a signaling password and a message key from the secret with HKDF-SHA256.
 - [Trystero](https://github.com/dmotz/trystero) finds the other peers through public Nostr relays, which see only a hash of the room ID and password-encrypted connection setup. Messages then travel over WebRTC data channels, directly where possible and through a TURN relay otherwise.
 - Each device makes an Ed25519 identity on first launch. Every message is signed by its author, then encrypted with the chat's message key (AES-256-GCM), so other members cannot forge or alter it.
+- When members connect, they compare how much of each author's log they hold and send each other what is missing, so history spreads through whoever is online. When the app returns from the background it checks its connections and rejoins if they have died.
 - Identity, chats and messages are stored in IndexedDB on the device. There is no account and no recovery.
 
 ## Develop

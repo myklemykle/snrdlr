@@ -40,13 +40,12 @@ export function ChatScreen(props: {
     let cancelled = false
     let opened: Session | null = null
     void (async () => {
-      const turnServers = await fetchTurnServers()
-      if (cancelled) return
       opened = await openSession({
         chat,
         identity,
         store,
-        connect: (keys, handlers) => joinChat(keys, handlers, turnServers),
+        // Fetched on every (re)connect, so long-open chats never reuse expired TURN credentials.
+        connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers()),
         handlers: {
           onMessages: next => !cancelled && setMessages(next),
           onPeersChange: peerIds => {
@@ -66,6 +65,28 @@ export function ChatScreen(props: {
       void opened?.close()
     }
   }, [chat.id])
+
+  // Phones drop connections when the app is in the background, so check on them when it comes back.
+  useEffect(() => {
+    let hiddenAt: number | null = document.hidden ? Date.now() : null
+    const onVisibility = () => {
+      if (document.hidden) hiddenAt = Date.now()
+      else {
+        void session.current?.resume(hiddenAt === null ? 0 : Date.now() - hiddenAt)
+        hiddenAt = null
+      }
+    }
+    const onPageShow = (event: PageTransitionEvent) => event.persisted && void session.current?.resume(Infinity)
+    const onOnline = () => void session.current?.resume(Infinity)
+    document.addEventListener('visibilitychange', onVisibility)
+    addEventListener('pageshow', onPageShow)
+    addEventListener('online', onOnline)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      removeEventListener('pageshow', onPageShow)
+      removeEventListener('online', onOnline)
+    }
+  }, [])
 
   // While an invite is showing, wait in its room and let in everyone who arrives. Closing it forgets
   // the token, so the code stops working.
@@ -196,12 +217,12 @@ export function ChatScreen(props: {
         <input
           value={draft}
           onInput={event => setDraft(event.currentTarget.value)}
-          placeholder={connected ? 'Message' : 'You can send once someone is here'}
+          placeholder={connected ? 'Message' : 'Message (delivered when you are both here)'}
           maxLength={MAX_TEXT_LENGTH}
           aria-label="Message"
           autocomplete="off"
         />
-        <button type="submit" disabled={!connected || !draft.trim()}>
+        <button type="submit" disabled={!messages || !draft.trim()}>
           Send
         </button>
       </form>

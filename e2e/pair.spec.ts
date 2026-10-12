@@ -68,6 +68,29 @@ test('two people pair by invite, chat, and keep their history across reloads', a
   await expect(anne.locator('.mine', {hasText: 'still here'})).toBeVisible()
 })
 
+test('messages written while the other person is away arrive when they return', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Catch up')
+
+  // Written before anyone else has joined.
+  await send(anne, 'first one here')
+
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(bob.locator('.theirs', {hasText: 'first one here'})).toContainText('Anne')
+
+  // Bob leaves the chat; Anne keeps writing; Bob also writes on his own from the chat screen later.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.status')).toHaveText(/Nobody else is here/, {timeout: 15_000})
+  await send(anne, 'while you were out')
+  await send(anne, 'and another')
+
+  await bob.getByRole('button', {name: /Catch up/}).click()
+  await expect(bob.locator('.theirs', {hasText: 'while you were out'})).toBeVisible({timeout: 15_000})
+  await expect(bob.locator('.theirs', {hasText: 'and another'})).toBeVisible()
+  await expect(bob.locator('.log li:not(.event)')).toHaveText(['Annefirst one here', 'Annewhile you were out', 'Anneand another'])
+})
+
 /** Starts a chat as a new person and returns the live invite link, which the QR code also encodes. */
 async function startChat(page: Page, name: string, chatName: string): Promise<string> {
   await page.goto('/')

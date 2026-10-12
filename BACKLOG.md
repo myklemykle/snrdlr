@@ -12,7 +12,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.
   - Unique chat names. The default name "Chat" gets duplicated in the chat list; pick a distinct default (for example "Chat 2", or one based on the date or members) and warn on a duplicate.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
-- **Leave a chat.** A "leave" button on each entry in the chat list that forgets the chat: its secret and its history on this device. Other members keep their copies, and until Phase 4 they are not told you left.
+- **Leave a chat.** A "leave" button on each entry in the chat list that forgets the chat: its secret and its history on this device. Other members keep their copies and are not told you left.
 - **Larger emoji** in chat messages, especially messages that are only emoji.
 - **Message context menu** (hover on desktop, press and hold on touch):
   - Reply. See "How reply would work" below.
@@ -29,6 +29,9 @@ This changes the message format, so it needs a rule for how older app versions t
 
 ## Engineering follow-ups
 
+- **Rest of Phase 4.** Invite certificates and handshake verification, DMs, and "add someone" starting a new group.
+- **Phase 3 (installable app, in-app scanner) is postponed** until just before push notifications, which are what make installing worthwhile on iOS.
+- **Sync sends duplicates in large groups.** A returning member asks every connected peer for what it lacks, and each of them answers. Fine for a handful of people; worth narrowing later.
 - **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
@@ -40,5 +43,6 @@ This changes the message format, so it needs a rule for how older app versions t
 
 ## Testing still owed
 
+- Reconnect after backgrounding on a real iPhone: lock the phone or switch apps for a minute, come back, and check the chat recovers and catches up without a reload.
 - Phase 1 and Phase 2 exit tests on Android.
 - History surviving on iOS over several days, in a Safari tab and installed to the Home Screen.
