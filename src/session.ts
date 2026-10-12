@@ -94,8 +94,6 @@ export async function openSession(options: {
   let peers: string[] = []
   let closed = false
   let reconnecting = false
-  /** What each connected peer has already been sent during this connection, so nothing is sent twice. */
-  const sentTo = new Map<string, Set<string>>()
   const publish = () => handlers.onMessages(messages)
 
   const insert = (record: MessageRecord) => {
@@ -115,7 +113,6 @@ export async function openSession(options: {
       const record: MessageRecord = {...message, author: identity.id, chatId: chat.id, receivedAt: message.sentAt, envelope}
       if (await store.addMessage(record)) {
         insert(record)
-        for (const peerId of peers) markSent(peerId, record)
         await wire?.send(envelope).catch(() => {})
         return
       }
@@ -136,20 +133,14 @@ export async function openSession(options: {
     }
   }
 
-  const keyOf = (message: MessageRecord) => `${message.author}:${message.seq}`
-  const markSent = (peerId: string, message: MessageRecord) => {
-    if (!sentTo.has(peerId)) sentTo.set(peerId, new Set())
-    sentTo.get(peerId)!.add(keyOf(message))
-  }
-
-  /** Sends a peer everything they say they lack. */
+  // Sends a peer everything they say they lack. Their vector is the only evidence of what they hold:
+  // a message that was sent to them earlier may have gone into a connection that had quietly died.
   async function answerSync(value: unknown, peerId: string, via: Wire) {
     const have = parseVector(value)
     if (!have) return
-    const missing = messages.filter(message => message.seq > (have[message.author] ?? 0) && !sentTo.get(peerId)?.has(keyOf(message)))
+    const missing = messages.filter(message => message.seq > (have[message.author] ?? 0))
     for (const message of missing) {
       if (wire !== via || !peers.includes(peerId)) return
-      markSent(peerId, message)
       try {
         await via.send(message.envelope, peerId)
       } catch {
@@ -174,7 +165,6 @@ export async function openSession(options: {
         void ready.then(via => {
           if (!live()) return
           const newcomers = peerIds.filter(peerId => !peers.includes(peerId))
-          for (const peerId of [...sentTo.keys()]) if (!peerIds.includes(peerId)) sentTo.delete(peerId)
           peers = peerIds
           handlers.onPeersChange(peerIds)
           for (const peerId of newcomers) void via.sendSync(versionVector(messages), peerId).catch(() => {})
@@ -196,7 +186,6 @@ export async function openSession(options: {
       wire = null
       generation++
       peers = []
-      sentTo.clear()
       handlers.onPeersChange([])
       await old?.leave().catch(() => {})
       if (!closed) await openWire()

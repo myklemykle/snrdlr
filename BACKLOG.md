@@ -12,6 +12,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.
   - Unique chat names. The default name "Chat" gets duplicated in the chat list; pick a distinct default (for example "Chat 2", or one based on the date or members) and warn on a duplicate.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
+- **Show when the app is re-establishing communication.** A small indicator in the chat header while it checks its connections or rejoins after coming back, since that takes a moment.
 - **Leave a chat.** A "leave" button on each entry in the chat list that forgets the chat: its secret and its history on this device. Other members keep their copies and are not told you left.
 - **Larger emoji** in chat messages, especially messages that are only emoji.
 - **Message context menu** (hover on desktop, press and hold on touch):
@@ -31,6 +32,7 @@ This changes the message format, so it needs a rule for how older app versions t
 
 - **Rest of Phase 4.** Invite certificates and handshake verification, DMs, and "add someone" starting a new group.
 - **Phase 3 (installable app, in-app scanner) is postponed** until just before push notifications, which are what make installing worthwhile on iOS.
+- **Sync resends around a permanent gap.** If one of an author's messages is held by nobody online, everything they wrote after it is offered again on each 30-second sync round. Rare, and only costs bandwidth; fix by having the vector list what is held beyond the gap.
 - **Sync sends duplicates in large groups.** A returning member asks every connected peer for what it lacks, and each of them answers. Fine for a handful of people; worth narrowing later.
 - **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.

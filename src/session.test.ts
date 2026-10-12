@@ -41,6 +41,8 @@ function makeNetwork() {
           },
           routes: async () => [],
           leave: async () => {
+            // A dead connection cannot say goodbye: the others still list this member until it rejoins.
+            if (dead.has(peerId)) return
             if (members.get(peerId) === handlers) members.delete(peerId)
             announce()
           }
@@ -283,6 +285,30 @@ describe('session', () => {
     expect(network.joins).toBe(joinsBefore + 1)
     expect(texts(bob.view)).toEqual(['sent while bob was in the background'])
     expect(bob.peers).toEqual([anne.identity.id])
+  })
+
+  it('resends what it thought it had delivered to a peer that silently dropped off and came back', async () => {
+    const now = vi.spyOn(Date, 'now')
+    let clock = 1_760_000_000_000
+    now.mockImplementation(() => clock)
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+
+    // Bob's phone sleeps. Anne's side still shows him connected, so her messages look delivered.
+    network.kill(bob.identity.id)
+    for (const text of ['one', 'two', 'three']) await anne.session.sendText(text)
+    await settle()
+    expect(anne.peers).toEqual([bob.identity.id])
+
+    clock += 60_000
+    await bob.session.resume(60_000)
+    await settle()
+
+    expect(texts(bob.view)).toEqual(['one', 'two', 'three'])
+    now.mockRestore()
   })
 
   it('leaves healthy connections alone when it comes back', async () => {
