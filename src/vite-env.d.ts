@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** When this build was made and from which commit. */
+declare const __BUILD__: string
+
 interface ImportMetaEnv {
   /** Origin of the TURN credential worker; TURN is skipped when unset. */
   readonly VITE_TURN_URL?: string

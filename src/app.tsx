@@ -404,6 +404,7 @@ function Home(props: {
         <button type="submit">Start a group</button>
       </form>
       <p class="note">To join someone else's group or chat with them, scan their code with your camera while they have it on screen.</p>
+      <p class="build">Version {__BUILD__}</p>
     </main>
   )
 }

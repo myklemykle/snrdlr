@@ -422,3 +422,10 @@ button:disabled {
   font-size: inherit;
   color: var(--fg);
 }
+
+.build {
+  margin-top: 2rem;
+  font-size: 0.75rem;
+  opacity: 0.55;
+  text-align: center;
+}

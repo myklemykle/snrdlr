@@ -384,6 +384,13 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await expect(bob.locator('.chats .open')).toHaveCount(2)
 })
 
+test('the home screen says which build is running', async ({browser}) => {
+  const anne = await newPerson(browser)
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await expect(anne.getByText(/^Version \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · [0-9a-f]{7,}$/)).toBeVisible()
+})
+
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {
   const page = await newPerson(browser)
   await page.goto('/#i=not-a-real-invite')
