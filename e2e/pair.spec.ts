@@ -190,8 +190,12 @@ test('the header shows connection progress, and emoji are shown larger', async (
   await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
 
   await send(anne, '🎉')
+  await send(anne, '🏕️🔥')
   await send(anne, 'see you there 👍🏽')
-  await expect(bob.locator('.theirs.jumbo .emoji')).toHaveText('🎉')
+  await expect(bob.locator('.theirs.solo .emoji')).toHaveText('🎉')
+  await expect(bob.locator('.theirs.jumbo .emoji')).toHaveText('🏕️🔥')
+  const fontSize = (selector: string) => bob.locator(selector).evaluate(element => parseFloat(getComputedStyle(element).fontSize))
+  expect(await fontSize('.solo .emoji')).toBeGreaterThan(await fontSize('.jumbo .emoji'))
   const mixed = bob.locator('.theirs:not(.jumbo)', {hasText: 'see you there'})
   await expect(mixed.locator('.emoji')).toHaveText('👍🏽')
   await expect(mixed).toContainText('see you there 👍🏽')

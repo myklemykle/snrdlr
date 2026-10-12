@@ -366,3 +366,9 @@ button:disabled {
   text-align: center;
   color: var(--muted);
 }
+
+.log .solo .emoji {
+  font-size: 4.5em;
+  line-height: 1.15;
+  vertical-align: baseline;
+}

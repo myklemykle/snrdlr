@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
-import {isJumboEmoji, splitEmoji} from './emoji'
+import {emojiSize, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
 import type {Identity} from './identity'
 import {createInvite, inviteToFragment, sealGrant, type Invite} from './invite'
@@ -227,8 +227,9 @@ export function ChatScreen(props: {
             )
           }
           const {text} = message.content
+          const size = emojiSize(text)
           return (
-            <li key={messageKey(message)} class={`${mine ? 'mine' : 'theirs'}${isJumboEmoji(text) ? ' jumbo' : ''}`}>
+            <li key={messageKey(message)} class={`${mine ? 'mine' : 'theirs'}${size ? ` ${size}` : ''}`}>
               {!mine && <span class="author">{nameOf(message.author)}</span>}
               {splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
             </li>

@@ -23,10 +23,16 @@ export function splitEmoji(text: string): Segment[] {
   return segments
 }
 
-/** True for a message that is nothing but a few emoji, which is shown larger still. */
-export function isJumboEmoji(text: string): boolean {
+/** How many emoji a message consists of, if it is nothing but emoji; otherwise 0. */
+export function emojiOnlyCount(text: string): number {
   const segments = splitEmoji(text)
-  if (segments.length === 0 || segments.some(segment => !segment.emoji && segment.text.trim() !== '')) return false
-  const count = [...new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(text.replace(/\s/g, ''))].length
-  return count <= MAX_JUMBO_EMOJI
+  if (segments.length === 0 || segments.some(segment => !segment.emoji && segment.text.trim() !== '')) return 0
+  return [...new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(text.replace(/\s/g, ''))].length
+}
+
+/** The extra size class for an emoji-only message: one emoji is largest, a few are large, many are normal. */
+export function emojiSize(text: string): 'solo' | 'jumbo' | null {
+  const count = emojiOnlyCount(text)
+  if (count === 1) return 'solo'
+  return count > 1 && count <= MAX_JUMBO_EMOJI ? 'jumbo' : null
 }

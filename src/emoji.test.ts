@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {isJumboEmoji, splitEmoji} from './emoji'
+import {emojiSize, splitEmoji} from './emoji'
 
 const emojiParts = (text: string) => splitEmoji(text).filter(segment => segment.emoji).map(segment => segment.text)
 
@@ -32,16 +32,18 @@ describe('splitEmoji', () => {
   })
 })
 
-describe('isJumboEmoji', () => {
-  it('is true for a few emoji and nothing else', () => {
-    expect(isJumboEmoji('🎉')).toBe(true)
-    expect(isJumboEmoji('👍🏽 👩‍👩‍👧 🇳🇴')).toBe(true)
+describe('emojiSize', () => {
+  it('singles out one emoji sent alone, however many parts it is made of', () => {
+    for (const text of ['🎉', ' 👍🏽 ', '👩‍👩‍👧', '🇳🇴', '🏳️‍🌈']) expect(emojiSize(text), text).toBe('solo')
   })
 
-  it('is false with any words, with many emoji, or when empty', () => {
-    expect(isJumboEmoji('ok 👍')).toBe(false)
-    expect(isJumboEmoji('🎉'.repeat(7))).toBe(false)
-    expect(isJumboEmoji('')).toBe(false)
-    expect(isJumboEmoji('hello')).toBe(false)
+  it('is jumbo for a few emoji and nothing else', () => {
+    expect(emojiSize('🎉🎉')).toBe('jumbo')
+    expect(emojiSize('👍🏽 👩‍👩‍👧 🇳🇴')).toBe('jumbo')
+    expect(emojiSize('🎉'.repeat(6))).toBe('jumbo')
+  })
+
+  it('is nothing special with any words, with many emoji, or when empty', () => {
+    for (const text of ['ok 👍', '🎉'.repeat(7), '', 'hello', '   ']) expect(emojiSize(text), text).toBeNull()
   })
 })
