@@ -2,7 +2,7 @@
 
 An experimental chat app where the only way to add someone is to meet them: one person shows a QR code, the other scans it, and they chat peer to peer over WebRTC. No account and no install.
 
-**Status: Phase 2, live invites, and the first half of Phase 4 (sync and reconnect).** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text, and keep their chats and history on the device. Messages written while someone is away reach them the next time they are online together with any member who has them. Nobody has reviewed the cryptography. Do not rely on it for anything private.
+**Status: Phase 2, live invites, and the first half of Phase 4 (sync and reconnect).** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text, and keep their chats and history on the device. Messages written while someone is away reach them the next time they are online together with any member who has them; chats that are not open catch up when the app is opened. Nobody has reviewed the cryptography. Do not rely on it for anything private.
 
 ## How it works
 

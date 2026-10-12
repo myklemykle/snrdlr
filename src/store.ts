@@ -8,6 +8,8 @@ export type ChatRecord = {
   secret: Uint8Array
   name: string
   createdAt: number
+  /** When this chat was last looked at; messages received after it count as unread. */
+  readAt?: number
   /** Set when rejoining a chat that was left: our earlier messages used sequence numbers up to here. */
   ownSeqFloor?: number
 }
@@ -25,7 +27,10 @@ interface Schema extends DBSchema {
   messages: {
     key: [chatId: string, author: string, seq: number]
     value: MessageRecord
-    indexes: {order: [chatId: string, lamport: number, author: string, seq: number]}
+    indexes: {
+      order: [chatId: string, lamport: number, author: string, seq: number]
+      received: [chatId: string, receivedAt: number]
+    }
   }
   /** Chats that were left: just enough to carry on our numbering if we are invited back. */
   left: {key: string; value: {ownSeq: number}}
@@ -34,8 +39,8 @@ interface Schema extends DBSchema {
 export type Store = ReturnType<typeof wrap>
 
 export async function openStore(name = 'snrdlr') {
-  const db = await openDB<Schema>(name, 2, {
-    upgrade(db, oldVersion) {
+  const db = await openDB<Schema>(name, 3, {
+    upgrade(db, oldVersion, _newVersion, upgrade) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
         db.createObjectStore('chats', {keyPath: 'id'})
@@ -43,6 +48,7 @@ export async function openStore(name = 'snrdlr') {
         messages.createIndex('order', ['chatId', 'lamport', 'author', 'seq'])
       }
       if (oldVersion < 2) db.createObjectStore('left')
+      if (oldVersion < 3) upgrade.objectStore('messages').createIndex('received', ['chatId', 'receivedAt'])
     }
   })
   return wrap(db)
@@ -80,6 +86,20 @@ function wrap(db: IDBPDatabase<Schema>) {
       await tx.objectStore('messages').delete(IDBKeyRange.bound([id], [id, []]))
       await tx.objectStore('chats').delete(id)
       await tx.done
+    },
+
+    /** Records that the chat has been looked at up to `at`. */
+    async markRead(id: string, at: number): Promise<void> {
+      const tx = db.transaction('chats', 'readwrite')
+      const chat = await tx.store.get(id)
+      if (chat && (chat.readAt ?? 0) < at) await tx.store.put({...chat, readAt: at})
+      await tx.done
+    },
+    /** How many text messages from other people have arrived since the chat was last looked at. */
+    async unreadCount(chat: ChatRecord, selfId: string): Promise<number> {
+      const since = IDBKeyRange.bound([chat.id, chat.readAt ?? chat.createdAt], [chat.id, Infinity], true)
+      const arrived = await db.getAllFromIndex('messages', 'received', since)
+      return arrived.filter(message => message.author !== selfId && message.content.type === 'text').length
     },
 
     /** A chat's messages in display order: by logical clock, then author. */

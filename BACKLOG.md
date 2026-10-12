@@ -62,6 +62,7 @@ To test on a real iPhone before choosing:
 
 ## Engineering follow-ups
 
+- **Keep the chat list fresh while it is on screen.** Chats that are not open only sync when the app is opened or returned to, so the unread counts do not change while you sit on the list.
 - **Rest of Phase 4.** Invite certificates and handshake verification, DMs, and "add someone" starting a new group.
 - **Phase 3 (installable app, in-app scanner) is postponed** until just before push notifications, which are what make installing worthwhile on iOS.
 - **Sync resends around a permanent gap.** If one of an author's messages is held by nobody online, everything they wrote after it is offered again on each 30-second sync round. Rare, and only costs bandwidth; fix by having the vector list what is held beyond the gap.
@@ -71,7 +72,6 @@ To test on a real iPhone before choosing:
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
 - **Unknown message types.** Today an unrecognised type is dropped. Decide whether to store it for later display once the app is updated.
-- **Run the browser test in CI.** It is hermetic now (local relay), so it could gate deploys.
 - **Custom domain.** Keys and history are tied to `myklemykle.github.io`; moving later strands existing installs.
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the certificate check.
 

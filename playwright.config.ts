@@ -7,7 +7,14 @@ const APP_PORT = 4173
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
-  use: {baseURL: `http://localhost:${APP_PORT}`},
+  // One worker: every test pairs browsers through the same local relay and port.
+  workers: 1,
+  retries: process.env.CI ? 1 : 0,
+  use: {
+    baseURL: `http://localhost:${APP_PORT}`,
+    // Without mDNS, two browsers on one machine can always find each other's local address, CI included.
+    launchOptions: {args: ['--disable-features=WebRtcHideLocalIpsWithMdns']}
+  },
   webServer: [
     {
       command: 'npm run relay',

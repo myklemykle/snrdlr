@@ -63,7 +63,7 @@ test('two people pair by invite, chat, and keep their history across reloads', a
   await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await send(anne, 'still here')
   await expect(bob.locator('.theirs', {hasText: 'still here'})).toBeVisible()
-  await expect(bob.locator('.log li:not(.event)')).toHaveText(['Annehello from anne', 'hello from bob', 'Annestill here'])
+  await expect(bob.locator('.log li:not(.event)')).toHaveText([/^Annehello from anne/, /^hello from bob/, /^Annestill here/])
 
   // The chat is listed on the home screen and reopens with its history.
   await anne.getByRole('button', {name: 'Back to chats'}).click()
@@ -91,7 +91,7 @@ test('messages written while the other person is away arrive when they return', 
   await chatEntry(bob, 'Catch up').click()
   await expect(bob.locator('.theirs', {hasText: 'while you were out'})).toBeVisible({timeout: 15_000})
   await expect(bob.locator('.theirs', {hasText: 'and another'})).toBeVisible()
-  await expect(bob.locator('.log li:not(.event)')).toHaveText(['Annefirst one here', 'Annewhile you were out', 'Anneand another'])
+  await expect(bob.locator('.log li:not(.event)')).toHaveText([/^Annefirst one here/, /^Annewhile you were out/, /^Anneand another/])
 })
 
 /** Starts a chat as a new person and returns the live invite link, which the QR code also encodes. */
@@ -203,6 +203,34 @@ test('the header shows connection progress, and emoji are shown larger', async (
   // Alone again: after a moment of looking, the header settles on saying so.
   await bob.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 15_000})
+})
+
+test('chats that are not open catch up at launch and show how much is unread', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Updates')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  // Bob goes to his chat list, and Anne writes while he is not in the chat.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 15_000})
+  await send(anne, 'one')
+  await send(anne, 'two')
+
+  // Opening the app again syncs the chat in the background, without Bob opening it.
+  await bob.reload()
+  await expect(chatEntry(bob, 'Updates').getByLabel('2 unread')).toBeVisible({timeout: 20_000})
+
+  await chatEntry(bob, 'Updates').click()
+  await expect(bob.locator('.theirs', {hasText: 'two'})).toBeVisible()
+  await expect(bob.locator('.log .day')).toHaveText('Today')
+  await expect(bob.locator('.theirs', {hasText: 'two'}).locator('time')).toHaveText(/\d{1,2}[:.]\d{2}/)
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(chatEntry(bob, 'Updates')).toBeVisible()
+  await expect(bob.locator('.unread')).toHaveCount(0)
 })
 
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {

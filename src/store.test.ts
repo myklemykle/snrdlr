@@ -78,6 +78,28 @@ describe('store', () => {
     expect((await store.getChat('chat-a'))!.ownSeqFloor).toBe(2)
   })
 
+  it('counts unread text from other people since the chat was last looked at', async () => {
+    const store = await openStore(freshName())
+    const chat = await store.saveChat({id: 'chat-a', secret: new Uint8Array(32), name: 'A', createdAt: 100})
+    await store.addMessage(message({author: 'them', seq: 1, receivedAt: 150}))
+    await store.addMessage(message({author: 'them', seq: 2, receivedAt: 250}))
+    await store.addMessage(message({author: 'them', seq: 3, receivedAt: 260, content: {type: 'profile', name: 'Them'}}))
+    await store.addMessage(message({author: 'me', seq: 1, receivedAt: 270}))
+    await store.addMessage(message({chatId: 'chat-b', author: 'them', seq: 1, receivedAt: 280}))
+
+    expect(await store.unreadCount(chat, 'me')).toBe(2)
+
+    await store.markRead('chat-a', 200)
+    expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(1)
+
+    // Looking at the chat never moves the mark backwards.
+    await store.markRead('chat-a', 120)
+    expect((await store.getChat('chat-a'))!.readAt).toBe(200)
+
+    await store.markRead('chat-a', 300)
+    expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(0)
+  })
+
   it('refuses a second message with the same author and sequence number', async () => {
     const store = await openStore(freshName())
     expect(await store.addMessage(message({content: {type: 'text', text: 'original'}}))).toBe(true)

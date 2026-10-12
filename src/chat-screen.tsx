@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
+import {claimChat, unclaimChat} from './background'
 import {emojiSize, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
 import type {Identity} from './identity'
@@ -8,6 +9,7 @@ import {QrCode} from './qr'
 import {describeRoutes, type Route} from './route'
 import {openSession, type ConnectionStatus, type Session} from './session'
 import type {ChatRecord, MessageRecord, Store} from './store'
+import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
 
@@ -49,6 +51,9 @@ export function ChatScreen(props: {
     let cancelled = false
     let opened: Session | null = null
     void (async () => {
+      // Take the chat over from any background sync before joining its room ourselves.
+      await claimChat(chat.id)
+      if (cancelled) return
       opened = await openSession({
         chat,
         identity,
@@ -72,9 +77,14 @@ export function ChatScreen(props: {
     return () => {
       cancelled = true
       session.current = null
-      void opened?.close()
+      void Promise.resolve(opened?.close()).finally(() => unclaimChat(chat.id))
     }
   }, [chat.id])
+
+  // Everything on screen counts as read, including what arrives while the chat is open.
+  useEffect(() => {
+    if (messages) void store.markRead(chat.id, Date.now())
+  }, [messages])
 
   // Shows the chat's name in tabs and browser history.
   useEffect(() => {
@@ -217,23 +227,37 @@ export function ChatScreen(props: {
       )}
 
       <ol class="log">
-        {(messages ?? []).map(message => {
+        {(messages ?? []).map((message, index, all) => {
           const mine = message.author === identity.id
+          const day = dayKey(message.sentAt)
+          const newDay = day !== '' && (index === 0 || day !== dayKey(all[index - 1].sentAt))
+          const separator = newDay && (
+            <li key={`day:${messageKey(message)}`} class="event day">
+              {formatDay(message.sentAt)}
+            </li>
+          )
           if (message.content.type === 'profile') {
-            return mine ? null : (
-              <li key={messageKey(message)} class="event">
-                {message.content.name} joined
-              </li>
-            )
+            return [
+              separator,
+              !mine && (
+                <li key={messageKey(message)} class="event">
+                  {message.content.name} joined
+                </li>
+              )
+            ]
           }
           const {text} = message.content
           const size = emojiSize(text)
-          return (
+          return [
+            separator,
             <li key={messageKey(message)} class={`${mine ? 'mine' : 'theirs'}${size ? ` ${size}` : ''}`}>
               {!mine && <span class="author">{nameOf(message.author)}</span>}
               {splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
+              <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
+                {formatTime(message.sentAt)}
+              </time>
             </li>
-          )
+          ]
         })}
         <div ref={logEnd} />
       </ol>

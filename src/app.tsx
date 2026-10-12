@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'preact/hooks'
+import {onBackgroundActivity, sweepChats} from './background'
 import {ChatScreen} from './chat-screen'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {inviteFromFragment, isInviteFragment} from './invite'
@@ -6,10 +7,13 @@ import {redeemInvite} from './invite-room'
 import {deriveChatKeys, generateGroupSecret} from './keys'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {openStore, type ChatRecord, type Store} from './store'
+import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
 
 const CHAT_PREFIX = '#c='
 const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
+// How long after one background sync of the other chats before returning to the app starts another.
+const SWEEP_INTERVAL_MS = 30_000
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
 
 type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity | null}
@@ -101,6 +105,20 @@ function Main(props: {store: Store; identity: Identity | null; onIdentity: (iden
     else history.pushState(null, '', url)
     setHash('')
   }
+
+  // Bring the chats that are not on screen up to date at launch and whenever the app comes back.
+  useEffect(() => {
+    if (!identity) return
+    let lastSweep = 0
+    const sweep = () => {
+      if (document.hidden || Date.now() - lastSweep < SWEEP_INTERVAL_MS) return
+      lastSweep = Date.now()
+      void sweepChats({store, identity, connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers())})
+    }
+    sweep()
+    document.addEventListener('visibilitychange', sweep)
+    return () => document.removeEventListener('visibilitychange', sweep)
+  }, [identity])
 
   // Once the invite has been dealt with, take it out of the address bar and history.
   useEffect(() => {
@@ -213,11 +231,20 @@ function Home(props: {
 }) {
   const {store, identity, notice, onOpen, onCreate} = props
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
+  const [unread, setUnread] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
 
-  const refresh = () => store.listChats().then(setChats)
-  useEffect(() => void refresh(), [])
+  const refresh = async () => {
+    const stored = await store.listChats()
+    const counts = await Promise.all(stored.map(chat => store.unreadCount(chat, identity.id)))
+    setChats(stored)
+    setUnread(Object.fromEntries(stored.map((chat, index) => [chat.id, counts[index]])))
+  }
+  useEffect(() => {
+    void refresh()
+    return onBackgroundActivity(() => void refresh())
+  }, [])
 
   const leave = async (id: string) => {
     await store.deleteChat(id, identity.id)
@@ -263,7 +290,12 @@ function Home(props: {
             ) : (
               <li key={chat.id}>
                 <button type="button" class="open" onClick={() => onOpen(chat.id)}>
-                  {chat.name}
+                  <span class="name">{chat.name}</span>
+                  {unread[chat.id] > 0 && (
+                    <span class="unread" aria-label={`${unread[chat.id]} unread`}>
+                      {unread[chat.id]}
+                    </span>
+                  )}
                 </button>
                 <button type="button" class="leave" onClick={() => setLeaving(chat.id)} aria-label={`Leave ${chat.name}`}>
                   Leave
