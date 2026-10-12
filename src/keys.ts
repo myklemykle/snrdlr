@@ -21,6 +21,15 @@ function derive(secret: Uint8Array, label: string): Uint8Array {
   return hkdf(sha256, secret, undefined, utf8(`snrdlr/v1/${label}`), 32)
 }
 
+/** Keys for the short-lived room where an invite token is exchanged for the chat's secret. */
+export function deriveInviteKeys(token: Uint8Array): Pick<ChatKeys, 'roomId' | 'sdpPassword'> {
+  if (token.length !== SECRET_BYTES) throw new Error('invite token must be 32 bytes')
+  return {
+    roomId: toHex(derive(token, 'invite-room')),
+    sdpPassword: toBase64Url(derive(token, 'invite-sdp'))
+  }
+}
+
 export function deriveChatKeys(secret: Uint8Array): ChatKeys {
   if (secret.length !== SECRET_BYTES) throw new Error('group secret must be 32 bytes')
   return {

@@ -4,11 +4,20 @@ import type {ChatKeys} from './keys'
 import {routeFromStats} from './route'
 import type {Wire, WireHandlers} from './session'
 
-const APP_ID = 'snrdlr-v1'
+export const APP_ID = 'snrdlr-v1'
 
 // Set for local testing against scripts/local-relay.mjs; unset, Trystero picks from its public relay list.
 const relayUrls = import.meta.env.VITE_NOSTR_RELAYS?.split(',').map(url => url.trim()).filter(Boolean)
-const relayConfig = relayUrls?.length ? {urls: relayUrls} : undefined
+export const relayConfig = relayUrls?.length ? {urls: relayUrls} : undefined
+
+// Trystero does not fully leave a room that is left within about a second of joining it: the room keeps
+// answering newcomers. Holding the leave back until the join has settled avoids that.
+const MIN_ROOM_LIFETIME_MS = 2500
+
+export function leaveWhenSettled(room: {leave: () => Promise<void>}, joinedAt: number): Promise<void> {
+  const wait = Math.max(0, joinedAt + MIN_ROOM_LIFETIME_MS - Date.now())
+  return new Promise(resolve => setTimeout(() => resolve(room.leave()), wait))
+}
 
 export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: TurnServerConfig[] = []): Wire {
   const peers = new Set<string>()

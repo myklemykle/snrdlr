@@ -1,7 +1,8 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {MAX_TEXT_LENGTH} from './envelope'
 import type {Identity} from './identity'
-import {inviteToFragment} from './invite'
+import {createInvite, inviteToFragment, sealGrant, type Invite} from './invite'
+import {hostInvite} from './invite-room'
 import {QrCode} from './qr'
 import {describeRoutes, type Route} from './route'
 import {openSession, type Session} from './session'
@@ -10,16 +11,26 @@ import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
 
 const ROUTE_POLL_MS = 3000
+// A forgotten invite screen should not stay open indefinitely.
+const INVITE_LIFETIME_MS = 10 * 60 * 1000
 
 const messageKey = (message: MessageRecord) => `${message.author}:${message.seq}`
 
-export function ChatScreen(props: {chat: ChatRecord; identity: Identity; store: Store; onBack: () => void}) {
-  const {chat, identity, store, onBack} = props
+export function ChatScreen(props: {
+  chat: ChatRecord
+  identity: Identity
+  store: Store
+  /** Start with the invite code showing, as when the chat was just created. */
+  inviteOnOpen: boolean
+  onBack: () => void
+}) {
+  const {chat, identity, store, inviteOnOpen, onBack} = props
   const [messages, setMessages] = useState<MessageRecord[] | null>(null)
   const [peers, setPeers] = useState<string[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [showQr, setShowQr] = useState<boolean | null>(null)
+  const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen ? createInvite(identity) : null))
+  const [inviteNote, setInviteNote] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState('')
   const session = useRef<Session | null>(null)
@@ -41,10 +52,7 @@ export function ChatScreen(props: {chat: ChatRecord; identity: Identity; store: 
           onPeersChange: peerIds => {
             if (cancelled) return
             setPeers(peerIds)
-            if (peerIds.length > 0) {
-              setShowQr(false)
-              setError(null)
-            }
+            if (peerIds.length > 0) setError(null)
           },
           onError: message => !cancelled && setError(message)
         }
@@ -59,10 +67,26 @@ export function ChatScreen(props: {chat: ChatRecord; identity: Identity; store: 
     }
   }, [chat.id])
 
-  // Offer the code up front only while nobody else has ever been in the chat.
+  // While an invite is showing, wait in its room and let in everyone who arrives. Closing it forgets
+  // the token, so the code stops working.
   useEffect(() => {
-    if (showQr === null && messages) setShowQr(messages.every(message => message.author === identity.id))
-  }, [messages])
+    if (!invite) return
+    let cancelled = false
+    let host: {close: () => void} | null = null
+    void fetchTurnServers().then(turnServers => {
+      if (cancelled) return
+      host = hostInvite(invite, sealGrant(identity, invite, {secret: chat.secret, name: chat.name}), turnServers)
+    })
+    const timer = setTimeout(() => {
+      setInvite(null)
+      setInviteNote('The invite closed after 10 minutes.')
+    }, INVITE_LIFETIME_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      host?.close()
+    }
+  }, [invite])
 
   // Polled, because the route can change mid-connection and browsers fire no event for it.
   useEffect(() => {
@@ -99,7 +123,13 @@ export function ChatScreen(props: {chat: ChatRecord; identity: Identity; store: 
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
-  const inviteUrl = location.origin + location.pathname + inviteToFragment({secret: chat.secret, name: chat.name})
+  const inviteUrl = invite ? location.origin + location.pathname + inviteToFragment(invite) : ''
+  const toggleInvite = () => {
+    setInviteNote(null)
+    setCopied(false)
+    // A new token each time, so a code from an earlier showing never works again.
+    setInvite(invite ? null : createInvite(identity))
+  }
 
   const copyInvite = async () => {
     try {
@@ -123,17 +153,19 @@ export function ChatScreen(props: {chat: ChatRecord; identity: Identity; store: 
             {connected ? `Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}` : 'Nobody else is here right now'}
           </p>
         </div>
-        <button type="button" onClick={() => setShowQr(!showQr)}>
-          {showQr ? 'Hide code' : 'Show code'}
+        <button type="button" onClick={toggleInvite}>
+          {invite ? 'Stop inviting' : 'Invite'}
         </button>
       </header>
 
       {error && <p class="error">{error}</p>}
 
-      {showQr && (
+      {inviteNote && <p class="note">{inviteNote}</p>}
+
+      {invite && (
         <section class="invite">
           <QrCode text={inviteUrl} label="Invite code for this chat" />
-          <p>Scan with a phone camera to join. Anyone who sees this code can join and read the chat.</p>
+          <p>Anyone who scans this while it is on your screen can join. It stops working when you close it.</p>
           <button type="button" onClick={copyInvite}>
             {copied ? 'Copied' : 'Copy invite link'}
           </button>

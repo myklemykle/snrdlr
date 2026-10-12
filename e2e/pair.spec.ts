@@ -68,9 +68,66 @@ test('two people pair by invite, chat, and keep their history across reloads', a
   await expect(anne.locator('.mine', {hasText: 'still here'})).toBeVisible()
 })
 
-test('an invalid invite link lands on the home screen with an explanation', async ({browser}) => {
+/** Starts a chat as a new person and returns the live invite link, which the QR code also encodes. */
+async function startChat(page: Page, name: string, chatName: string): Promise<string> {
+  await page.goto('/')
+  await introduce(page, name)
+  await page.getByLabel('Chat name').fill(chatName)
+  await page.getByRole('button', {name: 'Start a chat'}).click()
+  return copyInvite(page)
+}
+
+async function copyInvite(page: Page): Promise<string> {
+  await page.getByRole('button', {name: 'Copy invite link'}).click()
+  return page.evaluate(() => navigator.clipboard.readText())
+}
+
+const STALE = 'That invite is no longer active.'
+
+test('several people can join through one code while it is showing', async ({browser}) => {
+  const [anne, bob, cindy] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Group')
+
+  await Promise.all([bob.goto(invite), cindy.goto(invite)])
+  await Promise.all([introduce(bob, 'Bob'), introduce(cindy, 'Cindy')])
+
+  await expect(anne.locator('.status')).toHaveText(/Connected to 2/, {timeout: 30_000})
+  await expect(anne.getByRole('img', {name: 'Invite code for this chat'})).toBeVisible()
+  await send(cindy, 'hi all')
+  await expect(anne.locator('.theirs', {hasText: 'hi all'})).toContainText('Cindy')
+  await expect(bob.locator('.theirs', {hasText: 'hi all'})).toContainText('Cindy')
+})
+
+test('a code stops working once the inviter closes it, and a new showing gets a new code', async ({browser}) => {
+  const [anne, bob, dave] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  const firstInvite = await startChat(anne, 'Anne', 'Private')
+
+  await anne.getByRole('button', {name: 'Stop inviting'}).click()
+  await expect(anne.getByRole('img', {name: 'Invite code for this chat'})).toBeHidden()
+
+  await dave.goto(firstInvite)
+  await introduce(dave, 'Dave')
+  await expect(dave.getByText(STALE)).toBeVisible({timeout: 15_000})
+  await expect(dave.getByRole('button', {name: 'Private'})).toHaveCount(0)
+  expect(dave.url()).not.toContain('#i=')
+
+  await anne.getByRole('button', {name: 'Invite', exact: true}).click()
+  const secondInvite = await copyInvite(anne)
+  expect(secondInvite).not.toBe(firstInvite)
+
+  // The old code stays dead even though the inviter is inviting again.
+  await dave.goto(firstInvite)
+  await expect(dave.getByText(STALE)).toBeVisible({timeout: 15_000})
+
+  await bob.goto(secondInvite)
+  await introduce(bob, 'Bob')
+  await expect(bob.getByRole('heading', {name: 'Private'})).toBeVisible()
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+})
+
+test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {
   const page = await newPerson(browser)
   await page.goto('/#i=not-a-real-invite')
   await introduce(page, 'Cindy')
-  await expect(page.getByText("That invite link isn't valid.")).toBeVisible()
+  await expect(page.getByText(STALE)).toBeVisible()
 })

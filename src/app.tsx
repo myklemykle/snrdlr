@@ -1,14 +1,20 @@
 import {useEffect, useState} from 'preact/hooks'
 import {ChatScreen} from './chat-screen'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
-import {inviteFromFragment} from './invite'
+import {inviteFromFragment, isInviteFragment} from './invite'
+import {redeemInvite} from './invite-room'
 import {deriveChatKeys, generateGroupSecret} from './keys'
 import {openStore, type ChatRecord, type Store} from './store'
+import {fetchTurnServers} from './turn'
 
 const CHAT_PREFIX = '#c='
-const INVITE_PREFIX = '#i='
+const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
+const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
 
 type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity | null}
+
+/** Progress of redeeming the invite in the address bar, if there is one. */
+type Join = {status: 'idle'} | {status: 'joining'} | {status: 'failed'} | {status: 'joined'; chatId: string}
 
 export function App() {
   const [boot, setBoot] = useState<Boot>({status: 'loading'})
@@ -31,14 +37,144 @@ export function App() {
       </main>
     )
   }
-  const {store, identity} = boot
-  if (!identity) return <Welcome onCreate={created => setBoot({status: 'ready', store, identity: created})} store={store} />
-  return <Router store={store} identity={identity} />
+  const {store} = boot
+  return <Main store={store} identity={boot.identity} onIdentity={identity => setBoot({status: 'ready', store, identity})} />
 }
 
-function Welcome({store, onCreate}: {store: Store; onCreate: (identity: Identity) => void}) {
+/**
+ * Redeems an invite as soon as it appears in the address bar, without waiting for the person to
+ * finish setting up, because the code only works while the inviter is still showing it.
+ */
+function useJoin(store: Store, hash: string): [Join, () => void] {
+  const [join, setJoin] = useState<Join>({status: 'idle'})
+
+  useEffect(() => {
+    if (!isInviteFragment(hash)) return
+    const invite = inviteFromFragment(hash)
+    if (!invite) return setJoin({status: 'failed'})
+
+    let cancelled = false
+    setJoin({status: 'joining'})
+    void (async () => {
+      try {
+        const grant = await redeemInvite(invite, await fetchTurnServers(), JOIN_TIMEOUT_MS)
+        const chat = await store.saveChat({
+          id: deriveChatKeys(grant.secret).roomId,
+          secret: grant.secret,
+          name: grant.name,
+          createdAt: Date.now()
+        })
+        if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
+      } catch {
+        if (!cancelled) setJoin({status: 'failed'})
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [hash])
+
+  return [join, () => setJoin({status: 'idle'})]
+}
+
+function Main(props: {store: Store; identity: Identity | null; onIdentity: (identity: Identity) => void}) {
+  const {store, identity, onIdentity} = props
+  const [hash, setHash] = useState(location.hash)
+  const [join, clearJoin] = useJoin(store, hash)
+  const [chat, setChat] = useState<ChatRecord | null>(null)
+  const [inviteOnOpen, setInviteOnOpen] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onHashChange = () => setHash(location.hash)
+    addEventListener('hashchange', onHashChange)
+    return () => removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  const openChat = (id: string, replace = false) => {
+    if (replace) history.replaceState(null, '', CHAT_PREFIX + id)
+    else history.pushState(null, '', CHAT_PREFIX + id)
+    setHash(CHAT_PREFIX + id)
+  }
+  const goHome = (replace = false) => {
+    const url = location.pathname + location.search
+    if (replace) history.replaceState(null, '', url)
+    else history.pushState(null, '', url)
+    setHash('')
+  }
+
+  // Once the invite has been dealt with, take it out of the address bar and history.
+  useEffect(() => {
+    if (!identity) return
+    if (join.status === 'joined') {
+      clearJoin()
+      openChat(join.chatId, true)
+    } else if (join.status === 'failed') {
+      clearJoin()
+      setNotice(STALE_INVITE)
+      goHome(true)
+    }
+  }, [join, identity])
+
+  useEffect(() => {
+    if (!hash.startsWith(CHAT_PREFIX)) return setChat(null)
+    let cancelled = false
+    void store.getChat(hash.slice(CHAT_PREFIX.length)).then(found => {
+      if (cancelled) return
+      if (found) setChat(found)
+      else goHome(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [hash])
+
+  if (!identity) return <Welcome store={store} invited={join.status !== 'idle'} onCreate={onIdentity} />
+  if (join.status !== 'idle' || isInviteFragment(hash)) {
+    return (
+      <main class="home">
+        <h1>snrdlr</h1>
+        <p>Joining the chat…</p>
+        <p class="note">This only works while the person inviting you still has their code on screen.</p>
+      </main>
+    )
+  }
+  if (hash.startsWith(CHAT_PREFIX)) {
+    const current = chat?.id === hash.slice(CHAT_PREFIX.length) ? chat : null
+    return (
+      current && (
+        <ChatScreen
+          key={current.id}
+          chat={current}
+          identity={identity}
+          store={store}
+          inviteOnOpen={inviteOnOpen === current.id}
+          onBack={() => goHome()}
+        />
+      )
+    )
+  }
+  return (
+    <Home
+      store={store}
+      identity={identity}
+      notice={notice}
+      onOpen={id => {
+        setNotice(null)
+        setInviteOnOpen(null)
+        openChat(id)
+      }}
+      onCreate={id => {
+        setNotice(null)
+        setInviteOnOpen(id)
+        openChat(id)
+      }}
+    />
+  )
+}
+
+function Welcome({store, invited, onCreate}: {store: Store; invited: boolean; onCreate: (identity: Identity) => void}) {
   const [name, setName] = useState('')
-  const joining = location.hash.startsWith(INVITE_PREFIX)
   const create = async (event: Event) => {
     event.preventDefault()
     const identity = createIdentity(name)
@@ -50,7 +186,7 @@ function Welcome({store, onCreate}: {store: Store; onCreate: (identity: Identity
   return (
     <main class="home">
       <h1>snrdlr</h1>
-      <p>{joining ? 'You have been invited to a chat. What should people call you?' : 'What should people call you?'}</p>
+      <p>{invited ? 'You have been invited to a chat. What should people call you?' : 'What should people call you?'}</p>
       <form onSubmit={create}>
         <input
           value={name}
@@ -69,68 +205,14 @@ function Welcome({store, onCreate}: {store: Store; onCreate: (identity: Identity
   )
 }
 
-function Router({store, identity}: {store: Store; identity: Identity}) {
-  const [hash, setHash] = useState(location.hash)
-  const [chat, setChat] = useState<ChatRecord | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-
-  useEffect(() => {
-    const onHashChange = () => setHash(location.hash)
-    addEventListener('hashchange', onHashChange)
-    return () => removeEventListener('hashchange', onHashChange)
-  }, [])
-
-  const openChat = (id: string, replace = false) => {
-    // Replacing drops the invite, and with it the chat's secret, from the address bar and history.
-    if (replace) history.replaceState(null, '', CHAT_PREFIX + id)
-    else history.pushState(null, '', CHAT_PREFIX + id)
-    setHash(CHAT_PREFIX + id)
-  }
-  const goHome = () => {
-    history.pushState(null, '', location.pathname + location.search)
-    setHash('')
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      if (hash.startsWith(INVITE_PREFIX)) {
-        const invite = inviteFromFragment(hash)
-        if (!invite) {
-          setNotice("That invite link isn't valid.")
-          return goHome()
-        }
-        const saved = await store.saveChat({
-          id: deriveChatKeys(invite.secret).roomId,
-          secret: invite.secret,
-          name: invite.name,
-          createdAt: Date.now()
-        })
-        if (!cancelled) openChat(saved.id, true)
-      } else if (hash.startsWith(CHAT_PREFIX)) {
-        const found = await store.getChat(hash.slice(CHAT_PREFIX.length))
-        if (cancelled) return
-        if (found) setChat(found)
-        else goHome()
-      } else {
-        setChat(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [hash])
-
-  if (hash.startsWith(INVITE_PREFIX)) return null
-  if (hash.startsWith(CHAT_PREFIX)) {
-    const current = chat?.id === hash.slice(CHAT_PREFIX.length) ? chat : null
-    return current && <ChatScreen key={current.id} chat={current} identity={identity} store={store} onBack={goHome} />
-  }
-  return <Home store={store} identity={identity} notice={notice} onOpen={openChat} />
-}
-
-function Home(props: {store: Store; identity: Identity; notice: string | null; onOpen: (id: string) => void}) {
-  const {store, identity, notice, onOpen} = props
+function Home(props: {
+  store: Store
+  identity: Identity
+  notice: string | null
+  onOpen: (id: string) => void
+  onCreate: (id: string) => void
+}) {
+  const {store, identity, notice, onOpen, onCreate} = props
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
   const [name, setName] = useState('')
 
@@ -145,7 +227,7 @@ function Home(props: {store: Store; identity: Identity; notice: string | null; o
       name: cleanName(name) || 'Chat',
       createdAt: Date.now()
     })
-    onOpen(chat.id)
+    onCreate(chat.id)
   }
 
   return (
@@ -178,7 +260,7 @@ function Home(props: {store: Store; identity: Identity; notice: string | null; o
         />
         <button type="submit">Start a chat</button>
       </form>
-      <p class="note">To join someone else's chat, scan their code with your camera.</p>
+      <p class="note">To join someone else's chat, scan their code with your camera while they have it on screen.</p>
     </main>
   )
 }

@@ -14,6 +14,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Reply. See "How reply would work" below.
   - DM this user. The proposal's default is in-person pairing only for v1; starting a DM from inside a group needs each member's X25519 public key, which profile messages do not carry yet.
   - User info.
+- **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
 - **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.
 
 ### How reply would work
@@ -24,6 +25,8 @@ This changes the message format, so it needs a rule for how older app versions t
 
 ## Engineering follow-ups
 
+- **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
+- **Update the proposal doc.** Its QR payload and joining sections still describe the secret travelling in the code.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
