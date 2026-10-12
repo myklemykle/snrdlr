@@ -19,6 +19,22 @@ Things noted along the way that are not part of the current phase. The phased pl
   - User info.
 - **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
 - **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.
+- **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.
+
+### How a biometric lock would work
+
+A web app cannot call Touch ID or Face ID directly; it asks through WebAuthn (a passkey made on the device, with user verification required), and the phone shows its own biometric prompt, falling back to the passcode.
+
+- **Screen lock only.** The app refuses to show anything until the check passes. Stops a casual snoop, but the keys and history sit unencrypted in storage, so it does not stop anyone who can inspect the browser's data.
+- **Encrypted storage (the real thing).** WebAuthn's PRF extension returns a secret only after a successful check; use it to encrypt the identity keys and chat secrets at rest. Needs a recent browser (Safari 18+, current Chrome), so test on real devices first.
+
+To settle when building it:
+
+- Opt-in, offered after someone is already chatting, never at first launch.
+- When to lock again: on every return to the app, or after some minutes away.
+- While locked, background sync cannot run, and (Phase 6) a notification cannot show message text.
+- There is no recovery: if the passkey is lost, so are the chats. Same as losing the device today.
+- The passkey is tied to the site's address, another reason to settle the custom domain first.
 
 ### How reply would work
 
