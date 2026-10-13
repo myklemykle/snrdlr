@@ -384,6 +384,53 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await expect(bob.locator('.chats .open')).toHaveCount(2)
 })
 
+test('a computer set to stay connected passes messages between people who are never online together', async ({browser}) => {
+  const [anne, bob, kay] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Relay')
+  await Promise.all([bob.goto(invite), kay.goto(invite)])
+  await Promise.all([introduce(bob, 'Bob'), introduce(kay, 'Kay')])
+  await expect(anne.locator('.status')).toHaveText(/Connected to 2/, {timeout: 30_000})
+
+  // Kay's computer is the one that stays on. She is not even looking at the chat.
+  await kay.getByRole('button', {name: 'Back to chats'}).click()
+  const keeping = kay.locator('.keeping')
+  await expect(keeping).toHaveCount(0)
+  await kay.getByLabel('Keep every chat connected').check()
+  await expect(keeping).toHaveText(/Keeping 1 chat connected, with 2 devices online/, {timeout: 30_000})
+
+  // Bob goes offline. Anne writes, then goes offline too.
+  await bob.goto('about:blank')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'for bob, whenever he is back')
+  await expect(chatEntry(kay, 'Relay').getByLabel('1 unread')).toBeVisible({timeout: 15_000})
+  await anne.goto('about:blank')
+  await expect(keeping).toHaveText('Keeping 1 chat connected. Nobody else is online right now.', {timeout: 30_000})
+
+  // Bob returns with Anne gone, and gets her message from Kay's computer.
+  await bob.goto('/')
+  await chatEntry(bob, 'Relay').click()
+  await expect(bob.locator('.theirs', {hasText: 'for bob, whenever he is back'})).toContainText('Anne', {timeout: 30_000})
+
+  // Opening the chat on Kay's computer and leaving it again keeps it connected throughout.
+  await chatEntry(kay, 'Relay').click()
+  await expect(kay.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await kay.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(keeping).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
+
+  // A second tab in the same browser leaves the job to the first.
+  const second = await kay.context().newPage()
+  await second.goto('/')
+  await expect(second.getByLabel('Keep every chat connected')).toBeChecked()
+  await expect(second.locator('.keeping')).toHaveText('Another snrdlr tab in this browser is already doing this.')
+  // When the first tab closes, the second takes over, and the choice has survived the reload.
+  await kay.close()
+  await expect(second.locator('.keeping')).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
+
+  await second.getByLabel('Keep every chat connected').uncheck()
+  await expect(second.locator('.keeping')).toHaveCount(0)
+  await expect(bob.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

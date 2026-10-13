@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'preact/hooks'
-import {onBackgroundActivity, sweepChats} from './background'
+import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
@@ -17,7 +17,21 @@ const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
 const SWEEP_INTERVAL_MS = 30_000
 // A forgotten "chat with me" code should not stay live indefinitely.
 const PAIRING_LIFETIME_MS = 10 * 60 * 1000
+// Only one tab per browser keeps the chats connected; the others wait for this lock.
+const KEEP_LOCK = 'snrdlr-stay-connected'
+const KEEP_SETTING = 'snrdlr.stayConnected'
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
+
+/** Whether this tab is holding every chat connected: off, queued behind another tab, or doing it. */
+type Keep = null | 'waiting' | KeepStatus
+
+function storedStay(): boolean {
+  try {
+    return localStorage.getItem(KEEP_SETTING) === '1'
+  } catch {
+    return false
+  }
+}
 
 type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
 
@@ -122,23 +136,62 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
     setHash('')
   }
 
+  const connectFor: ConnectFor = chat => async (keys, handlers) =>
+    joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity))
+
+  const [stay, setStay] = useState(storedStay)
+  const [keep, setKeep] = useState<Keep>(null)
+  const chooseStay = (on: boolean) => {
+    try {
+      localStorage.setItem(KEEP_SETTING, on ? '1' : '0')
+    } catch {
+      // The choice then lasts until the page is closed.
+    }
+    // A device that holds messages for others should not have its storage cleared under pressure.
+    if (on) void navigator.storage?.persist?.()
+    setStay(on)
+  }
+
   // Bring the chats that are not on screen up to date at launch and whenever the app comes back.
   useEffect(() => {
-    if (!named) return
+    if (!named || stay) return
     let lastSweep = 0
     const sweep = () => {
       if (document.hidden || Date.now() - lastSweep < SWEEP_INTERVAL_MS) return
       lastSweep = Date.now()
-      void sweepChats({
-        store,
-        identity,
-        connectFor: chat => async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity))
-      })
+      void sweepChats({store, identity, connectFor})
     }
     sweep()
     document.addEventListener('visibilitychange', sweep)
     return () => document.removeEventListener('visibilitychange', sweep)
-  }, [named])
+  }, [named, stay])
+
+  // Or, when asked to, hold every chat connected for as long as this tab is open.
+  useEffect(() => {
+    if (!named || !stay) return
+    let cancelled = false
+    let stop: (() => Promise<void>) | null = null
+    let finished!: () => void
+    const untilFinished = new Promise<void>(resolve => (finished = resolve))
+    const begin = () => {
+      clearTimeout(queued)
+      if (cancelled) return
+      setKeep({chats: 0, connections: 0})
+      stop = keepChats({store, identity, connectFor, onStatus: status => !cancelled && setKeep(status)})
+      return untilFinished
+    }
+    // The lock normally arrives at once; only say another tab has it if it does not.
+    const queued = setTimeout(() => !cancelled && setKeep('waiting'), 500)
+    // Holding the lock also tells the browser this tab is busy, which makes it less likely to be frozen.
+    if (navigator.locks) void navigator.locks.request(KEEP_LOCK, begin)
+    else void begin()
+    return () => {
+      cancelled = true
+      clearTimeout(queued)
+      setKeep(null)
+      void Promise.resolve(stop?.()).finally(finished)
+    }
+  }, [named, stay])
 
   // Once the invite has been dealt with, take it out of the address bar and history.
   useEffect(() => {
@@ -200,6 +253,9 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
       store={store}
       identity={identity}
       notice={notice}
+      stay={stay}
+      keep={keep}
+      onStay={chooseStay}
       onOpen={id => {
         setNotice(null)
         setInviteOnOpen(null)
@@ -247,14 +303,27 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
   )
 }
 
+function keepSummary(keep: Exclude<Keep, null>): string {
+  if (keep === 'waiting') return 'Another snrdlr tab in this browser is already doing this.'
+  const chats = `${keep.chats} ${keep.chats === 1 ? 'chat' : 'chats'}`
+  if (keep.chats === 0) return 'On. There are no chats to keep connected yet.'
+  if (keep.connections === 0) return `Keeping ${chats} connected. Nobody else is online right now.`
+  return `Keeping ${chats} connected, with ${keep.connections} ${keep.connections === 1 ? 'device' : 'devices'} online.`
+}
+
 function Home(props: {
   store: Store
   identity: Identity
   notice: string | null
+  stay: boolean
+  keep: Keep
+  onStay: (on: boolean) => void
   onOpen: (id: string) => void
   onCreate: (id: string) => void
 }) {
-  const {store, identity, notice, onOpen, onCreate} = props
+  const {store, identity, notice, stay, keep, onStay, onOpen, onCreate} = props
+  // Offered on computers only: a phone's browser stops the page as soon as it is out of sight.
+  const [desktop] = useState(() => matchMedia('(hover: hover) and (pointer: fine)').matches)
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
   const [unread, setUnread] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
@@ -314,7 +383,10 @@ function Home(props: {
   }, [])
 
   const leave = async (id: string) => {
+    // Stops anything still syncing this chat in the background before its history is deleted.
+    await claimChat(id)
     await store.deleteChat(id, identity.id)
+    unclaimChat(id)
     setLeaving(null)
     await refresh()
   }
@@ -404,6 +476,25 @@ function Home(props: {
         <button type="submit">Start a group</button>
       </form>
       <p class="note">To join someone else's group or chat with them, scan their code with your camera while they have it on screen.</p>
+
+      {(desktop || stay) && (
+        <section class="keep">
+          <h2>Stay connected</h2>
+          <label>
+            <input type="checkbox" checked={stay} onChange={event => onStay(event.currentTarget.checked)} /> Keep every chat connected while
+            this tab is open
+          </label>
+          {keep && (
+            <p class="keeping" role="status">
+              {keepSummary(keep)}
+            </p>
+          )}
+          <p class="note">
+            For a computer that stays on. People in your chats who are never online at the same time still get each other's messages,
+            because this computer holds them in between. Leave this tab open and keep the computer from sleeping.
+          </p>
+        </section>
+      )}
       <p class="build">Version {__BUILD__}</p>
     </main>
   )

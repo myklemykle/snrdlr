@@ -429,3 +429,12 @@ button:disabled {
   opacity: 0.55;
   text-align: center;
 }
+
+.keep label {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.keep .keeping {
+  font-weight: 600;
+}

@@ -140,7 +140,11 @@ Cheapest thing to do early: settle the final address before there are users to s
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
 - **Final address.** The app is at `alpha.snrdlr.net` while it is in testing, and nobody is promised their chats will last. Keys and history are tied to the address, so pick the permanent one (for example `snrdlr.net` itself) before anyone is; moving strands every install unless identities can be exported and imported.
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the connection check. It cannot check authors itself, since it cannot read certificates; members do that when they receive what it stored.
-- **Stay connected on desktop.** A mode for desktop browsers that keeps every chat connected while the tab is open, so one awake computer passes messages between members who are never online together. Any member already relays for the chat on screen; this extends it to all of them. Comes before the blind bot. Check how browsers throttle or discard a background tab (Chrome's Memory Saver, timers while no peer is connected), and ask for persistent storage.
+- **Stay connected on desktop: built, needs a soak test.** A switch on the home screen of desktop browsers keeps every chat connected while the tab is open, so one awake computer passes messages between members who are never online together. One tab per browser does it (a second tab waits its turn), rooms are rejoined every two to three hours so relay credentials stay fresh, and connections are tested after the computer sleeps. Still open:
+  - **Hours in a background tab are untested.** Automated tests cannot reproduce Chrome slowing a hidden tab's timers or discarding it (Memory Saver). Leave the tab open overnight, hidden, and check the next morning that the status line still shows it connected and that a message sent to it overnight reached a third device. Do the same in Safari and Firefox.
+  - If a browser does discard the tab, options are a pinned or separate window, a silent audio trick, or going straight to the bot.
+  - The chat on screen is not rejoined on a timer, so a chat left open for more than four hours may be using expired relay credentials for new connections.
+  - Nothing tells other members that an always-on device exists, or which one it is.
 
 ## From the first Android run (moto g power 2021, Chrome 131, 12 October 2026)
 
