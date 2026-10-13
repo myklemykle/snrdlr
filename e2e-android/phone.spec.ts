@@ -212,3 +212,11 @@ test('the phone reconnects by itself after Wi-Fi drops and returns', async ({bro
   await connected(moto)
   await expect(moto.locator('.error')).toHaveCount(0)
 })
+
+test('the phone does not offer to stay connected, and a computer does', async ({browser}) => {
+  const desk = await newDesk(browser)
+  await expect(desk.getByRole('heading', {name: 'Stay connected'})).toBeVisible()
+  await expect(moto.getByRole('heading', {name: 'New group'})).toBeVisible()
+  await expect(moto.getByRole('heading', {name: 'Stay connected'})).toHaveCount(0)
+  expect(await moto.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(false)
+})
