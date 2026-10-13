@@ -61,7 +61,7 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     // Trystero's error text is aimed at developers; keep it in the console.
     onJoinError: ({error}) => {
       console.warn(error)
-      handlers.onError("Couldn't connect to the other device over this network.")
+      handlers.onError("Couldn't reach another device in this chat. It may be asleep, or this network may be blocking the connection.")
     }
   })
 

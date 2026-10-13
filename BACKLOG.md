@@ -139,6 +139,20 @@ Cheapest thing to do early: settle the final address before there are users to s
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the connection check. It cannot check authors itself, since it cannot read certificates; members do that when they receive what it stored.
 - **Stay connected on desktop.** A mode for desktop browsers that keeps every chat connected while the tab is open, so one awake computer passes messages between members who are never online together. Any member already relays for the chat on screen; this extends it to all of them. Comes before the blind bot. Check how browsers throttle or discard a background tab (Chrome's Memory Saver, timers while no peer is connected), and ask for persistent storage.
 
+## From the first Android run (moto g power 2021, Chrome 131, 12 October 2026)
+
+37 passed, 3 failed, 11 skipped or not run. Fixed since, and needing a retest on the phone:
+
+- **Emoji keyboard covered the message box.** The taller keyboard overlapped the bottom of the chat. The page is now told to shrink with the keyboard.
+- **A message sent while Android was away did not show.** Not reproduced. Two possible causes fixed: a message stored by another session of the same chat stayed hidden until a reload; and a device that had been out of touch numbered its next message just after the last one it had seen, so it appeared far up the history instead of at the end.
+- **"Couldn't connect" while the other phone was simply asleep.** Reworded; the message still appears whenever one device in the chat cannot be reached.
+
+Still open:
+
+- **"Add someone" in a direct chat is confusing.** It reads as adding to this chat; it starts a new group. Rename it ("New group with Anne") or explain it.
+- **Many connection-check page loads with no credential request after them** from the Android phone, seen in the Worker's log. Either the check is slow there or it is being abandoned when a connection is torn down. Each chat that connects also runs its own check at the same moment; they should share one.
+- **Not yet run:** emoji sizes (4.4), mobile data (6.2 to 6.5, the phone has no SIM), next-day persistence (9.1, 9.2), other browsers, incognito.
+
 ## Testing still owed
 
 - Reconnect after backgrounding on a real iPhone: lock the phone or switch apps for a minute, come back, and check the chat recovers and catches up without a reload.

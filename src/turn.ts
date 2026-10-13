@@ -5,6 +5,9 @@ const MESSAGE_TYPE = 'snrdlr-turn'
 const CACHE_KEY = 'snrdlr.turn'
 // Reuse credentials for an hour; the worker issues them for four, so cached ones stay valid in use.
 const CACHE_MS = 60 * 60 * 1000
+// After a failure, go without TURN for a while instead of running the challenge before every connection.
+const RETRY_AFTER_MS = 5 * 60 * 1000
+const FAILED_KEY = 'snrdlr.turn.failed'
 
 function isIceServer(value: unknown): value is TurnServerConfig {
   if (typeof value !== 'object' || value === null) return false
@@ -28,6 +31,23 @@ function readCache(now: number): TurnServerConfig[] {
     return parseIceServers(cached.iceServers)
   } catch {
     return []
+  }
+}
+
+function failedRecently(now: number): boolean {
+  try {
+    const at = Number(sessionStorage.getItem(FAILED_KEY))
+    return at > 0 && now >= at && now - at < RETRY_AFTER_MS
+  } catch {
+    return false
+  }
+}
+
+function noteFailure(now: number) {
+  try {
+    sessionStorage.setItem(FAILED_KEY, String(now))
+  } catch {
+    // Storage can be unavailable; the next join just tries again.
   }
 }
 
@@ -78,7 +98,9 @@ export async function fetchTurnServers(workerUrl = import.meta.env.VITE_TURN_URL
   if (!workerUrl) return []
   const cached = readCache(Date.now())
   if (cached.length > 0) return cached
+  if (failedRecently(Date.now())) return []
   const iceServers = await requestFromWorker(workerUrl)
   if (iceServers.length > 0) writeCache(Date.now(), iceServers)
+  else noteFailure(Date.now())
   return iceServers
 }

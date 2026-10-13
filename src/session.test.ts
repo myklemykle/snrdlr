@@ -575,4 +575,45 @@ describe('session', () => {
     const again = await join(makeNetwork(), chat, bobIdentity, bobStore, bobChat)
     expect(again.view.filter(m => m.author === bobIdentity.id && m.content.type === 'profile')).toHaveLength(2)
   })
+
+  it('puts a message from a device that was out of touch at the end, not back where its view stopped', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bobIdentity = createIdentity('Bob')
+    const bobChat = admitted(chat, bobIdentity)
+    const bobStore = await openStore(`session-${counter++}`)
+    // Bob is cut off while Anne writes; he has seen none of it when he writes his own.
+    const alone = await join(makeNetwork(), chat, bobIdentity, bobStore, bobChat)
+    for (const text of ['one', 'two', 'three']) await anne.session.sendText(text)
+    await new Promise(resolve => setTimeout(resolve, 5))
+    await alone.session.sendText('late')
+    await alone.session.close()
+
+    const bob = await join(network, chat, bobIdentity, bobStore, bobChat)
+    await settle()
+
+    expect(texts(anne.view)).toEqual(['one', 'two', 'three', 'late'])
+    expect(texts(bob.view)).toEqual(['one', 'two', 'three', 'late'])
+  })
+
+  it('shows a message that another session of the same chat stored behind its back', async () => {
+    const chat = makeChat()
+    const elsewhere = makeNetwork()
+    const anne = await join(elsewhere, chat, createIdentity('Anne'))
+    await anne.session.sendText('did you get this?')
+
+    const network = makeNetwork()
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+    // As a background sync or another tab would: straight into storage, not through Bob's open session.
+    for (const stored of await anne.store.listMessages(chat.id)) await bob.store.addMessage(stored)
+    expect(texts(bob.view)).toEqual([])
+
+    for (const {envelope} of elsewhere.sent) network.inject(bob.identity.id, envelope)
+    await settle()
+
+    expect(texts(bob.view)).toEqual(['did you get this?'])
+    expect(texts(bob.view)).toHaveLength(1)
+  })
 })

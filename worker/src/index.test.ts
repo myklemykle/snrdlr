@@ -270,17 +270,27 @@ describe('spending cap', () => {
     expect((await ask(env, november + MINUTE)).status).toBe(200)
   })
 
-  it('refuses credentials when there is no reading, or only an old one', async () => {
-    stubAll(() => analyticsAnswer(1e9))
+  it('is not armed until its first reading, so a rejected token does not switch the relay off', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    stubAll(() => new Response('{"errors":[{"code":9106}]}', {status: 400}))
     const env = cappedEnv()
 
-    const before = await ask(env, NOON)
-    expect(before.status).toBe(503)
-    expect(await before.json()).toEqual({error: 'turn-usage-unknown'})
-
     await recordUsage(env, NOON)
+
+    expect(await env.USAGE.get('turn-usage')).toBeNull()
+    expect((await ask(env, NOON + MINUTE)).status).toBe(200)
+    error.mockRestore()
+  })
+
+  it('refuses credentials once its reading is old', async () => {
+    stubAll(() => analyticsAnswer(1e9))
+    const env = cappedEnv()
+    await recordUsage(env, NOON)
+
     expect((await ask(env, NOON + 5 * 60 * MINUTE)).status).toBe(200)
-    expect((await ask(env, NOON + 7 * 60 * MINUTE)).status).toBe(503)
+    const late = await ask(env, NOON + 7 * 60 * MINUTE)
+    expect(late.status).toBe(503)
+    expect(await late.json()).toEqual({error: 'turn-usage-unknown'})
   })
 
   it('keeps the last reading when analytics fails, answers with an error, or returns nonsense', async () => {

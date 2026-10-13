@@ -6,8 +6,9 @@
 //
 // Spending cap: relayed traffic is billed per gigabyte past a free monthly allowance. Every few minutes a
 // scheduled run reads this month's usage from Cloudflare's analytics and records it; once it passes the
-// limit, no more credentials are issued until the next month. Without a recent reading none are issued
-// either, so a broken check cannot leave the relay open. Chat still works over direct connections.
+// limit, no more credentials are issued until the next month. Once there has been a reading, none are
+// issued without a recent one either, so a check that breaks cannot leave the relay open. Chat still works
+// over direct connections.
 
 export type Env = {
   TURN_KEY_ID: string
@@ -78,7 +79,8 @@ async function fetchEgressBytes(env: Env, now: number): Promise<number> {
     headers: {Authorization: `Bearer ${env.ANALYTICS_API_TOKEN}`, 'Content-Type': 'application/json'},
     body: JSON.stringify({query})
   })
-  if (!response.ok) throw new Error(`analytics answered ${response.status}`)
+  // The body of a refusal says why (a rejected token, a bad query); it does not repeat the token.
+  if (!response.ok) throw new Error(`analytics answered ${response.status}: ${(await response.text()).slice(0, 300)}`)
   const result = (await response.json()) as {
     errors?: {message?: string}[] | null
     data?: {viewer?: {accounts?: {callsTurnUsageAdaptiveGroups?: {sum?: {egressBytes?: unknown}}[]}[]}} | null
@@ -117,7 +119,9 @@ async function capReason(env: Env, now: number): Promise<string | null> {
   } catch {
     // Unreadable is treated like missing.
   }
-  if (typeof reading?.checkedAt !== 'number' || now - reading.checkedAt > MAX_READING_AGE_MS) return 'turn-usage-unknown'
+  // Before the first successful reading the cap is not armed, so a mistyped token cannot switch the relay off.
+  if (typeof reading?.checkedAt !== 'number') return null
+  if (now - reading.checkedAt > MAX_READING_AGE_MS) return 'turn-usage-unknown'
   return reading.paused === false ? null : 'turn-paused'
 }
 

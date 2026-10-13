@@ -174,13 +174,19 @@ export async function openSession(options: {
     publish()
   }
   const lamportNow = () => messages.reduce((max, message) => Math.max(max, message.lamport), 0)
+  // The ordering clock follows the wall clock when it can. A device that has been out of touch would
+  // otherwise number its next message just after the last one it happened to see, and the message would
+  // appear far up everyone's history instead of at the end.
+  const nextLamport = (now: number) => Math.max(lamportNow() + 1, now)
+  const holds = (author: string, seq: number) => messages.some(message => message.author === author && message.seq === seq)
   const ownSeq = () =>
     messages.reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
 
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
   async function post(content: Content): Promise<void> {
     for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
-      const message = {seq: ownSeq() + 1, lamport: lamportNow() + 1, sentAt: Date.now(), content}
+      const sentAt = Date.now()
+      const message = {seq: ownSeq() + 1, lamport: nextLamport(sentAt), sentAt, content}
       const envelope = await sealEnvelope(context, identity, message)
       const record: MessageRecord = {...message, author: identity.id, chatId: chat.id, receivedAt: message.sentAt, envelope}
       if (await store.addMessage(record)) {
@@ -197,7 +203,10 @@ export async function openSession(options: {
 
   async function keep(message: Message, envelope: Uint8Array) {
     const record: MessageRecord = {...message, chatId: chat.id, receivedAt: Date.now(), envelope}
-    if ((await store.addMessage(record)) && !closed) insert(record)
+    const isNew = await store.addMessage(record)
+    // Already stored but not on screen: another session of this chat (a background sync, another tab)
+    // stored it after we loaded the history. Without this it would stay hidden until a reload.
+    if (!closed && (isNew || !holds(record.author, record.seq))) insert(record)
   }
 
   async function receive(envelope: Uint8Array) {
