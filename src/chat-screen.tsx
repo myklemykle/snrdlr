@@ -509,8 +509,9 @@ export function ChatScreen(props: {
                     </button>
                   </div>
                   {tallies && <p class="who">{tallies.map(tally => `${tally.emoji} ${tally.by.map(nameOf).join(', ')}`).join(' · ')}</p>}
-                  <button type="button" class="copy" onClick={() => copyText(text)}>
-                    Copy text
+                  {/* Shows what will be copied, as much of it as fits. */}
+                  <button type="button" class="copy" aria-label={`Copy “${text.slice(0, 120)}”`} onClick={() => copyText(text)}>
+                    Copy “<span class="snippet">{text.slice(0, 120)}</span>”
                   </button>
                 </div>
               )}

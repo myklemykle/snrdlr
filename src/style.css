@@ -578,12 +578,20 @@ button:disabled {
 }
 
 .menu .copy {
-  display: block;
   width: 100%;
   margin-top: 0.4rem;
   padding: 0.4rem;
+  display: flex;
   text-align: left;
   border-color: transparent;
+}
+
+.menu .copy .snippet {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Clear of the reactions that hang below the message. */

@@ -13,7 +13,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
-- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions and "Copy text" in it. Still to add:
+- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions and a copy button in it. Still to add:
   - Reply. See "How reply would work" below.
   - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
@@ -22,7 +22,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - **Search is by English name only** ("party popper"), with no keywords ("celebrate") and no other languages.
   - The picker leaves out emoji newer than the device can draw, by a drawing test that has only been checked in desktop Chrome. Check on the iPhone and the Android phone that no empty boxes appear and nothing obvious is missing.
   - On an iPhone, check that the picker sits above the keyboard when its search box is in use.
-  - Press and hold replaces the phone's own text selection on messages, so "Copy text" copies the whole message only.
+  - Press and hold replaces the phone's own text selection on messages, so the menu's copy button copies the whole message only.
   - The Android automated test for reactions is written but has not been run.
   - Offer the picker from the message box on desktop too, where there is no emoji keyboard a click away.
   - Reactions will apply to images once those exist.

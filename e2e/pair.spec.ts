@@ -508,8 +508,22 @@ test('people react to a message with an emoji, change it, and take it away', asy
 
   // The same menu copies the message's text, and closes when clicked away from.
   await openMenu(atAnne)
-  await anne.getByRole('button', {name: 'Copy text'}).click()
+  await anne.getByRole('button', {name: 'Copy “shall we go?”'}).click()
   expect(await anne.evaluate(() => navigator.clipboard.readText())).toBe('shall we go?')
+
+  // A long message shows as much as fits, and all of it is copied.
+  const long = 'This is the message text, and it goes on for rather longer than any menu could ever be expected to show in full'
+  await send(bob, long)
+  const longAtAnne = anne.locator('.theirs', {hasText: long})
+  await openMenu(longAtAnne)
+  const copy = anne.locator('.menu .copy')
+  await expect(copy).toHaveText(`Copy “${long}”`)
+  await expect(copy).toHaveAccessibleName(`Copy “${long}”`)
+  const [menuBox, copyBox, snippet] = [(await anne.locator('.menu').boundingBox())!, (await copy.boundingBox())!, anne.locator('.menu .snippet')]
+  expect(copyBox.x + copyBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width)
+  expect(await snippet.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+  await copy.click()
+  expect(await anne.evaluate(() => navigator.clipboard.readText())).toBe(long)
   await openMenu(atAnne)
   await anne.waitForTimeout(500)
   await anne.mouse.click(20, 20)
