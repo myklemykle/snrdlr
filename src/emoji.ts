@@ -36,3 +36,16 @@ export function emojiSize(text: string): 'solo' | 'jumbo' | null {
   if (count === 1) return 'solo'
   return count > 1 && count <= MAX_JUMBO_EMOJI ? 'jumbo' : null
 }
+
+const graphemes = (text: string) => [...new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(text)].map(part => part.segment)
+
+/** Whether the text is exactly one emoji, as a reaction must be. */
+export function isSingleEmoji(text: string): boolean {
+  return text.length <= 40 && !/\s/.test(text) && emojiOnlyCount(text) === 1
+}
+
+/** The first emoji in what someone typed, if there is one. */
+export function firstEmoji(text: string): string | null {
+  const found = splitEmoji(text).find(segment => segment.emoji)
+  return found ? graphemes(found.text)[0] : null
+}

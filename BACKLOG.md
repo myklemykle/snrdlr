@@ -13,10 +13,15 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
-- **Message context menu** (hover on desktop, press and hold on touch):
+- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions and "Copy text" in it. Still to add:
   - Reply. See "How reply would work" below.
   - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
+- **Reactions: follow-ups.** One reaction per person per message; six quick ones plus any typed emoji. Open:
+  - "Another emoji" opens a text box, and the person has to switch to the emoji keyboard themselves; a web page cannot ask for it. A built-in emoji grid would avoid that.
+  - Press and hold replaces the phone's own text selection on messages, so "Copy text" copies the whole message only.
+  - Not yet tried by hand on the iPhone or the Android phone; the Android automated test is written but has not been run.
+  - Reactions will apply to images once those exist.
 - **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
 - **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.
 - **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.

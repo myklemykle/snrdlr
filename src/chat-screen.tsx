@@ -1,13 +1,14 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
-import {emojiSize, splitEmoji} from './emoji'
+import {emojiSize, firstEmoji, splitEmoji} from './emoji'
 import {MAX_TEXT_LENGTH} from './envelope'
 import {memberId, type Identity} from './identity'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
 import {QrCode} from './qr'
+import {messageKey, QUICK_REACTIONS, tallyReactions} from './reactions'
 import {describeRoutes, type Route} from './route'
 import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
@@ -27,7 +28,9 @@ const BUSY_LABELS: Record<Exclude<ConnectionStatus, 'idle'>, string> = {
   reconnecting: 'Reconnecting…'
 }
 
-const messageKey = (message: MessageRecord) => `${message.author}:${message.seq}`
+// How long a finger must rest on a message to open its menu, and how far it may drift meanwhile.
+const LONG_PRESS_MS = 450
+const LONG_PRESS_SLOP_PX = 10
 
 export function ChatScreen(props: {
   chat: ChatRecord
@@ -168,7 +171,30 @@ export function ChatScreen(props: {
     }
   }, [peers])
 
-  useEffect(() => logEnd.current?.scrollIntoView({block: 'end'}), [messages])
+
+  // A member can post their profile more than once; only the first is shown as joining.
+  const firstProfiles = useMemo(() => {
+    const seen = new Set<string>()
+    const first = new Set<MessageRecord>()
+    for (const message of messages ?? []) {
+      if (message.content.type !== 'profile' || seen.has(message.author)) continue
+      seen.add(message.author)
+      first.add(message)
+    }
+    return first
+  }, [messages])
+  // The messages that get a line of their own. Certificates show through the "joined" lines, reactions
+  // on the message they are about, and unknown kinds wait for a newer version of the app.
+  const shown = useMemo(
+    () =>
+      (messages ?? []).filter(message => {
+        const {type} = message.content
+        if (type === 'profile') return message.author !== identity.id && firstProfiles.has(message)
+        return type === 'text' || type === 'group-invite'
+      }),
+    [messages]
+  )
+  const reactions = useMemo(() => tallyReactions(messages ?? []), [messages])
 
   // When the on-screen keyboard opens or changes height the log gets shorter. If the newest message was
   // in view, keep it in view; otherwise the keyboard would push it out of sight.
@@ -178,6 +204,13 @@ export function ChatScreen(props: {
     const element = log.current
     if (element) atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48
   }
+  // A new line in the log scrolls to the end. A reaction changes no line, so it only does so if the end
+  // was already in view; reacting to an old message must not jump away from it.
+  const lineCount = useRef(-1)
+  useEffect(() => {
+    if (shown.length !== lineCount.current || atEnd.current) logEnd.current?.scrollIntoView({block: 'end'})
+    lineCount.current = shown.length
+  }, [messages])
   useEffect(() => {
     const keepEnd = () => atEnd.current && logEnd.current?.scrollIntoView({block: 'end'})
     window.addEventListener('resize', keepEnd)
@@ -214,17 +247,6 @@ export function ChatScreen(props: {
     }
     return found
   }, [messages])
-  // A member can post their profile more than once; only the first is shown as joining.
-  const firstProfiles = useMemo(() => {
-    const seen = new Set<string>()
-    const first = new Set<MessageRecord>()
-    for (const message of messages ?? []) {
-      if (message.content.type !== 'profile' || seen.has(message.author)) continue
-      seen.add(message.author)
-      first.add(message)
-    }
-    return first
-  }, [messages])
   const founderId = chat.kind === 'group' ? memberId(chat.context) : null
 
   const send = (event: Event) => {
@@ -234,6 +256,58 @@ export function ChatScreen(props: {
     setDraft('')
     session.current.sendText(text).catch(() => setError('Message could not be sent.'))
   }
+
+  // The menu on one message: reactions, and copying its text.
+  const [menu, setMenu] = useState<string | null>(null)
+  const [typingEmoji, setTypingEmoji] = useState(false)
+  const menuOpenedAt = useRef(0)
+  const openMenu = (key: string) => {
+    menuOpenedAt.current = Date.now()
+    setTypingEmoji(false)
+    setMenu(key)
+  }
+  const closeMenu = () => {
+    // The finger that opened the menu by pressing also lifts; that must not count as a tap outside it.
+    if (Date.now() - menuOpenedAt.current > 400) setMenu(null)
+  }
+  const ownReaction = (message: MessageRecord) =>
+    reactions.get(messageKey(message))?.find(tally => tally.by.includes(identity.id))?.emoji ?? null
+  // Choosing the emoji we already chose takes it away.
+  const react = (message: MessageRecord, emoji: string) => {
+    setMenu(null)
+    session.current
+      ?.react({author: message.author, seq: message.seq}, ownReaction(message) === emoji ? '' : emoji)
+      .catch(() => setError('Reaction could not be sent.'))
+  }
+  const copyText = async (text: string) => {
+    setMenu(null)
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      setError("Couldn't copy the message.")
+    }
+  }
+
+  // On a touch screen, resting a finger on a message opens its menu.
+  const press = useRef<{timer: number; x: number; y: number} | null>(null)
+  const cancelPress = () => {
+    if (press.current) clearTimeout(press.current.timer)
+    press.current = null
+  }
+  const startPress = (event: PointerEvent, key: string) => {
+    if (event.pointerType === 'mouse' || menu) return
+    cancelPress()
+    const timer = window.setTimeout(() => {
+      press.current = null
+      openMenu(key)
+    }, LONG_PRESS_MS)
+    press.current = {timer, x: event.clientX, y: event.clientY}
+  }
+  const movePress = (event: PointerEvent) => {
+    const started = press.current
+    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > LONG_PRESS_SLOP_PX) cancelPress()
+  }
+  useEffect(() => cancelPress, [])
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -324,12 +398,13 @@ export function ChatScreen(props: {
       )}
 
       <ol class="log" ref={log} onScroll={noteScroll}>
-        {(messages ?? []).map((message, index, all) => {
+        {shown.map((message, index, all) => {
           const mine = message.author === identity.id
+          const key = messageKey(message)
           const day = dayKey(message.sentAt)
           const newDay = day !== '' && (index === 0 || day !== dayKey(all[index - 1].sentAt))
           const separator = newDay && (
-            <li key={`day:${messageKey(message)}`} class="event day">
+            <li key={`day:${key}`} class="event day">
               {formatDay(message.sentAt)}
             </li>
           )
@@ -337,19 +412,17 @@ export function ChatScreen(props: {
             const inviter = invitedBy.get(message.author)
             return [
               separator,
-              !mine && firstProfiles.has(message) && (
-                <li key={messageKey(message)} class="event">
-                  {message.author === founderId
-                    ? `${message.content.name} started this chat`
-                    : `${message.content.name} joined${inviter ? ` · invited by ${nameOf(inviter)}` : ''}`}
-                </li>
-              )
+              <li key={key} class="event">
+                {message.author === founderId
+                  ? `${message.content.name} started this chat`
+                  : `${message.content.name} joined${inviter ? ` · invited by ${nameOf(inviter)}` : ''}`}
+              </li>
             ]
           }
           if (message.content.type === 'group-invite') {
             return [
               separator,
-              <li key={messageKey(message)} class="event">
+              <li key={key} class="event">
                 {mine ? (
                   `You started the group "${message.content.name}" with ${chatName}`
                 ) : (
@@ -363,23 +436,90 @@ export function ChatScreen(props: {
               </li>
             ]
           }
-          // Certificates are shown through the "joined" lines; unknown kinds wait for a newer app version.
           if (message.content.type !== 'text') return separator
           const {text} = message.content
           const size = emojiSize(text)
+          const tallies = reactions.get(key)
+          const own = ownReaction(message)
+          const open = menu === key
           return [
             separator,
-            <li key={messageKey(message)} class={`${mine ? 'mine' : 'theirs'}${size ? ` ${size}` : ''}`}>
+            <li
+              key={key}
+              class={`${mine ? 'mine' : 'theirs'}${size ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}`}
+              onPointerDown={event => startPress(event, key)}
+              onPointerMove={movePress}
+              onPointerUp={cancelPress}
+              onPointerCancel={cancelPress}
+              onPointerLeave={cancelPress}
+              // A long press must open our menu, not the browser's.
+              onContextMenu={event => (press.current || open) && event.preventDefault()}
+            >
               {!mine && <span class="author">{nameOf(message.author)}</span>}
               {splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
                 {formatTime(message.sentAt)}
               </time>
+              {tallies && (
+                <span class="reactions">
+                  {tallies.map(tally => {
+                    const who = tally.by.map(nameOf).join(', ')
+                    return (
+                      <button
+                        key={tally.emoji}
+                        type="button"
+                        class={tally.by.includes(identity.id) ? 'own' : ''}
+                        aria-label={`${tally.emoji} from ${who}`}
+                        title={who}
+                        onClick={() => react(message, tally.emoji)}
+                      >
+                        {tally.emoji}
+                        {tally.by.length > 1 && <span class="count">{tally.by.length}</span>}
+                      </button>
+                    )
+                  })}
+                </span>
+              )}
+              <button type="button" class="react" aria-label="React or copy" aria-expanded={open} onClick={() => (open ? setMenu(null) : openMenu(key))}>
+                ☺
+              </button>
+              {open && (
+                <div class="menu" ref={element => element?.scrollIntoView({block: 'nearest'})}>
+                  <div class="quick">
+                    {QUICK_REACTIONS.map(emoji => (
+                      <button key={emoji} type="button" class={own === emoji ? 'own' : ''} aria-label={`React ${emoji}`} onClick={() => react(message, emoji)}>
+                        {emoji}
+                      </button>
+                    ))}
+                    <button type="button" aria-label="Another emoji" onClick={() => setTypingEmoji(true)}>
+                      ＋
+                    </button>
+                  </div>
+                  {typingEmoji && (
+                    <input
+                      ref={element => element?.focus()}
+                      aria-label="Emoji"
+                      placeholder="Type an emoji"
+                      autocomplete="off"
+                      onInput={event => {
+                        const emoji = firstEmoji(event.currentTarget.value)
+                        if (emoji) react(message, emoji)
+                      }}
+                    />
+                  )}
+                  {tallies && <p class="who">{tallies.map(tally => `${tally.emoji} ${tally.by.map(nameOf).join(', ')}`).join(' · ')}</p>}
+                  <button type="button" class="copy" onClick={() => copyText(text)}>
+                    Copy text
+                  </button>
+                </div>
+              )}
             </li>
           ]
         })}
         <div ref={logEnd} />
       </ol>
+
+      {menu && <div class="menu-backdrop" onClick={closeMenu} />}
 
       <form class="composer" onSubmit={send}>
         <input

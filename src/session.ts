@@ -56,6 +56,8 @@ export type Session = {
   postCert: (cert: Uint8Array) => Promise<void>
   /** In a direct chat: lets the other person into a group we have started. */
   postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
+  /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
+  react: (target: {author: string; seq: number}, emoji: string) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -316,6 +318,7 @@ export async function openSession(options: {
     sendText: text => post({type: 'text', text}),
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
+    react: (target, emoji) => post({type: 'reaction', target, emoji}),
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return
       if (peers.length === 0) {

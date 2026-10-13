@@ -438,3 +438,160 @@ button:disabled {
 .keep .keeping {
   font-weight: 600;
 }
+
+/* Reactions, and the menu on a message. */
+.log .mine,
+.log .theirs {
+  position: relative;
+}
+
+.log .reacted {
+  margin-bottom: 1.1rem;
+}
+
+.log .menu-open {
+  z-index: 6;
+}
+
+.reactions {
+  position: absolute;
+  top: calc(100% - 0.55rem);
+  display: flex;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.mine .reactions {
+  right: 0.5rem;
+}
+
+.theirs .reactions {
+  left: 0.5rem;
+}
+
+.reactions button {
+  padding: 0.05rem 0.4rem;
+  border-radius: 1rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.reactions .own,
+.menu .quick .own {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+}
+
+.reactions .count {
+  margin-left: 0.25rem;
+  font-size: 0.75rem;
+}
+
+/* Shown beside a message when a mouse is over it; touch screens use a long press instead. */
+.log .react {
+  display: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.2rem 0.5rem;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.mine .react {
+  right: 100%;
+}
+
+.theirs .react {
+  left: 100%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .log li:hover .react,
+  .log .react:focus-visible,
+  .log .menu-open .react {
+    display: block;
+  }
+}
+
+@media (pointer: coarse) {
+  /* A long press opens the message's menu, so it must not also start a text selection. */
+  .log .mine,
+  .log .theirs {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  z-index: 6;
+  width: max-content;
+  max-width: min(21rem, calc(100vw - 2rem));
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 0.2);
+  white-space: normal;
+  font-size: 1rem;
+}
+
+.mine .menu {
+  right: 0;
+}
+
+.theirs .menu {
+  left: 0;
+}
+
+.menu .quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+}
+
+.menu .quick button {
+  padding: 0.3rem 0.45rem;
+  border-color: transparent;
+  font-size: 1.4rem;
+  line-height: 1.2;
+}
+
+.menu input {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.menu .who {
+  margin: 0.4rem 0.3rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.menu .copy {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.4rem;
+  text-align: left;
+  border-color: transparent;
+}
+
+/* Clear of the reactions that hang below the message. */
+.reacted .menu {
+  top: calc(100% + 1.4rem);
+}

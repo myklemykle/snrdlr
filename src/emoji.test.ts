@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {emojiSize, splitEmoji} from './emoji'
+import {emojiSize, firstEmoji, isSingleEmoji, splitEmoji} from './emoji'
 
 const emojiParts = (text: string) => splitEmoji(text).filter(segment => segment.emoji).map(segment => segment.text)
 
@@ -45,5 +45,25 @@ describe('emojiSize', () => {
 
   it('is nothing special with any words, with many emoji, or when empty', () => {
     for (const text of ['ok 👍', '🎉'.repeat(7), '', 'hello', '   ']) expect(emojiSize(text), text).toBeNull()
+  })
+})
+
+describe('isSingleEmoji', () => {
+  it('accepts exactly one emoji, however it is built', () => {
+    for (const emoji of ['👍', '❤️', '👍🏽', '👨‍👩‍👧', '🇳🇴', '1️⃣']) expect(isSingleEmoji(emoji), emoji).toBe(true)
+  })
+
+  it('refuses text, several emoji, padding, and nothing', () => {
+    for (const text of ['', 'a', 'ok👍', '👍👍', ' 👍', '👍 ', '©']) expect(isSingleEmoji(text), JSON.stringify(text)).toBe(false)
+  })
+})
+
+describe('firstEmoji', () => {
+  it('finds the first emoji in what was typed', () => {
+    expect(firstEmoji('🎉')).toBe('🎉')
+    expect(firstEmoji('🎉🔥')).toBe('🎉')
+    expect(firstEmoji('ok 👍🏽 then')).toBe('👍🏽')
+    expect(firstEmoji('👨‍👩‍👧!')).toBe('👨‍👩‍👧')
+    expect(firstEmoji('no emoji')).toBeNull()
   })
 })

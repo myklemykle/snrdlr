@@ -431,6 +431,109 @@ test('a computer set to stay connected passes messages between people who are ne
   await expect(bob.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
 })
 
+test('people react to a message with an emoji, change it, and take it away', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Reactions')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await send(anne, 'shall we go?')
+  const atAnne = anne.locator('.mine', {hasText: 'shall we go?'})
+  const atBob = bob.locator('.theirs', {hasText: 'shall we go?'})
+  const openMenu = async (bubble: typeof atBob) => {
+    await bubble.hover()
+    await bubble.getByRole('button', {name: 'React or copy'}).click()
+  }
+
+  // Bob picks one of the quick ones; both see it on the message.
+  await openMenu(atBob)
+  await bob.getByRole('button', {name: 'React 👍'}).click()
+  await expect(bob.locator('.menu')).toHaveCount(0)
+  await expect(atAnne.getByRole('button', {name: '👍 from Bob'})).toBeVisible()
+  await expect(atBob.locator('.reactions .own')).toHaveText('👍')
+
+  // Anne agrees by tapping it, and it shows a count.
+  await atAnne.locator('.reactions button').click()
+  await expect(atBob.locator('.reactions button')).toHaveText(['👍2'])
+  await expect(atBob.getByRole('button', {name: '👍 from you, Anne'})).toBeVisible()
+
+  // Bob changes his to one that is not in the quick row. He has one reaction, not two.
+  await openMenu(atBob)
+  await expect(bob.locator('.menu .who')).toHaveText('👍 you, Anne')
+  await bob.getByRole('button', {name: 'Another emoji'}).click()
+  await bob.getByRole('textbox', {name: 'Emoji'}).fill('🎉')
+  await expect(atAnne.locator('.reactions button')).toHaveText(['👍', '🎉'])
+  await expect(atAnne.locator('.reactions .own')).toHaveText('👍')
+
+  // Tapping his own takes it away.
+  await atBob.getByRole('button', {name: '🎉 from you'}).click()
+  await expect(atAnne.locator('.reactions button')).toHaveText(['👍'])
+  await expect(atBob.locator('.reactions button')).toHaveText(['👍'])
+
+  // A reaction is not a message: no new line, nothing unread, and it survives a reload.
+  await expect(bob.locator('.log li:not(.event)')).toHaveCount(1)
+  await bob.reload()
+  await expect(bob.locator('.theirs', {hasText: 'shall we go?'}).getByRole('button', {name: '👍 from Anne'})).toBeVisible()
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(chatEntry(bob, 'Reactions')).toBeVisible()
+  await expect(bob.locator('.unread')).toHaveCount(0)
+
+  // The same menu copies the message's text, and closes when clicked away from.
+  await openMenu(atAnne)
+  await anne.getByRole('button', {name: 'Copy text'}).click()
+  expect(await anne.evaluate(() => navigator.clipboard.readText())).toBe('shall we go?')
+  await openMenu(atAnne)
+  await anne.waitForTimeout(500)
+  await anne.mouse.click(20, 20)
+  await expect(anne.locator('.menu')).toHaveCount(0)
+})
+
+test('on a touch screen, a long press on a message opens its reactions', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const context = await browser.newContext({hasTouch: true, isMobile: true, viewport: {width: 375, height: 667}})
+  const phone = await context.newPage()
+  const invite = await startChat(anne, 'Anne', 'Touch')
+  await phone.goto(invite)
+  await introduce(phone, 'Phone')
+  await send(anne, 'press me')
+  const bubble = phone.locator('.theirs', {hasText: 'press me'})
+  await expect(bubble).toBeVisible()
+
+  const touch = await context.newCDPSession(phone)
+  const press = async (ms: number) => {
+    const box = (await bubble.boundingBox())!
+    const point = {x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2)}
+    await touch.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [point]})
+    await phone.waitForTimeout(ms)
+    await touch.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []})
+  }
+
+  // There is no hover on a phone, so no button beside the message; and a tap does nothing.
+  await expect(bubble.getByRole('button', {name: 'React or copy'})).toBeHidden()
+  await press(100)
+  await expect(phone.locator('.menu')).toHaveCount(0)
+
+  await press(700)
+  const menu = phone.locator('.menu')
+  await expect(menu).toBeVisible()
+  // Lifting the finger must not close it, and it has to fit on a narrow screen.
+  await phone.waitForTimeout(300)
+  const box = (await menu.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(375)
+
+  await phone.getByRole('button', {name: 'React ❤️'}).tap()
+  await expect(anne.locator('.mine', {hasText: 'press me'}).getByRole('button', {name: '❤️ from Phone'})).toBeVisible()
+  await expect(bubble.locator('.reactions .own')).toHaveText('❤️')
+
+  // Open again and tap elsewhere: it closes without changing anything.
+  await press(700)
+  await expect(menu).toBeVisible()
+  await phone.waitForTimeout(500)
+  await phone.touchscreen.tap(180, 20)
+  await expect(menu).toHaveCount(0)
+  await expect(bubble.locator('.reactions button')).toHaveText(['❤️'])
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

@@ -136,4 +136,18 @@ describe('envelope', () => {
     await expect(openEnvelope(chat, new Uint8Array(encode('junk')))).rejects.toThrow()
     await expect(openEnvelope(chat, new Uint8Array(40_000))).rejects.toThrow(/too large/)
   })
+
+  it('round-trips a reaction and its removal, and refuses one that is not a single emoji', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const target = {author: 'ab'.repeat(32), seq: 7}
+    for (const emoji of ['👍', '👨‍👩‍👧', '']) {
+      const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).toEqual({...reaction, author: anne.id})
+    }
+    for (const emoji of ['nice', '👍👍', '👍 ']) {
+      const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).rejects.toThrow('bad reaction body')
+    }
+  })
 })

@@ -220,3 +220,38 @@ test('the phone does not offer to stay connected, and a computer does', async ({
   await expect(moto.getByRole('heading', {name: 'Stay connected'})).toHaveCount(0)
   expect(await moto.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches)).toBe(false)
 })
+
+test('a long press on a message opens its reactions, and the phone can react and be reacted to', async ({browser}) => {
+  const desk = await newDesk(browser)
+  await deskInvitesMoto(desk, 'Reactions')
+  await connected(moto)
+  await send(desk, 'press me')
+  const bubble = moto.locator('.theirs', {hasText: 'press me'})
+  await expect(bubble).toBeVisible()
+
+  // A real touch held in place, sent through the debugger.
+  const box = (await bubble.boundingBox())!
+  const point = {x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2)}
+  const session = await moto.context().newCDPSession(moto)
+  await session.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [point]})
+  await sleep(800)
+  await session.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []})
+
+  // The menu opens, stays open once the finger lifts, fits the screen, and no text got selected.
+  const menu = moto.locator('.menu')
+  await expect(menu).toBeVisible()
+  await sleep(500)
+  await expect(menu).toBeVisible()
+  const menuBox = (await menu.boundingBox())!
+  const width = await moto.evaluate(() => innerWidth)
+  expect(menuBox.x).toBeGreaterThanOrEqual(0)
+  expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(width)
+  expect(await moto.evaluate(() => getSelection()?.toString() ?? '')).toBe('')
+
+  await moto.getByRole('button', {name: 'React ❤️'}).tap()
+  await expect(desk.locator('.mine', {hasText: 'press me'}).getByRole('button', {name: '❤️ from Moto'})).toBeVisible()
+
+  // The desk agrees; the phone shows a count of two, with its own marked.
+  await desk.locator('.mine', {hasText: 'press me'}).locator('.reactions button').click()
+  await expect(bubble.locator('.reactions .own')).toHaveText('❤️2')
+})

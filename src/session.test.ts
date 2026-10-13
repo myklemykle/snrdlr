@@ -4,6 +4,7 @@ import {createIdentity, type Identity} from './identity'
 import {chatKeys, newGroupChat} from './chats'
 import {importMsgKey, sealEnvelope} from './envelope'
 import {issueCert} from './membership'
+import {tallyReactions} from './reactions'
 import {openSession, versionVector, type ConnectionStatus} from './session'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 import {makeNetwork} from './test-network'
@@ -615,5 +616,36 @@ describe('session', () => {
 
     expect(texts(bob.view)).toEqual(['did you get this?'])
     expect(texts(bob.view)).toHaveLength(1)
+  })
+
+  it('shares reactions like any other message, including with someone who was away', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
+    await anne.session.sendText('shall we go?')
+    await settle()
+    const target = {author: anne.identity.id, seq: anne.view.find(m => m.content.type === 'text')!.seq}
+    const key = `${target.author}:${target.seq}`
+
+    await bob.session.react(target, '👍')
+    await settle()
+    expect(tallyReactions(anne.view).get(key)).toEqual([{emoji: '👍', by: [bob.identity.id]}])
+
+    // Bob changes his mind, then Anne agrees with him.
+    await bob.session.react(target, '🎉')
+    await anne.session.react(target, '🎉')
+    await settle()
+    for (const person of [anne, bob]) {
+      expect(tallyReactions(person.view).get(key)).toEqual([{emoji: '🎉', by: [bob.identity.id, anne.identity.id]}])
+    }
+
+    // Cindy joins later and sees the same thing; then Bob takes his away.
+    const cindy = await join(network, chat, createIdentity('Cindy'))
+    await settle()
+    expect(tallyReactions(cindy.view).get(key)).toEqual([{emoji: '🎉', by: [bob.identity.id, anne.identity.id]}])
+    await bob.session.react(target, '')
+    await settle()
+    expect(tallyReactions(cindy.view).get(key)).toEqual([{emoji: '🎉', by: [anne.identity.id]}])
+    expect(texts(cindy.view)).toEqual(['shall we go?'])
   })
 })

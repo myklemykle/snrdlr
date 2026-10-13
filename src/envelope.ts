@@ -7,6 +7,7 @@
 import {ed25519} from '@noble/curves/ed25519.js'
 import {decode, encode} from 'cbor-x'
 import {bytesEqual, concatBytes, fromHex, toHex, utf8} from './bytes'
+import {isSingleEmoji} from './emoji'
 import {memberId, MAX_NAME_LENGTH} from './identity'
 
 export const ENVELOPE_VERSION = 1
@@ -22,6 +23,11 @@ export type Content =
   | {type: 'member-cert'; cert: Uint8Array}
   /** In a direct chat: the sender has started a group that includes the recipient, and this lets them in. */
   | {type: 'group-invite'; secret: Uint8Array; name: string; founder: Uint8Array; chain: Uint8Array[]}
+  /**
+   * The author's reaction to another message. Each person has at most one per message: their latest
+   * replaces any earlier one, and an empty emoji takes it away.
+   */
+  | {type: 'reaction'; target: {author: string; seq: number}; emoji: string}
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -75,6 +81,8 @@ function encodeContent(content: Content): [string, unknown] {
       return ['member-cert', content.cert]
     case 'group-invite':
       return ['group-invite', {g: content.secret, n: content.name, f: content.founder, c: content.chain}]
+    case 'reaction':
+      return ['reaction', {a: fromHex(content.target.author), s: content.target.seq, e: content.emoji}]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -109,6 +117,12 @@ function decodeContent(type: unknown, body: unknown): Content {
       founder: new Uint8Array(f as Uint8Array),
       chain: (c as Uint8Array[]).map(cert => new Uint8Array(cert))
     }
+  }
+  if (type === 'reaction') {
+    const {a, s, e} = (body ?? {}) as Record<string, unknown>
+    if (!(a instanceof Uint8Array) || a.length !== 32 || !isCount(s) || s === 0) throw new Error('bad reaction body')
+    if (typeof e !== 'string' || (e !== '' && !isSingleEmoji(e))) throw new Error('bad reaction body')
+    return {type, target: {author: toHex(a), seq: s}, emoji: e}
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
   if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}
