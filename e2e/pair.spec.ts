@@ -749,6 +749,60 @@ test('a picture reaches someone who was away, through a third person, after its 
   await expect(bob.locator('.theirs.image .author')).toHaveText('Anne')
 })
 
+test('a tab left open on an old version does not leave newer tabs blank, and steps aside for a newer one', async ({browser}) => {
+  const context = await browser.newContext()
+  // An old tab: holds the storage open at an earlier version and, like old versions, never lets go.
+  const old = await context.newPage()
+  await old.goto('/')
+  const stylesheet = await old.locator('link[rel="stylesheet"]').getAttribute('href')
+  await context.clearCookies()
+  await old.goto(new URL(stylesheet!, old.url()).href)
+  await old.evaluate(async () => {
+    for (const {name} of await indexedDB.databases()) await new Promise(done => (indexedDB.deleteDatabase(name!).onsuccess = done))
+    await new Promise(done => {
+      const request = indexedDB.open('snrdlr', 4)
+      request.onupgradeneeded = () => {
+        const db = request.result
+        db.createObjectStore('identity')
+        db.createObjectStore('chats', {keyPath: 'id'})
+        db.createObjectStore('messages', {keyPath: ['chatId', 'author', 'seq']}).createIndex('order', ['chatId', 'lamport', 'author', 'seq'])
+        db.createObjectStore('left')
+        request.transaction!.objectStore('messages').createIndex('received', ['chatId', 'receivedAt'])
+      }
+      request.onsuccess = () => {
+        ;(window as unknown as {held: IDBDatabase}).held = request.result
+        done(null)
+      }
+    })
+  })
+
+  // A new tab says what is wrong instead of staying blank, and starts by itself once the old one goes.
+  const current = await context.newPage()
+  await current.goto('/')
+  await expect(current.getByText('another tab in this browser is still running the old version')).toBeVisible()
+  await old.close()
+  await expect(current.getByLabel('Your name')).toBeVisible()
+  await introduce(current, 'Anne')
+
+  // Now this tab is the old one. When a newer version asks for the storage, it lets go and reloads.
+  const reloaded = current.waitForEvent('load')
+  const newer = await context.newPage()
+  await newer.goto(new URL(stylesheet!, current.url()).href)
+  const upgraded = await newer.evaluate(
+    () =>
+      new Promise(done => {
+        const request = indexedDB.open('snrdlr', 99)
+        request.onsuccess = () => {
+          request.result.close()
+          done('opened')
+        }
+        request.onblocked = () => setTimeout(() => done('blocked'), 3000)
+      })
+  )
+  expect(upgraded).toBe('opened')
+  await reloaded
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

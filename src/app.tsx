@@ -33,7 +33,7 @@ function storedStay(): boolean {
   }
 }
 
-type Boot = {status: 'loading'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
+type Boot = {status: 'loading'} | {status: 'blocked'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
 
 /** Progress of redeeming the invite in the address bar, if there is one. */
 type Join = {status: 'idle'} | {status: 'joining'} | {status: 'failed'} | {status: 'joined'; chatId: string}
@@ -42,7 +42,11 @@ export function App() {
   const [boot, setBoot] = useState<Boot>({status: 'loading'})
 
   useEffect(() => {
-    openStore()
+    openStore('snrdlr', {
+      onBlocked: () => setBoot(current => (current.status === 'loading' ? {status: 'blocked'} : current)),
+      // This tab is the old one: load the new version, which can use the storage as it now is.
+      onOutdated: () => location.reload()
+    })
       .then(async store => {
         // Keys are made on first launch, before the person is asked for a name, so that an invite can
         // be redeemed straight away while its code is still showing.
@@ -58,6 +62,15 @@ export function App() {
   }, [])
 
   if (boot.status === 'loading') return null
+  if (boot.status === 'blocked') {
+    return (
+      <main class="home">
+        <h1>snrdlr</h1>
+        <p>snrdlr has been updated, and another tab in this browser is still running the old version.</p>
+        <p>Reload or close that tab, and this one will carry on by itself.</p>
+      </main>
+    )
+  }
   if (boot.status === 'failed') {
     return (
       <main class="home">

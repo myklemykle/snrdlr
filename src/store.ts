@@ -47,8 +47,21 @@ interface Schema extends DBSchema {
 
 export type Store = ReturnType<typeof wrap>
 
-export async function openStore(name = 'snrdlr') {
+export type StoreHooks = {
+  /** Another tab, running an older version of the app, is holding the storage open; we wait for it. */
+  onBlocked?: () => void
+  /** A newer version of the app in another tab needs the storage; ours has been closed to let it in. */
+  onOutdated?: () => void
+}
+
+export async function openStore(name = 'snrdlr', hooks: StoreHooks = {}) {
   const db = await openDB<Schema>(name, 5, {
+    blocked: () => hooks.onBlocked?.(),
+    // Without this, a tab left open on an old version would stop every newer tab from starting.
+    blocking(_current, _blocked, event) {
+      ;(event.target as IDBDatabase).close()
+      hooks.onOutdated?.()
+    },
     upgrade(db, oldVersion, _newVersion, upgrade) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
