@@ -8,7 +8,9 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Nothing plays while the app is closed or the phone is locked; that needs notifications (Phase 6).
   - One pool of sounds for both directions. Separate sets for sent and received, a per-chat mute, and a volume control are possible later.
   - Not yet heard on a real iPhone or Android phone; check that the silent switch mutes it on the iPhone.
-  - Each set has its own volume in Settings, from 0 to 200%, for trying levels out. Once a level is settled, set it as that set's default (or re-level the files) and consider removing the slider.
+  - Each set has its own volume in Settings, from 0 to 200%. Defaults: snrdl 10%, plink 50%. A device where the slider was moved keeps its own level. The low snrdl default suggests the files themselves could be re-levelled.
+  - The sound for sending plays when the message is known to have reached another member's device, which each device now reports the moment it receives something. A device on an older copy of the app reports only every half minute, so the sound can be that late.
+  - **Delivered marks.** The same report could show, per message, that it has reached someone (and later, everyone). Not built.
   - The snrdl sounds are credited to Elan Katin in the README; under what licence they are shared is not recorded.
 - **Settings.** A window opened from the gear on the home screen, holding only the choice of sounds so far. Candidates to move or add there: changing your name, the stay-connected switch, the version line, storage used.
 - **Names and nicknames.**

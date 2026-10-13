@@ -95,7 +95,11 @@ export function ChatScreen(props: {
             if (peerIds.length > 0) setError(null)
           },
           onError: message => !cancelled && setError(message),
-          onFiles: held => !cancelled && setFiles(held)
+          onFiles: held => !cancelled && setFiles(held),
+          // The sound for sending waits until the message has reached at least one other person's device.
+          onDelivered: arrived => {
+            if (!cancelled && arrived.some(({content}) => content.type === 'text' || content.type === 'image')) playSound()
+          }
         }
       })
       if (cancelled) void opened.close()
@@ -302,7 +306,6 @@ export function ChatScreen(props: {
     const text = draft.trim()
     if (!session.current || preparing > 0 || (!text && attached.length === 0)) return
     setDraft('')
-    playSound()
     if (attached.length === 0) return session.current.sendText(text).catch(() => setError('Message could not be sent.'))
     const sending = attached
     setAttached([])

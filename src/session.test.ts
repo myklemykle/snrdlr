@@ -36,7 +36,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     peers: [] as string[],
     statuses: [] as ConnectionStatus[],
     errors: [] as string[],
-    files: new Set() as ReadonlySet<string>
+    files: new Set() as ReadonlySet<string>,
+    delivered: [] as string[]
   }
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
@@ -49,7 +50,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
       onStatus: status => state.statuses.push(status),
       onPeersChange: peers => (state.peers = peers),
       onError: message => state.errors.push(message),
-      onFiles: files => (state.files = files)
+      onFiles: files => (state.files = files),
+      onDelivered: arrived => state.delivered.push(...arrived.flatMap(m => (m.content.type === 'text' ? [m.content.text] : [])))
     },
     errorDelayMs: 60
   })
@@ -66,6 +68,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     get files() {
       return state.files
     },
+    /** The texts of our messages known to have reached someone, in the order that was learned. */
+    delivered: state.delivered,
     statuses: state.statuses,
     errors: state.errors
   }
@@ -764,5 +768,33 @@ describe('session', () => {
     await mallory.sendFile('f'.repeat(64), file, bob.identity.id)
     await settle()
     expect(await bobStore.listFiles(chat.id)).toEqual([])
+  })
+
+  it('learns that a message has reached someone, straight away if they are there and later if not', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    await settle()
+
+    // Nobody is there: it is stored and waiting, not delivered.
+    await anne.session.sendText('anyone?')
+    await settle()
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(anne.delivered).toEqual([])
+
+    // Bob arrives and syncs: now it has reached someone.
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await vi.waitFor(() => expect(anne.delivered).toEqual(['anyone?']))
+
+    // With Bob there, the next one is confirmed within a moment, once, however many people hold it.
+    const cindy = await join(network, chat, createIdentity('Cindy'))
+    await settle()
+    await anne.session.sendText('hello both')
+    await vi.waitFor(() => expect(anne.delivered).toEqual(['anyone?', 'hello both']))
+    await new Promise(resolve => setTimeout(resolve, 150))
+    expect(anne.delivered).toEqual(['anyone?', 'hello both'])
+    // Receiving is not delivering: Bob and Cindy sent nothing.
+    expect(bob.delivered).toEqual([])
+    expect(cindy.delivered).toEqual([])
   })
 })

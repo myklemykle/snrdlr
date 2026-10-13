@@ -835,7 +835,7 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   // Joining and catching up on history is silent.
   expect(await played(bob)).toBe(0)
 
-  // One for sending, one for receiving.
+  // One for receiving, and one for sending once it has arrived.
   await send(anne, 'hello')
   await expect(bob.locator('.theirs', {hasText: 'hello'})).toBeVisible()
   await expect.poll(() => played(anne)).toBe(1)
@@ -873,14 +873,15 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
 
   // Each set has its own volume. Moving the slider plays a sound at the new level.
   const volumes = () => bob.evaluate(() => (window as unknown as {volumes: number[]}).volumes)
-  expect((await volumes()).at(-1)).toBe(1)
-  await expect(settings.getByText('Volume of plink: 100%')).toBeVisible()
+  expect((await volumes()).at(-1)).toBe(0.5)
+  await expect(settings.getByText('Volume of plink: 50%')).toBeVisible()
   await settings.getByRole('slider', {name: 'Volume of plink'}).fill('40')
   await expect(settings.getByText('Volume of plink: 40%')).toBeVisible()
   await expect.poll(() => played(bob)).toBe(4)
   expect((await volumes()).at(-1)).toBeCloseTo(0.4)
   await settings.getByRole('radio', {name: 'snrdl'}).check()
-  await expect(settings.getByText('Volume of snrdl: 100%')).toBeVisible()
+  await expect(settings.getByText('Volume of snrdl: 10%')).toBeVisible()
+  expect((await volumes()).at(-1)).toBeCloseTo(0.1)
   await settings.getByRole('slider', {name: 'Volume of snrdl'}).fill('150')
   await expect.poll(() => played(bob)).toBe(6)
   expect((await volumes()).at(-1)).toBeCloseTo(1.5)
@@ -909,6 +910,17 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   expect((await volumes()).at(-1)).toBeCloseTo(1.5)
   await bob.keyboard.press('Escape')
   await expect(settings).toHaveCount(0)
+
+  // Sending to nobody is silent. The sound comes when the message reaches someone.
+  await expect.poll(() => played(anne)).toBe(3)
+  await bob.goto('about:blank')
+  await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+  await send(anne, 'left for later')
+  await anne.waitForTimeout(800)
+  expect(await played(anne)).toBe(3)
+  await bob.goto('/')
+  await expect(chatEntry(bob, 'Sounds').locator('.unread')).toBeVisible({timeout: 20_000})
+  await expect.poll(() => played(anne)).toBe(4)
 })
 
 test('each sound set plays its own files, and every file in the app\'s own set can be decoded', async ({browser}) => {

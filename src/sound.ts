@@ -57,12 +57,17 @@ const urls = () => sets.get(soundChoice()) ?? []
 export const MAX_VOLUME = 2
 const volumeKey = (choice: string) => `snrdlr.soundVolume.${choice}`
 
+// Where each set starts, chosen by ear. A set not listed plays as its files were made.
+const DEFAULT_VOLUMES: Record<string, number> = {snrdl: 0.1, plink: 0.5}
+
 export function soundVolume(choice: string): number {
+  const usual = DEFAULT_VOLUMES[choice] ?? 1
   try {
-    const stored = Number(localStorage.getItem(volumeKey(choice)) ?? '1')
-    return Number.isFinite(stored) ? Math.min(MAX_VOLUME, Math.max(0, stored)) : 1
+    const stored = localStorage.getItem(volumeKey(choice))
+    const volume = stored === null ? usual : Number(stored)
+    return Number.isFinite(volume) ? Math.min(MAX_VOLUME, Math.max(0, volume)) : usual
   } catch {
-    return 1
+    return usual
   }
 }
 

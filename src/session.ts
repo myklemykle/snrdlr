@@ -58,6 +58,8 @@ export type SessionHandlers = {
   onStatus: (status: ConnectionStatus) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
+  /** Messages of ours that some other member's device is now known to hold. Called once for each message. */
+  onDelivered?: (messages: MessageRecord[]) => void
   /** The hashes of the files held for this chat, whenever that changes. */
   onFiles?: (held: ReadonlySet<string>) => void
 }
@@ -92,6 +94,9 @@ const SEARCH_GRACE_MS = 8_000
 const ERROR_DELAY_MS = 15_000
 // Files are fetched a few at a time. A peer that has not sent one after this long is given up on, and
 // one that said it lacks a file is not asked again for a while.
+// After receiving messages from a peer, how long to wait before telling them what we now hold, so a
+// run of messages is acknowledged once.
+const ACK_DELAY_MS = 50
 const MAX_FILE_REQUESTS = 3
 const FILE_TIMEOUT_MS = 45_000
 const FILE_RETRY_MS = 25_000
@@ -255,6 +260,28 @@ export async function openSession(options: {
       .catch(() => {})
   }
 
+  // Delivery: a peer's version vector says how many of our messages they hold. Whoever receives a message
+  // sends theirs straight back, so the author learns within a moment that it arrived somewhere.
+  const undelivered = new Map<number, MessageRecord>()
+  const noteDelivered = (have: VersionVector) => {
+    const reached = have[identity.id] ?? 0
+    const arrived = [...undelivered.values()].filter(record => record.seq <= reached)
+    if (arrived.length === 0) return
+    for (const record of arrived) undelivered.delete(record.seq)
+    handlers.onDelivered?.(arrived)
+  }
+  const acks = new Map<string, ReturnType<typeof setTimeout>>()
+  const acknowledge = (peerId: string) => {
+    if (acks.has(peerId)) return
+    acks.set(
+      peerId,
+      setTimeout(() => {
+        acks.delete(peerId)
+        if (!closed && peers.includes(peerId)) void wire?.sendSync(versionVector(messages), peerId).catch(() => {})
+      }, ACK_DELAY_MS)
+    )
+  }
+
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
   async function post(content: Content): Promise<void> {
     for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
@@ -264,6 +291,7 @@ export async function openSession(options: {
       const record: MessageRecord = {...message, author: identity.id, chatId: chat.id, receivedAt: message.sentAt, envelope}
       if (await store.addMessage(record)) {
         insert(record)
+        undelivered.set(record.seq, record)
         await wire?.send(envelope).catch(() => {})
         return
       }
@@ -304,6 +332,7 @@ export async function openSession(options: {
   async function answerSync(value: unknown, peerId: string, via: Wire) {
     const have = parseVector(value)
     if (!have) return
+    noteDelivered(have)
     const missing = messages.filter(message => message.seq > (have[message.author] ?? 0))
     for (const message of missing) {
       if (wire !== via || !peers.includes(peerId)) return
@@ -322,7 +351,10 @@ export async function openSession(options: {
     let wireReady!: (opened: Wire) => void
     const ready = new Promise<Wire>(resolve => (wireReady = resolve))
     const opened = await options.connect(keys, {
-      onEnvelope: envelope => void receive(envelope),
+      onEnvelope: (envelope, peerId) =>
+        void receive(envelope).then(() => {
+          if (live()) acknowledge(peerId)
+        }),
       onSync: (have, peerId) =>
         void ready.then(via => {
           if (live()) void answerSync(have, peerId, via)
@@ -427,6 +459,7 @@ export async function openSession(options: {
     async close() {
       closed = true
       clearInterval(resync)
+      acks.forEach(timer => clearTimeout(timer))
       clearTimeout(searchTimer)
       clearTimeout(errorTimer)
       await wire?.leave().catch(() => {})
