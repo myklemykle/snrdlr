@@ -1,7 +1,17 @@
 import {expect, test, type Browser, type Page} from '@playwright/test'
 
-/** A separate browser profile, so each person has their own storage and identity. */
+/**
+ * A separate browser profile, so each person has their own storage and identity. They have been
+ * invited before, as anyone who can start a chat must have been.
+ */
 async function newPerson(browser: Browser): Promise<Page> {
+  const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write']})
+  await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
+  return context.newPage()
+}
+
+/** Someone who has never used the app and has not been invited. */
+async function newStranger(browser: Browser): Promise<Page> {
   const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write']})
   return context.newPage()
 }
@@ -760,6 +770,7 @@ test('a picture reaches someone who was away, through a third person, after its 
 
 test('a tab left open on an old version does not leave newer tabs blank, and steps aside for a newer one', async ({browser}) => {
   const context = await browser.newContext()
+  await context.addInitScript(() => localStorage.setItem('snrdlr.invited', '1'))
   // An old tab: holds the storage open at an earlier version and, like old versions, never lets go.
   const old = await context.newPage()
   await old.goto('/')
@@ -1017,6 +1028,105 @@ test('developer mode: a standing link lets someone join later, with the inviter 
   // Developer mode is turned off the same way.
   await anne.goto('/?dev=0')
   await expect(anne.locator('.build')).not.toContainText('developer mode')
+})
+
+test('the app is invite-only: a stranger cannot set up, and gets in by joining through an invite', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const stranger = await newStranger(browser)
+
+  // Finding the address is not enough: no name is asked for and nothing can be started.
+  await stranger.goto('/')
+  await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
+  await expect(stranger.getByLabel('Your name')).toHaveCount(0)
+  await expect(stranger.getByRole('button')).toHaveCount(0)
+  await stranger.reload()
+  await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
+
+  // An invite that no longer works does not let them in, even if they had started typing a name.
+  const invite = await startChat(anne, 'Anne', 'Club')
+  await anne.getByRole('button', {name: 'Stop inviting'}).click()
+  await stranger.goto(invite)
+  await expect(stranger.getByLabel('Your name')).toBeVisible()
+  await expect(stranger.getByText('That invite is no longer active')).toBeVisible({timeout: 15_000})
+  await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
+  await expect(stranger.getByLabel('Your name')).toHaveCount(0)
+  await stranger.reload()
+  await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
+
+  // A live invite does. From then on they are a user like any other, across reloads.
+  await anne.getByRole('button', {name: 'Invite', exact: true}).click()
+  await stranger.goto(await copyInvite(anne))
+  await introduce(stranger, 'Newcomer')
+  await expect(stranger.getByRole('heading', {name: 'Club'})).toBeVisible()
+  await expect(anne.getByText('Newcomer joined · invited by you')).toBeVisible({timeout: 30_000})
+  await stranger.goto('/')
+  await expect(stranger.getByRole('button', {name: 'Start a group'})).toBeVisible()
+  await expect(chatEntry(stranger, 'Club')).toBeVisible()
+
+  // Leaving every chat does not put them back outside.
+  await stranger.getByRole('button', {name: 'Leave Club'}).click()
+  await stranger.getByRole('button', {name: 'Leave chat'}).click()
+  await stranger.reload()
+  await expect(stranger.getByRole('button', {name: 'Start a group'})).toBeVisible()
+})
+
+test('someone invited who closes the app before giving a name is still in when they return', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const stranger = await newStranger(browser)
+  const invite = await startChat(anne, 'Anne', 'Club')
+  await stranger.goto(invite)
+  await expect(stranger.getByLabel('Your name')).toBeVisible()
+  // Joined in the background, before any name was typed.
+  await expect.poll(() => stranger.evaluate(() => localStorage.getItem('snrdlr.invited')), {timeout: 15_000}).toBe('1')
+  await stranger.goto('about:blank')
+  await stranger.goto('/')
+  await introduce(stranger, 'Slow')
+  await expect(chatEntry(stranger, 'Club')).toBeVisible()
+})
+
+test('a "chat with me" code and a standing link both let a stranger in; developer mode skips the gate', async ({browser}) => {
+  const anne = await newPerson(browser)
+  await anne.goto('/?dev=1')
+  await introduce(anne, 'Anne')
+
+  const viaCode = await newStranger(browser)
+  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  await viaCode.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await introduce(viaCode, 'Coded')
+  await expect(viaCode.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
+  await viaCode.goto('/')
+  await expect(viaCode.getByRole('button', {name: 'Start a group'})).toBeVisible()
+
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByLabel('Chat name').fill('Demo')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  await anne.getByRole('button', {name: 'Copy standing link (testing)'}).click()
+  const viaLink = await newStranger(browser)
+  await viaLink.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await introduce(viaLink, 'Linked')
+  await expect(viaLink.getByRole('heading', {name: 'Demo'})).toBeVisible()
+  await viaLink.goto('/')
+  await expect(viaLink.getByRole('button', {name: 'Start a group'})).toBeVisible()
+
+  // A fresh device with developer mode on is asked its name like before.
+  const developer = await newStranger(browser)
+  await developer.goto('/?dev=1')
+  await introduce(developer, 'Dev')
+  await expect(developer.getByRole('button', {name: 'Start a group'})).toBeVisible()
+})
+
+test('someone who used the app before it was invite-only is still in', async ({browser}) => {
+  // The first visit is made with developer mode on, which leaves no record of an invitation; then that
+  // is switched off, as if the gate had arrived with an update.
+  const earlier = await newStranger(browser)
+  await earlier.goto('/?dev=1')
+  await introduce(earlier, 'Early')
+  await expect(earlier.getByRole('button', {name: 'Start a group'})).toBeVisible()
+  expect(await earlier.evaluate(() => localStorage.getItem('snrdlr.invited'))).toBeNull()
+  await earlier.goto('/?dev=0')
+  await expect(earlier.getByRole('button', {name: 'Start a group'})).toBeVisible()
+  expect(await earlier.evaluate(() => localStorage.getItem('snrdlr.invited'))).toBe('1')
 })
 
 test('the home screen says which build is running', async ({browser}) => {

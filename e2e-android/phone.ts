@@ -91,6 +91,9 @@ export async function resetApp(page: Page) {
   await session.send('Storage.clearDataForOrigin', {origin: APP, storageTypes: 'all'})
   await session.detach()
   await page.goto(`${APP}/`)
+  // The app is invite-only; these tests start from someone who has been invited before.
+  await page.evaluate(() => localStorage.setItem('snrdlr.invited', '1'))
+  await page.reload()
 }
 
 /** Clicks a copy button and returns what it copied, without needing clipboard permission on the phone. */

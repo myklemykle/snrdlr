@@ -23,9 +23,11 @@ For anything that fails, note the step number, what the screen said (the status 
 
 ## 1. First launch
 
-- [ ] 1.1 Open the app address in Chrome. It asks "What should people call you?". No storage warning appears.
-- [ ] 1.2 Enter a name. The home screen shows "Start a group" and "Chat with one person".
-- [ ] 1.3 Close the tab, open the address again. It goes straight to the home screen without asking the name.
+The app is invite-only, so a phone that has never used it starts by being invited.
+
+- [ ] 1.1 Open the app address in Chrome on a phone that has never used it. It says "snrdlr is invite-only" and offers nothing else. No storage warning appears.
+- [ ] 1.2 On the other device, start a group so its code is showing, and scan it with Android. It asks "You have been invited to a chat. What should people call you?". Enter a name; the chat opens.
+- [ ] 1.3 Close the tab, open the app address again. It goes straight to the home screen, which shows "Start a group" and "Chat with one person", without asking the name.
 
 ## 2. Android invites, other joins
 

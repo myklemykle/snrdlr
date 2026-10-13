@@ -6,6 +6,8 @@ An experimental chat app where the only way to add someone is to meet them: one 
 
 **Status: Phases 1, 2 and 4 of the plan.** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text in groups and direct chats, and keep their chats and history on the device. Only people who were invited are let into a chat. Messages written while someone is away reach them the next time they are online together with any member who has them. Nobody has reviewed the cryptography. Do not rely on it for anything private.
 
+The app is invite-only: a device gets in by joining a chat through someone's invite. That is a courtesy gate in the app itself (`src/gate.ts`), not a lock.
+
 ## How it works
 
 - **Identity.** Each device makes an Ed25519 signing key and an X25519 key on first launch. There is no account and no recovery.

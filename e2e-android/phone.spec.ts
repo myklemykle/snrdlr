@@ -26,6 +26,7 @@ test.afterAll(async () => {
 
 async function newDesk(browser: Browser, name = 'Desk'): Promise<Page> {
   const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write']})
+  await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
   const page = await context.newPage()
   await page.goto('/')
   await introduce(page, name)

@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'preact/hooks'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
+import {admit, isAdmitted} from './gate'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
 import {hostInvite, redeemInvite} from './invite-room'
@@ -37,7 +38,11 @@ function storedStay(): boolean {
   }
 }
 
-type Boot = {status: 'loading'} | {status: 'blocked'} | {status: 'failed'} | {status: 'ready'; store: Store; identity: Identity}
+type Boot =
+  | {status: 'loading'}
+  | {status: 'blocked'}
+  | {status: 'failed'}
+  | {status: 'ready'; store: Store; identity: Identity; admitted: boolean}
 
 /** Progress of redeeming the invite in the address bar, if there is one. */
 type Join = {status: 'idle'} | {status: 'joining'} | {status: 'failed'} | {status: 'joined'; chatId: string}
@@ -60,7 +65,9 @@ export function App() {
           secrets = {name, signSecret, dhSecret}
           await store.saveIdentity(secrets)
         }
-        setBoot({status: 'ready', store, identity: loadIdentity(secrets)})
+        // Anyone with a name or a chat was here before the app became invite-only, or has been invited since.
+        const established = secrets.name !== '' || (await store.listChats()).length > 0
+        setBoot({status: 'ready', store, identity: loadIdentity(secrets), admitted: isAdmitted(established)})
       })
       .catch(() => setBoot({status: 'failed'}))
   }, [])
@@ -83,8 +90,16 @@ export function App() {
       </main>
     )
   }
-  const {store} = boot
-  return <Main store={store} identity={boot.identity} onIdentity={identity => setBoot({status: 'ready', store, identity})} />
+  const {store, admitted} = boot
+  return (
+    <Main
+      store={store}
+      identity={boot.identity}
+      admitted={admitted}
+      onAdmitted={() => setBoot(current => (current.status === 'ready' ? {...current, admitted: true} : current))}
+      onIdentity={identity => setBoot(current => (current.status === 'ready' ? {...current, identity} : current))}
+    />
+  )
 }
 
 /**
@@ -146,8 +161,15 @@ function useJoin(store: Store, identity: Identity, hash: string): [Join, () => v
   return [join, () => setJoin({status: 'idle'})]
 }
 
-function Main(props: {store: Store; identity: Identity; onIdentity: (identity: Identity) => void}) {
-  const {store, identity, onIdentity} = props
+function Main(props: {
+  store: Store
+  identity: Identity
+  /** Whether this device has been invited; until then all it can do is redeem an invite. */
+  admitted: boolean
+  onAdmitted: () => void
+  onIdentity: (identity: Identity) => void
+}) {
+  const {store, identity, admitted, onAdmitted, onIdentity} = props
   const [hash, setHash] = useState(location.hash)
   const [join, clearJoin] = useJoin(store, identity, hash)
   const named = identity.name !== ''
@@ -233,16 +255,23 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
   // A sound for messages arriving in chats that are not on screen.
   useEffect(() => onBackgroundActivity((_chatId, incoming) => incoming && playSound()), [])
 
-  // Once the invite has been dealt with, take it out of the address bar and history.
+  // Joining a chat by invite is what lets a device into the app.
   useEffect(() => {
-    if (!named) return
-    if (join.status === 'joined') {
-      clearJoin()
-      openChat(join.chatId, true)
-    } else if (join.status === 'failed') {
+    if (join.status !== 'joined' || admitted) return
+    admit()
+    onAdmitted()
+  }, [join])
+
+  // Once the invite has been dealt with, take it out of the address bar and history. Someone who is
+  // not in yet and whose invite did not work is told so at once, without being asked for a name first.
+  useEffect(() => {
+    if (join.status === 'failed' && (named || !admitted)) {
       clearJoin()
       setNotice(STALE_INVITE)
       goHome(true)
+    } else if (join.status === 'joined' && named) {
+      clearJoin()
+      openChat(join.chatId, true)
     }
   }, [join, named])
 
@@ -259,8 +288,20 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
     }
   }, [hash])
 
+  const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isStandingFragment(hash)
+  if (!admitted && !redeeming) {
+    return (
+      <main class="home">
+        <h1>snrdlr</h1>
+        {notice && <p class="error">{notice}</p>}
+        <p>snrdlr is invite-only.</p>
+        <p>To join, ask someone who already uses it to show you their code, and scan it with your camera while it is on their screen.</p>
+        <p class="build">Version {__BUILD__}</p>
+      </main>
+    )
+  }
   if (!named) return <Welcome store={store} identity={identity} invited={join.status !== 'idle'} onNamed={onIdentity} />
-  if (join.status !== 'idle' || isInviteFragment(hash) || isStandingFragment(hash)) {
+  if (redeeming) {
     return (
       <main class="home">
         <h1>snrdlr</h1>
