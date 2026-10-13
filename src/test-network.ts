@@ -15,6 +15,9 @@ export function makeNetwork() {
     sent: [] as {from: string; to?: string; envelope: Uint8Array}[],
     /** Every answer to a request for a file: who sent it to whom, and whether they had it. */
     files: [] as {from: string; to: string; hash: string; sent: boolean}[],
+    /** Every full account of what is held, and every short acknowledgement, put on the wire. */
+    syncs: [] as {from: string; to?: string; have: Record<string, number>}[],
+    acks: [] as {from: string; to: string; have: Record<string, number>}[],
     joins: 0,
     /** Who is in the room right now. */
     present: () => [...members.keys()],
@@ -35,7 +38,14 @@ export function makeNetwork() {
             this.sent.push({from: peerId, to: target, envelope})
             deliver(peerId, target, peer => peer.onEnvelope(envelope, peerId))
           },
-          sendSync: async (have, target) => deliver(peerId, target, peer => peer.onSync(have, peerId)),
+          sendSync: async (have, target) => {
+            this.syncs.push({from: peerId, to: target, have})
+            deliver(peerId, target, peer => peer.onSync(have, peerId))
+          },
+          sendAck: async (have, target) => {
+            this.acks.push({from: peerId, to: target, have})
+            deliver(peerId, target, peer => peer.onAck(have, peerId))
+          },
           ping: async target => {
             if (dead.has(peerId) || dead.has(target) || !members.has(target)) throw new Error('no answer')
           },

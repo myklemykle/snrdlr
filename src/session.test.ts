@@ -473,7 +473,7 @@ describe('session', () => {
     await settle()
     network.sent.length = 0
 
-    const wire = network.connect('mallory')({}, {onEnvelope() {}, onSync() {}, onPeersChange() {}, onError() {}, onFileWanted() {}, onFile() {}, expectsFile: () => false})
+    const wire = network.connect('mallory')({}, {onEnvelope() {}, onSync() {}, onAck() {}, onPeersChange() {}, onError() {}, onFileWanted() {}, onFile() {}, expectsFile: () => false})
     await settle()
     network.sent.length = 0
     for (const junk of [null, 'everything', [], {'not-an-id': 0}, {[anne.identity.id]: -1}, {[anne.identity.id]: 1.5}]) {
@@ -749,6 +749,7 @@ describe('session', () => {
       {
         onEnvelope() {},
         onSync() {},
+        onAck() {},
         onPeersChange() {},
         onError() {},
         onFile() {},
@@ -788,11 +789,20 @@ describe('session', () => {
 
     // With Bob there, the next one is confirmed within a moment, once, however many people hold it.
     const cindy = await join(network, chat, createIdentity('Cindy'))
-    await settle()
+    // Long enough for the exchange that follows a join to finish, acknowledgements included.
+    await new Promise(resolve => setTimeout(resolve, 200))
+    network.syncs.length = 0
+    network.acks.length = 0
     await anne.session.sendText('hello both')
     await vi.waitFor(() => expect(anne.delivered).toEqual(['anyone?', 'hello both']))
     await new Promise(resolve => setTimeout(resolve, 150))
     expect(anne.delivered).toEqual(['anyone?', 'hello both'])
+    // Each receiver answers with one short note about Anne's messages only, not a list of everyone's.
+    const annesCount = versionVector(anne.view)[anne.identity.id]
+    expect(network.acks).toHaveLength(2)
+    for (const ack of network.acks) expect(ack).toMatchObject({to: anne.identity.id, have: {[anne.identity.id]: annesCount}})
+    expect(network.acks.map(ack => Object.keys(ack.have).length)).toEqual([1, 1])
+    expect(network.syncs).toEqual([])
     // Receiving is not delivering: Bob and Cindy sent nothing.
     expect(bob.delivered).toEqual([])
     expect(cindy.delivered).toEqual([])

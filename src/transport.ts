@@ -99,6 +99,13 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     }
   })
 
+  const ackNotes = room.makeAction<VersionVector>('ack', {
+    onReceive: ({byteLength}) => byteLength <= MAX_SYNC_BYTES,
+    onMessage: (data, {peerId}) => {
+      if (members.has(peerId)) handlers.onAck(data, peerId)
+    }
+  })
+
   // Files (pictures) are asked for by hash and sent whole; Trystero splits them up on the way.
   const wants = room.makeAction<string>('want', {
     onMessage: (hash, {peerId}) => {
@@ -210,6 +217,9 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     sendSync: async (have, peerId) => {
       const to = targets(peerId)
       if (to.length > 0) await syncs.send(have, {target: to})
+    },
+    sendAck: async (have, peerId) => {
+      if (members.has(peerId)) await ackNotes.send(have, {target: peerId})
     },
     requestFile: async (hash, peerId) => {
       if (members.has(peerId)) await wants.send(hash, {target: peerId})

@@ -22,6 +22,8 @@ export type VersionVector = Record<string, number>
 export type WireHandlers = {
   onEnvelope: (envelope: Uint8Array, peerId: string) => void
   onSync: (have: unknown, peerId: string) => void
+  /** A peer says how many messages it holds from the authors of what we just sent it. */
+  onAck: (have: unknown, peerId: string) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
   /** A peer asks for a file. */
@@ -36,6 +38,7 @@ export type Wire = {
   /** Sends to everyone connected, or to one peer. */
   send: (envelope: Uint8Array, peerId?: string) => Promise<void>
   sendSync: (have: VersionVector, peerId?: string) => Promise<void>
+  sendAck: (have: VersionVector, peerId: string) => Promise<void>
   requestFile: (hash: string, peerId: string) => Promise<void>
   /** Sends a file to the peer who asked, or null to say we do not have it. */
   sendFile: (hash: string, data: Uint8Array | null, peerId: string) => Promise<void>
@@ -260,8 +263,9 @@ export async function openSession(options: {
       .catch(() => {})
   }
 
-  // Delivery: a peer's version vector says how many of our messages they hold. Whoever receives a message
-  // sends theirs straight back, so the author learns within a moment that it arrived somewhere.
+  // Delivery: whoever receives messages replies at once with how many it now holds from their authors
+  // (normally one author, the sender). That is how an author learns a message has arrived somewhere.
+  // It is a small note, not the full account of everything held that sync exchanges.
   const undelivered = new Map<number, MessageRecord>()
   const noteDelivered = (have: VersionVector) => {
     const reached = have[identity.id] ?? 0
@@ -270,16 +274,18 @@ export async function openSession(options: {
     for (const record of arrived) undelivered.delete(record.seq)
     handlers.onDelivered?.(arrived)
   }
-  const acks = new Map<string, ReturnType<typeof setTimeout>>()
-  const acknowledge = (peerId: string) => {
-    if (acks.has(peerId)) return
-    acks.set(
-      peerId,
-      setTimeout(() => {
-        acks.delete(peerId)
-        if (!closed && peers.includes(peerId)) void wire?.sendSync(versionVector(messages), peerId).catch(() => {})
-      }, ACK_DELAY_MS)
-    )
+  const acks = new Map<string, {timer: ReturnType<typeof setTimeout>; authors: Set<string>}>()
+  const acknowledge = (peerId: string, author: string) => {
+    const pending = acks.get(peerId)
+    if (pending) return void pending.authors.add(author)
+    const authors = new Set([author])
+    const timer = setTimeout(() => {
+      acks.delete(peerId)
+      if (closed || !peers.includes(peerId)) return
+      const held = versionVector(messages.filter(message => authors.has(message.author)))
+      if (Object.keys(held).length > 0) void wire?.sendAck(held, peerId).catch(() => {})
+    }, ACK_DELAY_MS)
+    acks.set(peerId, {timer, authors})
   }
 
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
@@ -311,20 +317,24 @@ export async function openSession(options: {
     if (record.content.type === 'image') fetchFiles()
   }
 
-  async function receive(envelope: Uint8Array) {
+  /** Takes in a message from the network. Returns its author, or null if it was not a genuine message. */
+  async function receive(envelope: Uint8Array): Promise<string | null> {
+    let author: string | null = null
     try {
       const message = await openEnvelope(context, envelope)
+      author = message.author
       // A certificate proves itself, so it counts even if the message carrying it cannot be kept yet.
       const someoneNew = learnFrom(message.content)
       if (roster.has(message.author)) await keep(message, envelope)
       else held = [...held, {message, envelope}].slice(-MAX_HELD)
-      if (!someoneNew) return
+      if (!someoneNew) return author
       const ready = held.filter(entry => roster.has(entry.message.author))
       held = held.filter(entry => !roster.has(entry.message.author))
       for (const entry of ready) await keep(entry.message, entry.envelope)
     } catch (error) {
       console.warn('dropped a message:', error instanceof Error ? error.message : error)
     }
+    return author
   }
 
   // Sends a peer everything they say they lack. Their vector is the only evidence of what they hold:
@@ -352,9 +362,13 @@ export async function openSession(options: {
     const ready = new Promise<Wire>(resolve => (wireReady = resolve))
     const opened = await options.connect(keys, {
       onEnvelope: (envelope, peerId) =>
-        void receive(envelope).then(() => {
-          if (live()) acknowledge(peerId)
+        void receive(envelope).then(author => {
+          if (author && live()) acknowledge(peerId, author)
         }),
+      onAck: have => {
+        const held = parseVector(have)
+        if (held && live()) noteDelivered(held)
+      },
       onSync: (have, peerId) =>
         void ready.then(via => {
           if (live()) void answerSync(have, peerId, via)
@@ -459,7 +473,7 @@ export async function openSession(options: {
     async close() {
       closed = true
       clearInterval(resync)
-      acks.forEach(timer => clearTimeout(timer))
+      acks.forEach(({timer}) => clearTimeout(timer))
       clearTimeout(searchTimer)
       clearTimeout(errorTimer)
       await wire?.leave().catch(() => {})
