@@ -16,6 +16,7 @@ import {describeRoutes, type Route} from './route'
 import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
 import {playSound} from './sound'
+import {devMode, makeStandingInvite} from './standing-invite'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
@@ -256,18 +257,25 @@ export function ChatScreen(props: {
     const found = new Map<string, string>()
     for (const message of messages ?? []) {
       const {content} = message
-      const bytes = content.type === 'member-cert' ? content.cert : content.type === 'profile' ? content.chain?.at(-1) : undefined
-      if (!bytes) continue
-      try {
-        const cert = openCert(chat.id, bytes)
-        found.set(memberId(cert.subject), memberId(cert.issuer))
-      } catch {
-        // Not a valid certificate for this chat; ignore it.
+      const certs = content.type === 'member-cert' ? [content.cert] : content.type === 'profile' ? (content.chain ?? []) : []
+      for (const bytes of certs) {
+        try {
+          const cert = openCert(chat.id, bytes)
+          found.set(memberId(cert.subject), memberId(cert.issuer))
+        } catch {
+          // Not a valid certificate for this chat; ignore it.
+        }
       }
     }
     return found
   }, [messages])
   const founderId = chat.kind === 'group' ? memberId(chat.context) : null
+  // Someone who came in by a standing link was admitted by a throwaway member, which has no name of its
+  // own; say whose link it was.
+  const invitedLine = (inviter: string) => {
+    const linkMaker = inviter !== identity.id && !names.has(inviter) ? invitedBy.get(inviter) : undefined
+    return linkMaker ? `by a standing link from ${nameOf(linkMaker)}` : `invited by ${nameOf(inviter)}`
+  }
 
   // Pictures chosen but not yet sent, shown above the message box. What is typed there becomes the caption.
   const [attached, setAttached] = useState<(PreparedImage & {url: string})[]>([])
@@ -415,6 +423,17 @@ export function ChatScreen(props: {
     }
   }
 
+  const [standingCopied, setStandingCopied] = useState(false)
+  const copyStanding = async () => {
+    try {
+      await navigator.clipboard.writeText(location.origin + location.pathname + makeStandingInvite(chat, identity, Date.now()))
+      setStandingCopied(true)
+      setTimeout(() => setStandingCopied(false), 2000)
+    } catch {
+      setError("Couldn't copy the link.")
+    }
+  }
+
   const copyInvite = async () => {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -473,6 +492,17 @@ export function ChatScreen(props: {
           <button type="button" onClick={copyInvite}>
             {copied ? 'Copied' : 'Copy invite link'}
           </button>
+          {devMode() && (
+            <div class="standing">
+              <button type="button" onClick={copyStanding}>
+                {standingCopied ? 'Copied' : 'Copy standing link (testing)'}
+              </button>
+              <p class="note">
+                For showing the app to someone far away. Anyone this link ever reaches can join this chat and read all of it, at any time. It never
+                expires and cannot be cancelled, so use it only for chats made for testing.
+              </p>
+            </div>
+          )}
         </section>
       )}
 
@@ -494,7 +524,7 @@ export function ChatScreen(props: {
               <li key={key} class="event">
                 {message.author === founderId
                   ? `${message.content.name} started this chat`
-                  : `${message.content.name} joined${inviter ? ` · invited by ${nameOf(inviter)}` : ''}`}
+                  : `${message.content.name} joined${inviter ? ` · ${invitedLine(inviter)}` : ''}`}
               </li>
             ]
           }

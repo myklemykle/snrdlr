@@ -38,6 +38,8 @@ For manual testing in desktop browsers without touching public relays, run `npm 
 
 `npm run probe` measures the public Nostr relays in `scripts/relay-candidates.json`, to choose which ones the app should use. For each relay it makes two connections and posts one short-lived event the size of a real connection setup, then hangs up. It will not probe a relay again within three hours, backs off to daily or weekly when one fails, never connects to one that says it needs a login or payment, and stops for good if a relay twice asks it to slow down. `.github/workflows/probe-relays.yml` runs it every six hours and keeps the results on the `probe-data` branch; `npm run probe:report` prints both sets.
 
+For showing the app to someone far away during development, open it once with `?dev=1` on the address. A group's Invite panel then offers "Copy standing link (testing)": a link that lets whoever holds it join that group at any time, with nobody at the other end. It never expires and cannot be cancelled, so use it only for chats made for testing. `?dev=0` turns developer mode off. See `src/standing-invite.ts`.
+
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 
 ## Credits

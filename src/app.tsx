@@ -8,6 +8,7 @@ import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
+import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -92,6 +93,26 @@ function useJoin(store: Store, identity: Identity, hash: string): [Join, () => v
   const [join, setJoin] = useState<Join>({status: 'idle'})
 
   useEffect(() => {
+    // A standing invite (testing only) needs nobody at the other end: everything is in the link.
+    if (isStandingFragment(hash)) {
+      const standing = standingFromFragment(hash)
+      if (!standing) return setJoin({status: 'failed'})
+      let cancelled = false
+      setJoin({status: 'joining'})
+      void (async () => {
+        try {
+          const granted = chatFromStandingInvite(standing, identity, Date.now())
+          const others = (await store.listChats()).filter(chat => chat.id !== granted.id).map(chat => chat.name)
+          const chat = await store.saveChat({...granted, name: uniqueChatName(granted.name, others)})
+          if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
+        } catch {
+          if (!cancelled) setJoin({status: 'failed'})
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
+    }
     if (!isInviteFragment(hash)) return
     const invite = inviteFromFragment(hash)
     if (!invite) return setJoin({status: 'failed'})
@@ -237,7 +258,7 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
   }, [hash])
 
   if (!named) return <Welcome store={store} identity={identity} invited={join.status !== 'idle'} onNamed={onIdentity} />
-  if (join.status !== 'idle' || isInviteFragment(hash)) {
+  if (join.status !== 'idle' || isInviteFragment(hash) || isStandingFragment(hash)) {
     return (
       <main class="home">
         <h1>snrdlr</h1>
@@ -588,7 +609,10 @@ function Home(props: {
           </p>
         </section>
       )}
-      <p class="build">Version {__BUILD__}</p>
+      <p class="build">
+        Version {__BUILD__}
+        {devMode() && ' · developer mode'}
+      </p>
     </main>
   )
 }

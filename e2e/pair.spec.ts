@@ -952,6 +952,64 @@ test('each sound set plays its own files, and every file in the app\'s own set c
   await expect.poll(() => fetched.filter(name => name.startsWith('plink-')).length).toBe(3)
 })
 
+test('developer mode: a standing link lets someone join later, with the inviter gone', async ({browser}) => {
+  const [anne, bob, cindy] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+
+  // Not offered unless developer mode has been turned on.
+  const invite = await startChat(anne, 'Anne', 'Plain')
+  await expect(anne.getByRole('button', {name: 'Copy standing link (testing)'})).toHaveCount(0)
+  expect(invite).toContain('#i=')
+
+  // Turned on from the address, which is then tidied; the home screen says so.
+  await anne.goto('/?dev=1')
+  await expect(anne.locator('.build')).toContainText('developer mode')
+  expect(anne.url()).not.toContain('dev=')
+  await anne.getByLabel('Chat name').fill('Demo')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  // Cindy joins the ordinary way, while the code is showing.
+  await cindy.goto(await copyInvite(anne))
+  await introduce(cindy, 'Cindy')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'welcome to the demo')
+  await expect(cindy.locator('.theirs', {hasText: 'welcome to the demo'})).toBeVisible()
+
+  await anne.getByRole('button', {name: 'Copy standing link (testing)'}).click()
+  const standing = await anne.evaluate(() => navigator.clipboard.readText())
+  expect(standing).toContain('#s=')
+  await anne.getByRole('button', {name: 'Stop inviting'}).click()
+
+  // Anne closes the app altogether. Bob opens the link later and is let in by Cindy's device alone.
+  await anne.goto('about:blank')
+  await expect(cindy.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+  await bob.goto(standing)
+  await introduce(bob, 'Bob')
+  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible()
+  expect(bob.url()).not.toContain('#s=')
+  await expect(bob.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await expect(bob.locator('.theirs', {hasText: 'welcome to the demo'})).toContainText('Anne')
+  await send(bob, 'hello from far away')
+  await expect(cindy.locator('.theirs', {hasText: 'hello from far away'})).toContainText('Bob')
+  await expect(cindy.getByText('Bob joined · by a standing link from Anne')).toBeVisible()
+
+  // Anne comes back and accepts him too. Bob is not offered the button: his copy is not in developer mode.
+  await anne.goto('/')
+  await chatEntry(anne, 'Demo').click()
+  await expect(anne.locator('.theirs', {hasText: 'hello from far away'})).toContainText('Bob', {timeout: 30_000})
+  await expect(anne.getByText('Bob joined · by a standing link from you')).toBeVisible()
+  await bob.getByRole('button', {name: 'Invite', exact: true}).click()
+  await expect(bob.getByRole('button', {name: 'Copy invite link'})).toBeVisible()
+  await expect(bob.getByRole('button', {name: 'Copy standing link (testing)'})).toHaveCount(0)
+
+  // The link keeps working, and opening it again changes nothing for someone already in.
+  await bob.goto(standing)
+  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible()
+  await expect(bob.locator('.mine', {hasText: 'hello from far away'})).toBeVisible()
+
+  // Developer mode is turned off the same way.
+  await anne.goto('/?dev=0')
+  await expect(anne.locator('.build')).not.toContainText('developer mode')
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

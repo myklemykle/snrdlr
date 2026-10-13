@@ -917,3 +917,9 @@ button:disabled {
   padding: 0;
   border: 0;
 }
+
+.invite .standing {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+}
