@@ -8,7 +8,23 @@ ALLOWED_ORIGINS = "https://alpha.snrdlr.net,http://localhost:5173,http://localho
 # Turnstile site key for the challenge page. Public; the matching secret is TURNSTILE_SECRET_KEY.
 TURNSTILE_SITE_KEY = "0x4AAAAAAFUH7TjgdBHKXYAK"
 
-# Secrets, set with `wrangler secret put`: TURN_KEY_ID, TURN_KEY_API_TOKEN, TURNSTILE_SECRET_KEY
+# Spending cap: no TURN credentials are issued once this many gigabytes have been relayed in a calendar
+# month. Cloudflare bills past 1,000 GB; credentials already issued keep working for up to four hours.
+TURN_MONTHLY_LIMIT_GB = "800"
+# Not a secret; names the account whose usage analytics are read.
+ACCOUNT_ID = "ae7e4e211e7842bcd65324c19b1ff9a4"
+
+# Secrets, set with `wrangler secret put`: TURN_KEY_ID, TURN_KEY_API_TOKEN, TURNSTILE_SECRET_KEY, and
+# ANALYTICS_API_TOKEN (an API token with Account Analytics: Read). The spending cap is off until the
+# last one is set.
+
+# The latest usage reading, written by the scheduled run.
+[[kv_namespaces]]
+binding = "USAGE"
+id = "ff874a54959a4b9eb8ec6e19df296294"
+
+[triggers]
+crons = ["*/10 * * * *"]
 
 # Per-IP limit on credential requests (per Cloudflare location, approximate).
 [[ratelimits]]

@@ -76,6 +76,25 @@ To test on a real iPhone before choosing:
 - Can an installed web app open a link in Safari proper, or only in an in-app browser view? The split design depends on it.
 - When a site has a manifest, does Add to Home Screen keep the current address, fragment included? If so, the keys could be carried across without a paste, at the cost of leaving them stored in the icon. Otherwise the transfer is "copy a code in Safari, paste it in the installed app".
 
+## Developer visibility and dashboard
+
+Wanted: a developers-only page showing who is using the app and how much, and in particular how much of the TURN allowance is used as media features and users arrive.
+
+What it could draw on:
+
+- **TURN usage**: relayed gigabytes this month against the limit, by day, from Cloudflare's analytics. The Worker already stores the month's total every ten minutes for the spending cap.
+- **Worker and Turnstile analytics**: credential requests per day, by country and browser; challenges passed and failed; rate-limit refusals.
+- **Alerts**: tell the developer when the spending cap trips or the usage check stops working.
+
+"Who the users are" needs deciding before building, because today the app tells its developer nothing, on purpose:
+
+- **A news channel everyone joins automatically** would show the developer every user's name and key. Built as an ordinary group it would also show every user to every other user, and connect their devices to each other, revealing addresses. If wanted, it needs to be a different thing: developer-to-user only, with members hidden from each other.
+- **One-way news** (a signed file on the site that the app reads) reaches everyone and reveals nobody. It gives no user count.
+- **An anonymous count** (the app tells the Worker "one device opened today", with no identity) gives numbers without names.
+- Whatever is chosen, say so in the app; "no account, nobody in the middle" is the pitch.
+
+Where it lives: a page served by the Worker behind a login (Cloudflare Access is free for a few users), not part of the public app.
+
 ## Forks and other domains
 
 Open question: if someone forks the project and hosts it elsewhere, should people on the two sites be able to chat, and how?
@@ -114,7 +133,7 @@ Cheapest thing to do early: settle the final address before there are users to s
 - **Sync sends duplicates in large groups.** A returning member asks every connected peer for what it lacks, and each of them answers. Fine for a handful of people; worth narrowing later.
 - **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
-- **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
+- **TURN spending cap: tighten.** The Worker stops issuing TURN credentials once the month's relayed traffic passes a limit (800 GB), or if it has had no usage reading for six hours. Still open: credentials already issued work for up to four hours after the cap trips, so a hard stop would mean revoking the TURN key itself; and nothing tells the developer when the cap trips (see the dashboard below).
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
 - **Final address.** The app is at `alpha.snrdlr.net` while it is in testing, and nobody is promised their chats will last. Keys and history are tied to the address, so pick the permanent one (for example `snrdlr.net` itself) before anyone is; moving strands every install unless identities can be exported and imported.
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the connection check. It cannot check authors itself, since it cannot read certificates; members do that when they receive what it stored.
