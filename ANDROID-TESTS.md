@@ -2,7 +2,7 @@
 
 A run-through for the first Android phone. About 45 minutes with a second device in hand.
 
-App: https://myklemykle.github.io/snrdlr/
+App: https://alpha.snrdlr.net/
 
 ## Before you start
 

@@ -34,7 +34,7 @@ To settle when building it:
 - When to lock again: on every return to the app, or after some minutes away.
 - While locked, background sync cannot run, and (Phase 6) a notification cannot show message text.
 - There is no recovery: if the passkey is lost, so are the chats. Same as losing the device today.
-- The passkey is tied to the site's address, another reason to settle the custom domain first.
+- The passkey is tied to the site's address, another reason to settle the final address first.
 
 ### How reply would work
 
@@ -96,11 +96,11 @@ Policy to decide:
 Ways to build a bridge:
 
 - **Site-neutral invites.** Make the code's payload usable by any compatible site: a "use my usual app" choice on the landing page, a pasted code, or the Phase 3 in-app scanner.
-- **Moving an identity between sites.** Export on one, import on the other; history returns through sync. The same transfer step as the "Migrate" notification design below, and as moving to a custom domain.
+- **Moving an identity between sites.** Export on one, import on the other; history returns through sync. The same transfer step as the "Migrate" notification design below, and as moving to the final address.
 - **Linking two identities as one person.** Each key signs the other, so members see one name rather than two. Needs a new message type.
 - **Shared relay list.** Sites must agree on at least one relay; goes with pinning a vetted list.
 
-Cheapest thing to do early: settle the custom domain before there are users to strand, and write the protocol down.
+Cheapest thing to do early: settle the final address before there are users to strand, and write the protocol down.
 
 ## Engineering follow-ups
 
@@ -116,7 +116,7 @@ Cheapest thing to do early: settle the custom domain before there are users to s
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list; one public relay rate-limited us during testing.
 - **Automatic TURN cut-off.** A scheduled check that deletes the TURN key if usage passes a threshold, as a backstop against a large bill. Wanted before sharing the app widely.
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
-- **Custom domain.** Keys and history are tied to `myklemykle.github.io`; moving later strands existing installs.
+- **Final address.** The app is at `alpha.snrdlr.net` while it is in testing, and nobody is promised their chats will last. Keys and history are tied to the address, so pick the permanent one (for example `snrdlr.net` itself) before anyone is; moving strands every install unless identities can be exported and imported.
 - **Bot access (Phase 5).** The proposal says the bot gets the room ID but not the message key; it will also need the signaling password, and a way past the connection check. It cannot check authors itself, since it cannot read certificates; members do that when they receive what it stored.
 - **Stay connected on desktop.** A mode for desktop browsers that keeps every chat connected while the tab is open, so one awake computer passes messages between members who are never online together. Any member already relays for the chat on screen; this extends it to all of them. Comes before the blind bot. Check how browsers throttle or discard a background tab (Chrome's Memory Saver, timers while no peer is connected), and ask for persistent storage.
 
