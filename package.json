@@ -11,9 +11,11 @@
     "dev:local": "VITE_NOSTR_RELAYS=ws://localhost:7777 VITE_TURN_URL= vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run src worker",
+    "test": "vitest run src worker scripts",
     "e2e": "playwright test",
     "e2e:android": "playwright test -c playwright.android.config.ts",
+    "probe": "node scripts/probe-relays.mjs",
+    "probe:report": "node scripts/probe-relays.mjs --report",
     "worker:deploy": "wrangler deploy -c worker/wrangler.toml"
   },
   "dependencies": {

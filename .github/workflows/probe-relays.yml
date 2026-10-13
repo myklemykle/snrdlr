@@ -1,0 +1,43 @@
+name: Probe relays
+
+# Measures the candidate Nostr relays four times a day and keeps the results on the
+# probe-data branch, which is never deployed. See scripts/probe-relays.mjs for what it
+# sends and how it avoids pestering anyone.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: probe-relays
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Fetch earlier results
+        run: |
+          if git fetch origin probe-data:probe-data; then
+            git worktree add probe-data probe-data
+          else
+            git worktree add --orphan -b probe-data probe-data
+          fi
+      - run: node scripts/probe-relays.mjs --out probe-data/results.jsonl --from github
+      - name: Save results
+        working-directory: probe-data
+        run: |
+          git config user.name "relay probe"
+          git config user.email "actions@users.noreply.github.com"
+          git add results.jsonl
+          git diff --cached --quiet || git commit -q -m "Probe results $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q origin probe-data

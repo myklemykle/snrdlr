@@ -33,6 +33,8 @@ For manual testing in desktop browsers without touching public relays, run `npm 
 
 `npm run e2e:android` drives Chrome on an Android phone, paired with a desktop browser on this machine. It needs `adb` (`brew install android-platform-tools`), USB debugging allowed for this computer, and the phone unlocked on the same Wi-Fi. The phone loads the test build through a USB tunnel as `http://localhost`, so its storage for the live site is untouched; Chrome on the phone is restarted, and its other tabs reload when next visited. It covers joining and inviting, history across a reload, catching up after the home screen, unread counts, direct chats, the on-screen keyboard, and a Wi-Fi drop. It cannot scan a code with the camera.
 
+`npm run probe` measures the public Nostr relays in `scripts/relay-candidates.json`, to choose which ones the app should use. For each relay it makes two connections and posts one short-lived event the size of a real connection setup, then hangs up. It will not probe a relay again within three hours, backs off to daily or weekly when one fails, never connects to one that says it needs a login or payment, and stops for good if a relay twice asks it to slow down. `.github/workflows/probe-relays.yml` runs it every six hours and keeps the results on the `probe-data` branch; `npm run probe:report` prints both sets.
+
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 
 ## License

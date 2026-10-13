@@ -1,0 +1,47 @@
+{
+  "note": "Relays the probe measures. 'current' are the five the app uses today (Trystero's default list shuffled by our app ID); 'trystero' is the rest of that list as of trystero 0.26; 'known' are large public relays added by hand.",
+  "current": [
+    "wss://relay.grigic.org",
+    "wss://nostr.chaima.info",
+    "wss://relay.flashapp.me",
+    "wss://nostr.red5d.dev",
+    "wss://relay.routstr.com"
+  ],
+  "trystero": [
+    "wss://0x-nostr-relay.fly.dev",
+    "wss://bendernostur.duckdns.org:8443",
+    "wss://cdn.satellite.earth",
+    "wss://nos.lol",
+    "wss://nostr.christiansass.de",
+    "wss://nostr.rblb.it",
+    "wss://nostr.robosats.org",
+    "wss://nostr.stakey.net",
+    "wss://nostrcity-club.fly.dev",
+    "wss://relay-dev.gulugulu.moe",
+    "wss://relay.aarpia.com",
+    "wss://relay.agentry.com",
+    "wss://relay.bitmacro.cloud",
+    "wss://relay.bullishbounty.com",
+    "wss://relay.degmods.com",
+    "wss://relay.hackshed.dev",
+    "wss://relay.kaleidoswap.com",
+    "wss://relay.layer.systems",
+    "wss://relay.nostr.blockhenge.com",
+    "wss://relay.nostr.dev.br",
+    "wss://relay.nostrmap.net",
+    "wss://relay.novospes.com",
+    "wss://relay.piazza.today",
+    "wss://testr.nymble.world"
+  ],
+  "known": [
+    "wss://relay.damus.io",
+    "wss://relay.primal.net",
+    "wss://relay.nostr.band",
+    "wss://relay.snort.social",
+    "wss://relay.nostr.net",
+    "wss://nostr.mom",
+    "wss://offchain.pub",
+    "wss://nostr.oxtr.dev",
+    "wss://nostr-pub.wellorder.net"
+  ]
+}

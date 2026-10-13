@@ -6,3 +6,4 @@ playwright-report
 .wrangler
 .dev.vars
 dist-e2e
+probe-data
