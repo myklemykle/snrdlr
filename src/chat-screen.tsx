@@ -21,6 +21,7 @@ import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
+import {useUpdateHold} from './update'
 
 const ROUTE_POLL_MS = 3000
 // A forgotten invite screen should not stay open indefinitely.
@@ -385,6 +386,9 @@ export function ChatScreen(props: {
     if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > LONG_PRESS_SLOP_PX) cancelPress()
   }
   useEffect(() => cancelPress, [])
+
+  // Anything half done here would be lost if the tab reloaded to update itself.
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)

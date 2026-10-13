@@ -13,6 +13,7 @@ import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragmen
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
+import {holdUpdates, useUpdateHold, useUpdateState, type UpdateState} from './update'
 
 const CHAT_PREFIX = '#c='
 const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
@@ -450,6 +451,16 @@ function Settings(props: {onClose: () => void}) {
   )
 }
 
+/** How long this tab has been going, and whether it restarted to update: for judging a long test. */
+function runningSummary(update: UpdateState, now: number): string {
+  const minutes = Math.floor((now - update.startedAt) / 60_000)
+  const lasted = minutes < 1 ? 'under a minute' : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+  const since = new Date(update.startedAt).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})
+  return update.updatedItself
+    ? `This tab updated itself at ${since} and has been running for ${lasted} since.`
+    : `This tab has been running for ${lasted}, since ${since}.`
+}
+
 function keepSummary(keep: Exclude<Keep, null>): string {
   if (keep === 'waiting') return 'Another snrdlr tab in this browser is already doing this.'
   const chats = `${keep.chats} ${keep.chats === 1 ? 'chat' : 'chats'}`
@@ -476,7 +487,16 @@ function Home(props: {
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const update = useUpdateState()
+  // The "running for" line is the only thing here that changes by the clock.
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
   const [pairing, setPairing] = useState<Invite | null>(null)
+  // A code on screen must not be wiped away by the tab reloading to update.
+  useUpdateHold(pairing !== null)
   const [copied, setCopied] = useState(false)
   const takenNames = useRef<string[]>([])
   takenNames.current = (chats ?? []).map(chat => chat.name)
@@ -658,6 +678,7 @@ function Home(props: {
               {keepSummary(keep)}
             </p>
           )}
+          {keep && <p class="note running">{runningSummary(update, now)}</p>}
           <p class="note">
             For a computer that stays on. People in your chats who are never online at the same time still get each other's messages,
             because this computer holds them in between. Leave this tab open and keep the computer from sleeping.
@@ -668,6 +689,20 @@ function Home(props: {
         Version {__BUILD__}
         {devMode() && ' · developer mode'}
       </p>
+      {update.ready && (
+        <p class="build">
+          {update.held ? 'A newer version is out; updates are held in this tab.' : 'A newer version is out.'}{' '}
+          <button type="button" class="inline" onClick={() => location.reload()}>
+            Reload to update
+          </button>
+        </p>
+      )}
+      {devMode() && (
+        <label class="build">
+          <input type="checkbox" checked={update.held} onChange={event => holdUpdates(event.currentTarget.checked)} /> Hold updates in this tab
+          (testing)
+        </label>
+      )}
     </main>
   )
 }

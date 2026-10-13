@@ -10,4 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_NOSTR_RELAYS?: string
   /** How long a joiner waits for an invite to answer, in milliseconds; shortened in tests. */
   readonly VITE_JOIN_TIMEOUT_MS?: string
+  /** How often an open tab looks for a newer build, and how long it must be idle before reloading; shortened in tests. */
+  readonly VITE_UPDATE_CHECK_MS?: string
+  readonly VITE_UPDATE_IDLE_MS?: string
 }

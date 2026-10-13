@@ -1129,6 +1129,65 @@ test('someone who used the app before it was invite-only is still in', async ({b
   expect(await earlier.evaluate(() => localStorage.getItem('snrdlr.invited'))).toBe('1')
 })
 
+test('an open tab moves to a newer version by itself once idle, but not mid-task or when held', async ({browser}) => {
+  const page = await newPerson(browser)
+  // What the site says the latest build is. To begin with, the one this tab is running.
+  let published: string | null = null
+  await page.route('**/version.json', async route => {
+    if (published === null) return route.continue()
+    await route.fulfill({json: {build: published}})
+  })
+  const loads: number[] = []
+  page.on('load', () => loads.push(Date.now()))
+  const lookAgain = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+
+  await page.goto('/?dev=1')
+  await introduce(page, 'Anne')
+  await page.getByLabel('Keep every chat connected').check()
+  await expect(page.locator('.running')).toHaveText(/^This tab has been running for under a minute, since /)
+  await page.waitForTimeout(2500)
+  expect(loads).toHaveLength(1)
+
+  // A newer build appears while a message is half typed: the tab stays put.
+  await page.getByLabel('Chat name').fill('Updates')
+  await page.getByRole('button', {name: 'Start a group'}).click()
+  await page.getByRole('button', {name: 'Stop inviting'}).click()
+  await page.getByLabel('Message').fill('half a thought')
+  published = 'a newer build'
+  await lookAgain()
+  await page.waitForTimeout(3500)
+  expect(loads).toHaveLength(1)
+  await expect(page.getByLabel('Message')).toHaveValue('half a thought')
+
+  // Held for testing: still put, and the home screen says an update is waiting.
+  await page.getByLabel('Message').fill('')
+  await page.getByRole('button', {name: 'Back to chats'}).click()
+  await page.getByLabel('Hold updates in this tab').check()
+  await expect(page.getByText('A newer version is out; updates are held in this tab.')).toBeVisible()
+  await page.waitForTimeout(3500)
+  expect(loads).toHaveLength(1)
+
+  // Released and left alone: it reloads by itself, says so, and carries on keeping chats connected.
+  await page.getByLabel('Hold updates in this tab').uncheck()
+  await expect.poll(() => loads.length, {timeout: 15_000}).toBe(2)
+  await expect(page.locator('.running')).toHaveText(/^This tab updated itself at .* and has been running for under a minute since\.$/)
+  await expect(page.locator('.keeping')).toHaveText(/Keeping 1 chat connected/)
+
+  // The files it got were not the newer build after all. It does not reload again and again; it offers a button.
+  await page.waitForTimeout(4000)
+  expect(loads).toHaveLength(2)
+  await expect(page.getByRole('button', {name: 'Reload to update'})).toBeVisible()
+})
+
+test('the build publishes its own version, which matches the one on screen', async ({browser}) => {
+  const page = await newPerson(browser)
+  await page.goto('/?dev=1')
+  await introduce(page, 'Anne')
+  const {build} = await (await page.request.get('/version.json')).json()
+  await expect(page.locator('.build').first()).toContainText(`Version ${build}`)
+  await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

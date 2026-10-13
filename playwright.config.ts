@@ -25,7 +25,7 @@ export default defineConfig({
     {
       command: `vite build --outDir dist-e2e && vite preview --outDir dist-e2e --port ${APP_PORT} --strictPort`,
       // A short join timeout keeps the stale-invite test quick.
-      env: {VITE_NOSTR_RELAYS: `ws://localhost:${RELAY_PORT}`, VITE_TURN_URL: '', VITE_JOIN_TIMEOUT_MS: '4000'},
+      env: {VITE_NOSTR_RELAYS: `ws://localhost:${RELAY_PORT}`, VITE_TURN_URL: '', VITE_JOIN_TIMEOUT_MS: '4000', VITE_UPDATE_IDLE_MS: '1500'},
       url: `http://localhost:${APP_PORT}`,
       reuseExistingServer: false
     }
