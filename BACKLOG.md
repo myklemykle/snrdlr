@@ -95,6 +95,43 @@ What it could draw on:
 
 Where it lives: a page served by the Worker behind a login (Cloudflare Access is free for a few users), not part of the public app.
 
+## Services snrdlr depends on, and who pays
+
+Everything outside the users' own devices. To be kept complete: add a row whenever a new outside service is introduced.
+
+### Needed for the app to work
+
+| Service | What it does | Run by | If it is down | Cost today |
+|---|---|---|---|---|
+| GitHub Pages | Serves the app's files | GitHub | Nobody can load the app. Chats already open keep working until the page is reloaded | Free |
+| Domain `snrdlr.net` and its DNS | The address | The registrar (its name servers) | Same as Pages. Whoever controls the domain controls what users load | Yearly registration |
+| TLS certificate | HTTPS, without which browsers refuse the app's features | Let's Encrypt, through GitHub | Same as Pages | Free |
+| Nostr relays | Devices find each other | Volunteers (five today); later our own plus three | No new connections. Existing ones carry on | Free, on others' goodwill |
+| STUN servers | Each device learns its public address, needed for a direct connection across networks | Google and Cloudflare (Trystero's defaults) | Only same-network and TURN-relayed connections form | Free |
+| TURN relay | Carries traffic when a direct connection is impossible | Cloudflare Realtime | Devices on restrictive networks cannot connect | Free to 1,000 GB a month, then $0.05 per GB; capped at 800 GB by our Worker |
+| TURN credentials Worker (`snrdlr-turn`) | Hands out short-lived TURN credentials; uses Cloudflare's rate limiter, key-value store, scheduler and analytics API | Us, on Cloudflare Workers | As TURN down | Free tier |
+| Turnstile | Bot check in front of the Worker | Cloudflare | As TURN down | Free |
+
+### Planned
+
+| Service | For | Likely cost |
+|---|---|---|
+| Our own Nostr relay | A permanent meeting point | Cloudflare Workers; to be checked |
+| Blind bot | Holds messages for members who are offline | A small server, about $5 a month, or a member's own computer |
+| Push services (Apple, Google, Mozilla) | Notifications; each browser uses its maker's service and there is no choosing | Free to send |
+| Push sender | Something of ours that asks those services to wake a device | A Worker or the bot's server |
+
+### Behind the scenes
+
+Not used by a running app, but the project stops without them: the GitHub account (source, automated tests, deploys, the relay probe), the npm registry (the libraries, at build time only), and the Cloudflare account. The GitHub account, the Cloudflare account and the domain are the three things that must not be lost or taken over; see "Protect the publishing account".
+
+### Paying for it
+
+- Today the only bill that grows with use is TURN, and only past 1,000 GB a month. Text chat will not get near that; images and audio over the relay could.
+- Costs that would be real with many users: TURN traffic, the bot's server and storage, and our relay if it outgrows a free tier.
+- To decide: how users pay their share. Options to think through: voluntary donations, a paid always-on bot per group (the group that wants offline delivery pays for its own), or groups bringing their own relay and bot. The design already allows the last: a fork or a group can point at its own services.
+- Anything that takes payment adds a new centralized piece (a payment processor, and some record of who paid) and must not link a payer to their chats.
+
 ## Forks and other domains
 
 Open question: if someone forks the project and hosts it elsewhere, should people on the two sites be able to chat, and how?
