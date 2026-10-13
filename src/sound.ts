@@ -53,6 +53,27 @@ export function setSoundChoice(choice: string): void {
 
 const urls = () => sets.get(soundChoice()) ?? []
 
+/** Volume runs from silent to twice as loud as the files were made; each set has its own. */
+export const MAX_VOLUME = 2
+const volumeKey = (choice: string) => `snrdlr.soundVolume.${choice}`
+
+export function soundVolume(choice: string): number {
+  try {
+    const stored = Number(localStorage.getItem(volumeKey(choice)) ?? '1')
+    return Number.isFinite(stored) ? Math.min(MAX_VOLUME, Math.max(0, stored)) : 1
+  } catch {
+    return 1
+  }
+}
+
+export function setSoundVolume(choice: string, volume: number): void {
+  try {
+    localStorage.setItem(volumeKey(choice), String(volume))
+  } catch {
+    // As with the choice of set.
+  }
+}
+
 const load = (audio: AudioContext, url: string) => {
   if (!loaded.has(url)) {
     loaded.set(
@@ -85,11 +106,14 @@ export function unlockSound(): void {
   }
 }
 
-/** Plays one sound from the chosen set, picked at random, if the browser allows it yet. */
-export function playSound(): void {
+/**
+ * Plays one sound from the chosen set, picked at random, if the browser allows it yet. `sample` is for
+ * trying out a setting: it plays even if another sound has only just played.
+ */
+export function playSound(sample = false): void {
   const now = Date.now()
   const wanted = urls()
-  if (!context || context.state !== 'running' || wanted.length === 0 || now - lastPlayedAt < MIN_GAP_MS) return
+  if (!context || context.state !== 'running' || wanted.length === 0 || (!sample && now - lastPlayedAt < MIN_GAP_MS)) return
   lastPlayedAt = now
   // Not the same one twice running, when there is a choice.
   const choices = wanted.length > 1 ? wanted.filter(url => url !== lastUrl) : wanted
@@ -100,7 +124,9 @@ export function playSound(): void {
     if (!buffer || audio.state !== 'running') return
     const source = audio.createBufferSource()
     source.buffer = buffer
-    source.connect(audio.destination)
+    const gain = audio.createGain()
+    gain.gain.value = soundVolume(soundChoice())
+    source.connect(gain).connect(audio.destination)
     source.start()
   })
 }

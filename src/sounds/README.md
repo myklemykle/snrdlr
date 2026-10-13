@@ -9,5 +9,5 @@ Each folder here is a sound set, named after the folder. People choose one in Se
 
 To add a set, add a folder; it appears in Settings after the next deploy. `snrdl` is the default and is listed first, then `plink`, then any others by name.
 
-- `snrdl/`: the app's own sounds.
+- `snrdl/`: the app's own sounds. Snrdle sounds by Elan Katin.
 - `plink/`: three generated blips.

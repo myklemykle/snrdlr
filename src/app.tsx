@@ -7,7 +7,7 @@ import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, se
 import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
-import {playSound, setSoundChoice, SILENT, SOUND_CHOICES, soundChoice} from './sound'
+import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -324,6 +324,7 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
 function Settings(props: {onClose: () => void}) {
   const {onClose} = props
   const [sounds, setSounds] = useState(soundChoice)
+  const [volume, setVolume] = useState(() => soundVolume(soundChoice()))
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
     addEventListener('keydown', onKey)
@@ -344,17 +345,38 @@ function Settings(props: {onClose: () => void}) {
                 onChange={() => {
                   setSoundChoice(choice)
                   setSounds(choice)
+                  setVolume(soundVolume(choice))
                   // So the choice can be heard straight away.
-                  playSound()
+                  playSound(true)
                 }}
               />{' '}
               {choice}
             </label>
           ))}
         </fieldset>
+        {sounds !== SILENT && (
+          <label class="volume">
+            Volume of {sounds}: {Math.round(volume * 100)}%
+            <input
+              type="range"
+              min="0"
+              max={MAX_VOLUME * 100}
+              step="5"
+              value={Math.round(volume * 100)}
+              aria-label={`Volume of ${sounds}`}
+              onInput={event => {
+                const next = Number(event.currentTarget.value) / 100
+                setSoundVolume(sounds, next)
+                setVolume(next)
+              }}
+              // On letting go, so the new level can be heard.
+              onChange={() => playSound(true)}
+            />
+          </label>
+        )}
         <p class="note">
           {sounds === SILENT ? 'No sounds.' : 'Plays a sound when a message arrives or is sent, while snrdlr is open.'} On a phone, sounds follow the
-          silent switch.
+          silent switch. 100% is each sound as it was made; above that, loud sounds may distort.
         </p>
         <button type="button" onClick={onClose}>
           Done

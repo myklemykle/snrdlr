@@ -815,6 +815,14 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
         counter.played++
         return start.apply(this, args)
       }
+      // The volume each sound is played at.
+      const levels = window as unknown as {volumes: number[]}
+      levels.volumes = []
+      const connect = AudioNode.prototype.connect as (this: AudioNode, ...args: unknown[]) => unknown
+      AudioNode.prototype.connect = function (this: AudioNode, ...args: unknown[]) {
+        if (this instanceof GainNode) levels.volumes.push(this.gain.value)
+        return connect.apply(this, args)
+      } as typeof AudioNode.prototype.connect
     })
     return page
   }
@@ -856,29 +864,49 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   const settings = bob.getByRole('dialog', {name: 'Settings'})
   await expect(settings.getByRole('radio')).toHaveCount(3)
   await expect(settings.getByRole('group', {name: 'Sounds'}).locator('label')).toHaveText(['snrdl', 'plink', 'shhhhh'])
-  await expect(settings.getByLabel('snrdl')).toBeChecked()
+  await expect(settings.getByRole('radio', {name: 'snrdl'})).toBeChecked()
 
   // Choosing another set plays one of its sounds, so it can be heard.
   await bob.waitForTimeout(500)
-  await settings.getByLabel('plink').check()
+  await settings.getByRole('radio', {name: 'plink'}).check()
   await expect.poll(() => played(bob)).toBe(3)
 
-  // "shhhhh" is silence: choosing it plays nothing, and neither do messages.
+  // Each set has its own volume. Moving the slider plays a sound at the new level.
+  const volumes = () => bob.evaluate(() => (window as unknown as {volumes: number[]}).volumes)
+  expect((await volumes()).at(-1)).toBe(1)
+  await expect(settings.getByText('Volume of plink: 100%')).toBeVisible()
+  await settings.getByRole('slider', {name: 'Volume of plink'}).fill('40')
+  await expect(settings.getByText('Volume of plink: 40%')).toBeVisible()
+  await expect.poll(() => played(bob)).toBe(4)
+  expect((await volumes()).at(-1)).toBeCloseTo(0.4)
+  await settings.getByRole('radio', {name: 'snrdl'}).check()
+  await expect(settings.getByText('Volume of snrdl: 100%')).toBeVisible()
+  await settings.getByRole('slider', {name: 'Volume of snrdl'}).fill('150')
+  await expect.poll(() => played(bob)).toBe(6)
+  expect((await volumes()).at(-1)).toBeCloseTo(1.5)
+  await settings.getByRole('radio', {name: 'plink'}).check()
+  await expect(settings.getByText('Volume of plink: 40%')).toBeVisible()
+  await expect.poll(() => played(bob)).toBe(7)
+
+  // "shhhhh" is silence: choosing it plays nothing, there is no volume to set, and messages are silent.
   await bob.waitForTimeout(500)
-  await settings.getByLabel('shhhhh').check()
+  await settings.getByRole('radio', {name: 'shhhhh'}).check()
+  await expect(settings.getByRole('slider')).toHaveCount(0)
   await settings.getByRole('button', {name: 'Done'}).click()
   await expect(settings).toHaveCount(0)
   await send(anne, 'hello again')
   await expect(chatEntry(bob, 'Sounds').getByLabel('2 unread')).toBeVisible({timeout: 15_000})
   await bob.waitForTimeout(300)
-  expect(await played(bob)).toBe(3)
+  expect(await played(bob)).toBe(7)
 
-  // The choice is remembered across a reload.
+  // The choices are remembered across a reload.
   await bob.reload()
   await bob.getByRole('button', {name: 'Settings'}).click()
-  await expect(settings.getByLabel('shhhhh')).toBeChecked()
-  await settings.getByLabel('snrdl').check()
+  await expect(settings.getByRole('radio', {name: 'shhhhh'})).toBeChecked()
+  await settings.getByRole('radio', {name: 'snrdl'}).check()
   await expect.poll(() => played(bob)).toBe(1)
+  await expect(settings.getByText('Volume of snrdl: 150%')).toBeVisible()
+  expect((await volumes()).at(-1)).toBeCloseTo(1.5)
   await bob.keyboard.press('Escape')
   await expect(settings).toHaveCount(0)
 })
@@ -908,7 +936,7 @@ test('each sound set plays its own files, and every file in the app\'s own set c
   expect(broken).toEqual([])
 
   await page.getByRole('button', {name: 'Settings'}).click()
-  await page.getByLabel('plink').check()
+  await page.getByRole('radio', {name: 'plink'}).check()
   await expect.poll(() => fetched.filter(name => name.startsWith('plink-')).length).toBe(3)
 })
 

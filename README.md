@@ -40,6 +40,10 @@ For manual testing in desktop browsers without touching public relays, run `npm 
 
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 
+## Credits
+
+Snrdle sounds by Elan Katin.
+
 ## License
 
 MIT
