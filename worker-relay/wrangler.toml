@@ -1,0 +1,21 @@
+name = "snrdlr-relay"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Every connection goes to one object, because any two devices must be able to find each other.
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+# Per-IP limit on new connections (per Cloudflare location, approximate).
+[[ratelimits]]
+name = "CONNECT_LIMITER"
+namespace_id = "1002"
+
+[ratelimits.simple]
+limit = 60
+period = 60

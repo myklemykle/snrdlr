@@ -1,5 +1,8 @@
 {
-  "note": "Relays the probe measures. 'current' are the five the app uses today (Trystero's default list shuffled by our app ID); 'trystero' is the rest of that list as of trystero 0.26; 'known' are large public relays added by hand.",
+  "note": "Relays the probe measures. 'ours' is our own relay; 'current' are the five public ones the app uses today (src/relays.ts); 'trystero' is the rest of Trystero 0.26's default list; 'known' are large public relays added by hand.",
+  "ours": [
+    "wss://snrdlr-relay.snrdlr.workers.dev"
+  ],
   "current": [
     "wss://relay.grigic.org",
     "wss://nostr.chaima.info",

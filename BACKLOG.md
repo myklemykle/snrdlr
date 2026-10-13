@@ -106,7 +106,8 @@ Everything outside the users' own devices. To be kept complete: add a row whenev
 | GitHub Pages | Serves the app's files | GitHub | Nobody can load the app. Chats already open keep working until the page is reloaded | Free |
 | Domain `snrdlr.net` and its DNS | The address | The registrar (its name servers) | Same as Pages. Whoever controls the domain controls what users load | Yearly registration |
 | TLS certificate | HTTPS, without which browsers refuse the app's features | Let's Encrypt, through GitHub | Same as Pages | Free |
-| Nostr relays | Devices find each other | Volunteers (five today); later our own plus three | No new connections. Existing ones carry on | Free, on others' goodwill |
+| Nostr relays, public | Devices find each other | Volunteers (five today, three later) | Nothing, while ours is up | Free, on others' goodwill |
+| Nostr relay, ours (`snrdlr-relay`) | The same, as the one relay every version of the app shares | Us, on Cloudflare Workers and Durable Objects | Nothing, while a public one is up. With all relays down: no new connections; existing ones carry on | Free tier |
 | STUN servers | Each device learns its public address, needed for a direct connection across networks | Google and Cloudflare (Trystero's defaults) | Only same-network and TURN-relayed connections form | Free |
 | TURN relay | Carries traffic when a direct connection is impossible | Cloudflare Realtime | Devices on restrictive networks cannot connect | Free to 1,000 GB a month, then $0.05 per GB; capped at 800 GB by our Worker |
 | TURN credentials Worker (`snrdlr-turn`) | Hands out short-lived TURN credentials; uses Cloudflare's rate limiter, key-value store, scheduler and analytics API | Us, on Cloudflare Workers | As TURN down | Free tier |
@@ -116,7 +117,6 @@ Everything outside the users' own devices. To be kept complete: add a row whenev
 
 | Service | For | Likely cost |
 |---|---|---|
-| Our own Nostr relay | A permanent meeting point | Cloudflare Workers; to be checked |
 | Blind bot | Holds messages for members who are offline | A small server, about $5 a month, or a member's own computer |
 | Push services (Apple, Google, Mozilla) | Notifications; each browser uses its maker's service and there is no choosing | Free to send |
 | Push sender | Something of ours that asks those services to wake a device | A Worker or the bot's server |
@@ -171,8 +171,11 @@ Cheapest thing to do early: settle the final address before there are users to s
 - **Trystero does not fully leave a room left within about a second of joining.** The room keeps answering newcomers. The app works around it (closed invites refuse requests; leaving is delayed until the join settles). Worth reproducing in isolation and reporting upstream.
 - **Pin a vetted list of Nostr relays.** The app uses Trystero's default list (five of about thirty hobby relays, picked by our app ID); one rate-limited us during testing, and the list can change under us when Trystero is upgraded, which would strand an older copy of the app on different relays. Plan: our own relay as the permanent anchor, plus three public ones.
   - **Probe: running.** `npm run probe` and a scheduled run every six hours measure 38 candidates (see the README). After about a week, pick three that always delivered, from different operators.
-  - **Our own relay: to build.** A second Cloudflare Worker that passes short-lived events between connected clients and stores nothing. Open to anyone for those events only (kinds 20000 to 29999), with size and rate limits; it refuses anything that would be stored, so it is of no use as a general Nostr relay. Check Cloudflare's pricing for long-lived connections first.
-  - **Then pin.** Our relay plus Trystero's five first, then our relay plus the chosen three. Afterwards change at most one public relay per release so old and new copies always share one.
+  - **Our own relay: built and in the list.** `wss://snrdlr-relay.snrdlr.workers.dev` (`worker-relay/`, deploy with `npm run relay:deploy`). Passes short-lived events only (kinds 20000 to 29999), stores nothing, and refuses a subscription that does not name its topics, so nobody can watch all activity. Open to anyone; limits per connection and per address. Runs on Cloudflare's free tier: 100,000 requests a day shared with the TURN Worker, where 20 incoming messages count as one request. Past that it fails until midnight UTC rather than billing, as long as the account stays on the free Workers plan.
+  - **The list is pinned** in `src/relays.ts`: ours plus the five Trystero used to pick. Next: replace the five with the best three from the probe. Change at most one public relay per release so old and new copies always share one.
+  - **Give the relay a permanent name.** Its address must outlive the Cloudflare account's `workers.dev` name. `relay.snrdlr.net` needs the domain's DNS to be hosted at Cloudflare (it is at the registrar now). Old copies of the app keep using the `workers.dev` address, so that one has to keep working too.
+  - **One object holds every connection**, because any two devices must be able to meet. Good for a few thousand connections; beyond that it needs splitting, which the connection library's one-socket-per-relay design makes awkward.
+  - **Usage is not watched.** Add the relay's request count to the developer dashboard, and warn well before the daily free limit.
 - **TURN spending cap: tighten.** The Worker stops issuing TURN credentials once the month's relayed traffic passes a limit (800 GB), or if it has had no usage reading for six hours. Still open: credentials already issued work for up to four hours after the cap trips, so a hard stop would mean revoking the TURN key itself; and nothing tells the developer when the cap trips (see the dashboard below).
 - **Two tabs of one chat on the same device.** Each tab only shows the other's messages after a reload.
 - **Final address.** The app is at `alpha.snrdlr.net` while it is in testing, and nobody is promised their chats will last. Keys and history are tied to the address, so pick the permanent one (for example `snrdlr.net` itself) before anyone is; moving strands every install unless identities can be exported and imported.

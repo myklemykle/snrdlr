@@ -1,4 +1,5 @@
 import {joinRoom, type TurnServerConfig} from 'trystero/nostr'
+import {RELAYS} from './relays'
 import {toHex, utf8} from './bytes'
 import type {ChatAuth} from './chats'
 import {MAX_ENVELOPE_BYTES} from './envelope'
@@ -12,9 +13,9 @@ const MAX_PROOF_BYTES = 64 * 1024
 const PING_TIMEOUT_MS = 4000
 const AUTH_TIMEOUT_MS = 10_000
 
-// Set for local testing against scripts/local-relay.mjs; unset, Trystero picks from its public relay list.
+// Set for local testing against scripts/local-relay.mjs; unset, the pinned list is used.
 const relayUrls = import.meta.env.VITE_NOSTR_RELAYS?.split(',').map(url => url.trim()).filter(Boolean)
-export const relayConfig = relayUrls?.length ? {urls: relayUrls} : undefined
+export const relayConfig = {urls: relayUrls?.length ? relayUrls : RELAYS}
 
 // Trystero does not fully leave a room that is left within about a second of joining it: the room keeps
 // answering newcomers. Holding the leave back until the join has settled avoids that.

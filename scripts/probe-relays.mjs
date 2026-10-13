@@ -275,7 +275,7 @@ export const summarize = results => {
 
 const loadCandidates = () => {
   const lists = JSON.parse(readFileSync(new URL('./relay-candidates.json', import.meta.url), 'utf8'))
-  return {all: [...lists.current, ...lists.trystero, ...lists.known], current: new Set(lists.current)}
+  return {all: [...lists.ours, ...lists.current, ...lists.trystero, ...lists.known], current: new Set([...lists.ours, ...lists.current])}
 }
 
 const printReport = (results, current) => {
