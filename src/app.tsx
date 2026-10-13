@@ -19,6 +19,8 @@ const JOIN_TIMEOUT_MS = Number(import.meta.env.VITE_JOIN_TIMEOUT_MS) || 30_000
 const SWEEP_INTERVAL_MS = 30_000
 // A forgotten "chat with me" code should not stay live indefinitely.
 const PAIRING_LIFETIME_MS = 10 * 60 * 1000
+// How long the pairing room is kept after someone has scanned the code.
+const PAIRING_LINGER_MS = 2000
 // Only one tab per browser keeps the chats connected; the others wait for this lock.
 const KEEP_LOCK = 'snrdlr-stay-connected'
 const KEEP_SETTING = 'snrdlr.stayConnected'
@@ -438,20 +440,32 @@ function Home(props: {
   const takenNames = useRef<string[]>([])
   takenNames.current = (chats ?? []).map(chat => chat.name)
 
-  // While the "chat with me" code is showing, everyone who scans it gets a direct chat with us.
-  // Hiding it forgets the token, so the code stops working.
+  // While the "chat with me" code is showing, whoever scans it gets a direct chat with us, and we go
+  // straight to that chat. Hiding the code forgets the token, so it stops working.
   useEffect(() => {
     if (!pairing) return
     let cancelled = false
+    let used = false
     let host: {close: () => void} | null = null
     void fetchTurnServers().then(turnServers => {
       if (cancelled) return
       host = hostInvite(
         pairing,
         request => {
+          // One showing of the code makes one chat: a second person scanning it a moment later is turned away.
+          if (used) throw new Error('code already used')
           const {chat, sealedGrant} = pairDirect(identity, pairing, request, takenNames.current, Date.now())
+          used = true
           takenNames.current = [...takenNames.current, chat.name]
-          void store.saveChat(chat).then(() => refresh())
+          // The room stays a moment longer than the screen, so our answer is sure to have gone out.
+          const answering = host
+          host = null
+          setTimeout(() => answering?.close(), PAIRING_LINGER_MS)
+          void store.saveChat(chat).then(saved => {
+            if (cancelled) return
+            setPairing(null)
+            onOpen(saved.id)
+          })
           return sealedGrant
         },
         turnServers
@@ -558,7 +572,7 @@ function Home(props: {
       {pairing ? (
         <section class="invite">
           <QrCode text={pairingUrl} label="Code to chat with me" />
-          <p>Anyone who scans this while it is on your screen starts a direct chat with you. It stops working when you hide it.</p>
+          <p>Whoever scans this while it is on your screen starts a direct chat with you, and it opens here too. It stops working when you hide it.</p>
           <button type="button" onClick={copyPairing}>
             {copied ? 'Copied' : 'Copy link'}
           </button>{' '}

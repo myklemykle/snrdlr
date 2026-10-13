@@ -86,9 +86,9 @@ This is the camera test, the part most likely to differ between phones.
 
 ## 8. Direct chats and adding someone
 
-- [ ] 8.1 On Android, under "Chat with one person", tap "Show my code". Scan it with the other device. A chat opens on both, named after the other person and tagged "direct" in the list.
+- [ ] 8.1 On Android, under "Chat with one person", tap "Show my code". Scan it with the other device. The code closes by itself and the chat opens on both, named after the other person and tagged "direct" in the list.
 - [ ] 8.2 The direct chat has no "Invite" button.
-- [ ] 8.3 Tap "Hide my code". Now the other device shows its code and Android scans it. It reopens the same chat rather than making a second one.
+- [ ] 8.3 Now the other device shows its code and Android scans it. It reopens the same chat rather than making a second one.
 - [ ] 8.4 Send a message each way in the direct chat.
 - [ ] 8.5 In the direct chat on Android, tap "Add someone". A new group opens with its code showing. On the other device, a line with an "Open" button appears in the direct chat; tapping it joins the group.
 - [ ] 8.6 With a third device, scan the group's code. All three can read each other's messages, and the third shows "joined · invited by <Android's name>".

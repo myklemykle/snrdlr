@@ -315,12 +315,18 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await anne.getByRole('button', {name: 'Copy link'}).click()
   const code = await anne.evaluate(() => navigator.clipboard.readText())
 
-  // Bob lands straight in a chat named after Anne; Anne's list gains one named after Bob.
+  // Bob lands straight in a chat named after Anne. Anne's code closes by itself and she is in the chat
+  // too, named after Bob.
   await bob.goto(code)
   await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
-  await expect(chatEntry(anne, 'Bob')).toContainText('direct')
-  await anne.getByRole('button', {name: 'Hide my code'}).click()
-  await chatEntry(anne, 'Bob').click()
+  await expect(anne.getByRole('heading', {name: 'Bob'})).toBeVisible({timeout: 15_000})
+  await expect(anne.getByRole('img', {name: 'Code to chat with me'})).toHaveCount(0)
+
+  // The code is spent: the same link does nothing for someone else afterwards.
+  const late = await newPerson(browser)
+  await late.goto(code)
+  await introduce(late, 'Late')
+  await expect(late.getByText('That invite is no longer active')).toBeVisible({timeout: 15_000})
 
   await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await send(anne, 'just us two')
@@ -338,6 +344,9 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await expect(anne.locator('.theirs', {hasText: 'yes'})).toBeVisible({timeout: 15_000})
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.locator('.chats .open')).toHaveCount(1)
+  await expect(chatEntry(anne, 'Bob')).toContainText('direct')
+  // Bob, who was showing the code this time, is taken to the same chat.
+  await expect(bob.locator('.mine', {hasText: 'yes'})).toBeVisible()
 })
 
 test('"add someone" in a direct chat starts a new group with both people, and a third joins by code', async ({browser}) => {
@@ -350,7 +359,7 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await anne.getByRole('button', {name: 'Copy link'}).click()
   await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
   await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
-  await chatEntry(anne, 'Bob').click()
+  await expect(anne.getByRole('heading', {name: 'Bob'})).toBeVisible({timeout: 15_000})
   await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await send(anne, 'private note')
   await expect(bob.locator('.theirs', {hasText: 'private note'})).toBeVisible()

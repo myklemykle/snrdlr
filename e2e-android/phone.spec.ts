@@ -153,8 +153,8 @@ test('a direct chat from the phone\'s code, then "add someone" starts a group', 
   await moto.getByRole('button', {name: 'Show my code'}).click()
   await desk.goto(await copiedBy(moto, 'Copy link'))
   await expect(desk.getByRole('heading', {name: 'Moto'})).toBeVisible({timeout: 30_000})
-  await expect(moto.locator('.chats .open', {hasText: 'Desk'})).toBeVisible({timeout: 30_000})
-  await moto.locator('.chats .open', {hasText: 'Desk'}).click()
+  // The phone's code closes by itself and it goes straight to the chat.
+  await expect(moto.getByRole('heading', {name: 'Desk'})).toBeVisible({timeout: 30_000})
   await connected(moto)
   await expect(moto.getByRole('button', {name: 'Invite'})).toHaveCount(0)
   await send(desk, 'just us')
