@@ -15,6 +15,7 @@ import {messageKey, QUICK_REACTIONS, tallyReactions} from './reactions'
 import {describeRoutes, type Route} from './route'
 import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
+import {playSound} from './sound'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
@@ -59,6 +60,7 @@ export function ChatScreen(props: {
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState('')
   const session = useRef<Session | null>(null)
+  const heard = useRef<number | null>(null)
   // Which pictures' files are on this device.
   const [files, setFiles] = useState<ReadonlySet<string>>(new Set())
   const logEnd = useRef<HTMLDivElement>(null)
@@ -77,7 +79,14 @@ export function ChatScreen(props: {
         // Fetched on every (re)connect, so long-open chats never reuse expired TURN credentials.
         connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity)),
         handlers: {
-          onMessages: next => !cancelled && setMessages(next),
+          onMessages: next => {
+            if (cancelled) return
+            // A sound for what other people say, but not for the history that loads when the chat opens.
+            const said = next.filter(({author, content}) => author !== identity.id && (content.type === 'text' || content.type === 'image')).length
+            if (heard.current !== null && said > heard.current) playSound()
+            heard.current = said
+            setMessages(next)
+          },
           onChatName: next => !cancelled && setChatName(next),
           onStatus: next => !cancelled && setStatus(next),
           onPeersChange: peerIds => {
@@ -293,6 +302,7 @@ export function ChatScreen(props: {
     const text = draft.trim()
     if (!session.current || preparing > 0 || (!text && attached.length === 0)) return
     setDraft('')
+    playSound()
     if (attached.length === 0) return session.current.sendText(text).catch(() => setError('Message could not be sent.'))
     const sending = attached
     setAttached([])

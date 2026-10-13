@@ -32,13 +32,16 @@ type Running = {cancel: () => void; done: Promise<void>}
 
 const running = new Map<string, Running>()
 const foreground = new Set<string>()
-const listeners = new Set<(chatId: string) => void>()
+const listeners = new Set<(chatId: string, incoming: boolean) => void>()
 let sweeping = false
 /** Set while chats are being kept connected, so a chat leaving the screen is picked up at once. */
 let keeperCheck: (() => void) | null = null
 
-/** Calls back whenever a chat that is not on screen receives something. */
-export function onBackgroundActivity(listener: (chatId: string) => void): () => void {
+/**
+ * Calls back whenever a chat that is not on screen receives something. `incoming` is true when that
+ * includes a message or picture someone sent, as opposed to a reaction or someone joining.
+ */
+export function onBackgroundActivity(listener: (chatId: string, incoming: boolean) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
@@ -59,14 +62,17 @@ export function unclaimChat(chatId: string): void {
 /** Tells listeners when other people's messages arrive in a chat that is not on screen. */
 function announceNews(chatId: string, selfId: string, onNews?: () => void) {
   let held: number | null = null
-  return (messages: {author: string}[]) => {
+  let heldSaid = 0
+  return (messages: {author: string; content: {type: string}}[]) => {
     // Only other people's messages count; our own "joined" message is not news.
-    const fromOthers = messages.filter(message => message.author !== selfId).length
-    if (held !== null && fromOthers !== held) {
+    const others = messages.filter(message => message.author !== selfId)
+    const said = others.filter(({content}) => content.type === 'text' || content.type === 'image').length
+    if (held !== null && others.length !== held) {
       onNews?.()
-      listeners.forEach(listener => listener(chatId))
+      listeners.forEach(listener => listener(chatId, said > heldSaid))
     }
-    held = fromOthers
+    held = others.length
+    heldSaid = said
   }
 }
 

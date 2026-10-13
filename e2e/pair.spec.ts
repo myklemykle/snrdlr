@@ -803,6 +803,76 @@ test('a tab left open on an old version does not leave newer tabs blank, and ste
   await reloaded
 })
 
+test('a sound plays when a message is sent or arrives, and can be turned off in settings', async ({browser}) => {
+  // Counts sounds as they start, in place of listening for them.
+  const listener = async () => {
+    const page = await newPerson(browser)
+    await page.addInitScript(() => {
+      const counter = window as unknown as {played: number}
+      counter.played = 0
+      const start = AudioBufferSourceNode.prototype.start
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        counter.played++
+        return start.apply(this, args)
+      }
+    })
+    return page
+  }
+  const played = (page: Page) => page.evaluate(() => (window as unknown as {played: number}).played)
+  const [anne, bob] = [await listener(), await listener()]
+  const invite = await startChat(anne, 'Anne', 'Sounds')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  // Joining and catching up on history is silent.
+  expect(await played(bob)).toBe(0)
+
+  // One for sending, one for receiving.
+  await send(anne, 'hello')
+  await expect(bob.locator('.theirs', {hasText: 'hello'})).toBeVisible()
+  await expect.poll(() => played(anne)).toBe(1)
+  await expect.poll(() => played(bob)).toBe(1)
+
+  // A reaction is not a message, so it is silent.
+  await bob.waitForTimeout(500)
+  const atBob = bob.locator('.theirs', {hasText: 'hello'})
+  await atBob.hover()
+  await atBob.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'React 👍'}).click()
+  await expect(anne.locator('.mine .reactions button')).toHaveText(['👍'])
+  await anne.waitForTimeout(300)
+  expect(await played(anne)).toBe(1)
+
+  // A message in a chat that is not on screen is heard too, on a computer that stays connected.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await bob.getByLabel('Keep every chat connected').check()
+  await expect(bob.locator('.keeping')).toHaveText(/with 1 device online/, {timeout: 30_000})
+  await send(anne, 'are you there?')
+  await expect(chatEntry(bob, 'Sounds').getByLabel('1 unread')).toBeVisible({timeout: 15_000})
+  await expect.poll(() => played(bob)).toBe(2)
+
+  // The gear beside the greeting opens settings; with sounds off, nothing plays.
+  await bob.getByRole('button', {name: 'Settings'}).click()
+  const settings = bob.getByRole('dialog', {name: 'Settings'})
+  await expect(settings.getByLabel('Sounds')).toBeChecked()
+  await settings.getByLabel('Sounds').uncheck()
+  await settings.getByRole('button', {name: 'Done'}).click()
+  await expect(settings).toHaveCount(0)
+  await send(anne, 'hello again')
+  await expect(chatEntry(bob, 'Sounds').getByLabel('2 unread')).toBeVisible({timeout: 15_000})
+  await bob.waitForTimeout(300)
+  expect(await played(bob)).toBe(2)
+
+  // The choice is remembered, and turning sounds back on plays one so it can be heard.
+  await bob.reload()
+  await bob.getByRole('button', {name: 'Settings'}).click()
+  await expect(settings.getByLabel('Sounds')).not.toBeChecked()
+  await settings.getByLabel('Sounds').check()
+  await expect.poll(() => played(bob)).toBe(1)
+  await bob.keyboard.press('Escape')
+  await expect(settings).toHaveCount(0)
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

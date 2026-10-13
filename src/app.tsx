@@ -7,6 +7,7 @@ import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, se
 import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
+import {playSound, setSoundsOn, soundsOn} from './sound'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -206,6 +207,9 @@ function Main(props: {store: Store; identity: Identity; onIdentity: (identity: I
     }
   }, [named, stay])
 
+  // A sound for messages arriving in chats that are not on screen.
+  useEffect(() => onBackgroundActivity((_chatId, incoming) => incoming && playSound()), [])
+
   // Once the invite has been dealt with, take it out of the address bar and history.
   useEffect(() => {
     if (!named) return
@@ -316,6 +320,42 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
   )
 }
 
+/** Choices that apply to the whole app on this device. */
+function Settings(props: {onClose: () => void}) {
+  const {onClose} = props
+  const [sounds, setSounds] = useState(soundsOn)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [])
+  return (
+    <div class="sheet-backdrop" onClick={onClose}>
+      <section class="sheet" role="dialog" aria-label="Settings" onClick={event => event.stopPropagation()}>
+        <h2>Settings</h2>
+        <label>
+          <input
+            type="checkbox"
+            checked={sounds}
+            onChange={event => {
+              const on = event.currentTarget.checked
+              setSoundsOn(on)
+              setSounds(on)
+              // So the choice can be heard straight away.
+              if (on) playSound()
+            }}
+          />{' '}
+          Sounds
+        </label>
+        <p class="note">Plays a sound when a message arrives or is sent, while snrdlr is open. On a phone it follows the silent switch.</p>
+        <button type="button" onClick={onClose}>
+          Done
+        </button>
+      </section>
+    </div>
+  )
+}
+
 function keepSummary(keep: Exclude<Keep, null>): string {
   if (keep === 'waiting') return 'Another snrdlr tab in this browser is already doing this.'
   const chats = `${keep.chats} ${keep.chats === 1 ? 'chat' : 'chats'}`
@@ -341,6 +381,7 @@ function Home(props: {
   const [unread, setUnread] = useState<Record<string, number>>({})
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [pairing, setPairing] = useState<Invite | null>(null)
   const [copied, setCopied] = useState(false)
   const takenNames = useRef<string[]>([])
@@ -414,7 +455,16 @@ function Home(props: {
   return (
     <main class="home">
       <h1>snrdlr</h1>
-      <p>Hello, {identity.name}.</p>
+      <p class="greeting">
+        Hello, {identity.name}.
+        <button type="button" class="gear" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.3.9a7.6 7.6 0 0 0-2.6-1.5L14.1 2.5h-4.2l-.4 2.5a7.6 7.6 0 0 0-2.6 1.5l-2.3-.9-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.3-.9a7.6 7.6 0 0 0 2.6 1.5l.4 2.5h4.2l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.3.9 2-3.4z" />
+          </svg>
+        </button>
+      </p>
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {notice && <p class="error">{notice}</p>}
 
       {chats && chats.length > 0 && <h2>Your chats</h2>}

@@ -842,3 +842,53 @@ button:disabled {
   align-items: center;
   padding: 0.5rem 0.7rem;
 }
+
+/* Settings. */
+.greeting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gear {
+  display: flex;
+  padding: 0.45rem;
+  color: var(--muted);
+}
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.sheet {
+  width: min(100%, 24rem);
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--bg);
+  box-shadow: 0 0.5rem 2rem rgb(0 0 0 / 0.3);
+}
+
+.sheet h2 {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.sheet label {
+  display: block;
+  font-weight: 600;
+}
+
+.sheet .note {
+  margin: 0.4rem 0 1.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}

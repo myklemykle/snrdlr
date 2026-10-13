@@ -4,9 +4,12 @@ Things noted along the way that are not part of the current phase. The phased pl
 
 ## Features requested
 
-- **Sounds** when sending or receiving a message.
-  - Browsers only allow audio after a tap, so the first sound needs unlocking on a user gesture.
-  - Only works while the app is open; notifications when closed are Phase 6 (push).
+- **Sounds: built, with stand-in sounds.** A random sound from `src/sounds/` plays when a message or picture is sent or arrives, in the open chat and (on a stay-connected computer) in the others. Off or on in Settings, the gear beside the greeting; on by default. Still open:
+  - **Real sounds.** The three `placeholder-*.wav` files are generated stand-ins. See `src/sounds/README.md` for formats.
+  - Nothing plays while the app is closed or the phone is locked; that needs notifications (Phase 6).
+  - One pool of sounds for both directions. Separate sets for sent and received, a per-chat mute, and a volume control are possible later.
+  - Not yet heard on a real iPhone or Android phone; check that the silent switch mutes it on the iPhone.
+- **Settings.** A window opened from the gear on the home screen, holding only the sounds switch so far. Candidates to move or add there: changing your name, the stay-connected switch, the version line, storage used.
 - **Names and nicknames.**
   - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
   - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.

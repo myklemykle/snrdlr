@@ -1,5 +1,10 @@
 import {render} from 'preact'
 import {App} from './app'
+import {unlockSound} from './sound'
 import './style.css'
+
+// Any tap or click lets the browser play message sounds from then on.
+addEventListener('pointerdown', unlockSound, {capture: true, passive: true})
+addEventListener('keydown', unlockSound, {capture: true, passive: true})
 
 render(<App />, document.getElementById('app')!)
