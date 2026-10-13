@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "test": "vitest run src worker",
     "e2e": "playwright test",
+    "e2e:android": "playwright test -c playwright.android.config.ts",
     "worker:deploy": "wrangler deploy -c worker/wrangler.toml"
   },
   "dependencies": {

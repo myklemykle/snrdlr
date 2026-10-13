@@ -147,10 +147,15 @@ Cheapest thing to do early: settle the final address before there are users to s
 - **A message sent while Android was away did not show.** Not reproduced. Two possible causes fixed: a message stored by another session of the same chat stayed hidden until a reload; and a device that had been out of touch numbered its next message just after the last one it had seen, so it appeared far up the history instead of at the end.
 - **"Couldn't connect" while the other phone was simply asleep.** Reworded; the message still appears whenever one device in the chat cannot be reached.
 
+- **Newest messages hidden when the keyboard opened.** Found by the automated phone run after the keyboard fix above: the log got shorter but did not stay scrolled to the end. Fixed, and covered by `npm run e2e:android`.
+
+Automated on the phone since (`npm run e2e:android`, 7 scenarios, all passing on this phone): steps 2.1 to 2.6, 3.4 and 3.5 by link, 4.1, 4.2, 4.9, 5.1 to 5.3, 5.6, 7.1 to 7.3, 8.1, 8.2, 8.5, and a Wi-Fi drop. They run against the test build and a relay on the Mac, on one Wi-Fi network, so they say nothing about the live site, the public relays, TURN or mobile data.
+
 Still open:
 
 - **"Add someone" in a direct chat is confusing.** It reads as adding to this chat; it starts a new group. Rename it ("New group with Anne") or explain it.
-- **Many connection-check page loads with no credential request after them** from the Android phone, seen in the Worker's log. Either the check is slow there or it is being abandoned when a connection is torn down. Each chat that connects also runs its own check at the same moment; they should share one.
+- **Many connection-check page loads with no credential request after them** from the Android phone, seen in the Worker's log. The phone had four tabs of the app open at once, each connecting its own chats, which accounts for much of it. Each chat that connects also runs its own check at the same moment; they should share one.
+- **Several tabs of the app on one phone.** Android opens a new tab for each scanned code, so tabs pile up, each holding connections. A message stored by one tab did not show in another (fixed for an open chat; the chat list still needs it). Consider having a new tab hand over to an existing one.
 - **Not yet run:** emoji sizes (4.4), mobile data (6.2 to 6.5, the phone has no SIM), next-day persistence (9.1, 9.2), other browsers, incognito.
 
 ## Testing still owed

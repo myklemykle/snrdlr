@@ -170,6 +170,24 @@ export function ChatScreen(props: {
 
   useEffect(() => logEnd.current?.scrollIntoView({block: 'end'}), [messages])
 
+  // When the on-screen keyboard opens or changes height the log gets shorter. If the newest message was
+  // in view, keep it in view; otherwise the keyboard would push it out of sight.
+  const log = useRef<HTMLOListElement>(null)
+  const atEnd = useRef(true)
+  const noteScroll = () => {
+    const element = log.current
+    if (element) atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48
+  }
+  useEffect(() => {
+    const keepEnd = () => atEnd.current && logEnd.current?.scrollIntoView({block: 'end'})
+    window.addEventListener('resize', keepEnd)
+    window.visualViewport?.addEventListener('resize', keepEnd)
+    return () => {
+      window.removeEventListener('resize', keepEnd)
+      window.visualViewport?.removeEventListener('resize', keepEnd)
+    }
+  }, [])
+
   // Each member's most recent profile message gives their display name.
   const names = useMemo(() => {
     const found = new Map<string, string>()
@@ -305,7 +323,7 @@ export function ChatScreen(props: {
         </section>
       )}
 
-      <ol class="log">
+      <ol class="log" ref={log} onScroll={noteScroll}>
         {(messages ?? []).map((message, index, all) => {
           const mine = message.author === identity.id
           const day = dayKey(message.sentAt)

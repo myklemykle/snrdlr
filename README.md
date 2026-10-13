@@ -25,10 +25,13 @@ npm install
 npm run dev      # local dev server
 npm test         # unit tests (keys, invites, membership, envelopes, storage, sync, TURN worker)
 npm run e2e      # two-browser pairing test, against a relay started on this machine
+npm run e2e:android  # the same app on a real Android phone attached by USB (see below)
 npm run build    # typecheck and build to dist/
 ```
 
 For manual testing in desktop browsers without touching public relays, run `npm run relay` in one terminal and `npm run dev:local` in another. The local relay (`scripts/local-relay.mjs`) is in-memory and unauthenticated, and only listens on localhost.
+
+`npm run e2e:android` drives Chrome on an Android phone, paired with a desktop browser on this machine. It needs `adb` (`brew install android-platform-tools`), USB debugging allowed for this computer, and the phone unlocked on the same Wi-Fi. The phone loads the test build through a USB tunnel as `http://localhost`, so its storage for the live site is untouched; Chrome on the phone is restarted, and its other tabs reload when next visited. It covers joining and inviting, history across a reload, catching up after the home screen, unread counts, direct chats, the on-screen keyboard, and a Wi-Fi drop. It cannot scan a code with the camera.
 
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 
