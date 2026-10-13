@@ -851,26 +851,65 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   await expect(chatEntry(bob, 'Sounds').getByLabel('1 unread')).toBeVisible({timeout: 15_000})
   await expect.poll(() => played(bob)).toBe(2)
 
-  // The gear beside the greeting opens settings; with sounds off, nothing plays.
+  // The gear beside the greeting opens settings. The app's own sounds are chosen to begin with.
   await bob.getByRole('button', {name: 'Settings'}).click()
   const settings = bob.getByRole('dialog', {name: 'Settings'})
-  await expect(settings.getByLabel('Sounds')).toBeChecked()
-  await settings.getByLabel('Sounds').uncheck()
+  await expect(settings.getByRole('radio')).toHaveCount(3)
+  await expect(settings.getByRole('group', {name: 'Sounds'}).locator('label')).toHaveText(['snrdl', 'plink', 'shhhhh'])
+  await expect(settings.getByLabel('snrdl')).toBeChecked()
+
+  // Choosing another set plays one of its sounds, so it can be heard.
+  await bob.waitForTimeout(500)
+  await settings.getByLabel('plink').check()
+  await expect.poll(() => played(bob)).toBe(3)
+
+  // "shhhhh" is silence: choosing it plays nothing, and neither do messages.
+  await bob.waitForTimeout(500)
+  await settings.getByLabel('shhhhh').check()
   await settings.getByRole('button', {name: 'Done'}).click()
   await expect(settings).toHaveCount(0)
   await send(anne, 'hello again')
   await expect(chatEntry(bob, 'Sounds').getByLabel('2 unread')).toBeVisible({timeout: 15_000})
   await bob.waitForTimeout(300)
-  expect(await played(bob)).toBe(2)
+  expect(await played(bob)).toBe(3)
 
-  // The choice is remembered, and turning sounds back on plays one so it can be heard.
+  // The choice is remembered across a reload.
   await bob.reload()
   await bob.getByRole('button', {name: 'Settings'}).click()
-  await expect(settings.getByLabel('Sounds')).not.toBeChecked()
-  await settings.getByLabel('Sounds').check()
+  await expect(settings.getByLabel('shhhhh')).toBeChecked()
+  await settings.getByLabel('snrdl').check()
   await expect.poll(() => played(bob)).toBe(1)
   await bob.keyboard.press('Escape')
   await expect(settings).toHaveCount(0)
+})
+
+test('each sound set plays its own files, and every file in the app\'s own set can be decoded', async ({browser}) => {
+  const page = await newPerson(browser)
+  const fetched: string[] = []
+  page.on('response', response => /\.(mp3|wav)$/.test(response.url()) && fetched.push(response.url().split('/').pop()!))
+  await page.goto('/')
+  await introduce(page, 'Anne')
+  // The first tap fetches the chosen set, and only that one.
+  await expect.poll(() => fetched.length).toBe(27)
+  expect(fetched.every(name => name.startsWith('snrdle-'))).toBe(true)
+  const broken = await page.evaluate(async names => {
+    const audio = new AudioContext()
+    const failures: string[] = []
+    for (const name of names) {
+      try {
+        const buffer = await audio.decodeAudioData(await (await fetch(`assets/${name}`)).arrayBuffer())
+        if (buffer.duration < 0.1 || buffer.duration > 2) failures.push(`${name}: ${buffer.duration}s`)
+      } catch {
+        failures.push(name)
+      }
+    }
+    return failures
+  }, fetched)
+  expect(broken).toEqual([])
+
+  await page.getByRole('button', {name: 'Settings'}).click()
+  await page.getByLabel('plink').check()
+  await expect.poll(() => fetched.filter(name => name.startsWith('plink-')).length).toBe(3)
 })
 
 test('the home screen says which build is running', async ({browser}) => {

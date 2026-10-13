@@ -7,7 +7,7 @@ import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, se
 import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
-import {playSound, setSoundsOn, soundsOn} from './sound'
+import {playSound, setSoundChoice, SILENT, SOUND_CHOICES, soundChoice} from './sound'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -323,7 +323,7 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
 /** Choices that apply to the whole app on this device. */
 function Settings(props: {onClose: () => void}) {
   const {onClose} = props
-  const [sounds, setSounds] = useState(soundsOn)
+  const [sounds, setSounds] = useState(soundChoice)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
     addEventListener('keydown', onKey)
@@ -333,21 +333,29 @@ function Settings(props: {onClose: () => void}) {
     <div class="sheet-backdrop" onClick={onClose}>
       <section class="sheet" role="dialog" aria-label="Settings" onClick={event => event.stopPropagation()}>
         <h2>Settings</h2>
-        <label>
-          <input
-            type="checkbox"
-            checked={sounds}
-            onChange={event => {
-              const on = event.currentTarget.checked
-              setSoundsOn(on)
-              setSounds(on)
-              // So the choice can be heard straight away.
-              if (on) playSound()
-            }}
-          />{' '}
-          Sounds
-        </label>
-        <p class="note">Plays a sound when a message arrives or is sent, while snrdlr is open. On a phone it follows the silent switch.</p>
+        <fieldset>
+          <legend>Sounds</legend>
+          {SOUND_CHOICES.map(choice => (
+            <label key={choice}>
+              <input
+                type="radio"
+                name="sounds"
+                checked={sounds === choice}
+                onChange={() => {
+                  setSoundChoice(choice)
+                  setSounds(choice)
+                  // So the choice can be heard straight away.
+                  playSound()
+                }}
+              />{' '}
+              {choice}
+            </label>
+          ))}
+        </fieldset>
+        <p class="note">
+          {sounds === SILENT ? 'No sounds.' : 'Plays a sound when a message arrives or is sent, while snrdlr is open.'} On a phone, sounds follow the
+          silent switch.
+        </p>
         <button type="button" onClick={onClose}>
           Done
         </button>

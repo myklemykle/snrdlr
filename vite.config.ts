@@ -17,5 +17,8 @@ export default defineConfig({
   // Relative asset paths, so the build works under any GitHub Pages subpath.
   base: './',
   plugins: [preact()],
+  // Small files would otherwise be folded into the script itself. The shortest sounds are that small,
+  // and would then be downloaded by everyone, whichever sound set they use.
+  build: {assetsInlineLimit: 0},
   define: {__BUILD__: JSON.stringify(buildStamp())}
 })

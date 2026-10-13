@@ -1,36 +1,57 @@
-// Plays a short sound when a message arrives or is sent. The sounds are the files in src/sounds.
+// Plays a short sound when a message arrives or is sent, from whichever set of sounds the person chose.
+// The sets are the folders in src/sounds.
 //
 // Browsers only let a page make noise once the person has tapped or clicked it, so the audio is
 // switched on at the first touch. It goes through the Web Audio API, which on an iPhone follows the
 // silent switch and plays over music instead of interrupting it.
-const SETTING = 'snrdlr.sounds'
+const SETTING = 'snrdlr.soundSet'
+// Before there were sets, this held '0' when sounds were turned off.
+const OLD_SETTING = 'snrdlr.sounds'
 // Several messages landing together make one sound, not a burst.
 const MIN_GAP_MS = 400
 
-const urls = Object.values(import.meta.glob('./sounds/*.{mp3,wav,m4a}', {eager: true, query: '?url', import: 'default'})) as string[]
+/** The choice that plays nothing. */
+export const SILENT = 'shhhhh'
+const DEFAULT_SET = 'snrdl'
+
+// Every folder in src/sounds is a set, named after the folder.
+const sets = new Map<string, string[]>()
+for (const [path, url] of Object.entries(import.meta.glob('./sounds/*/*.{mp3,wav,m4a}', {eager: true, query: '?url', import: 'default'}))) {
+  const name = path.split('/')[2]
+  sets.set(name, [...(sets.get(name) ?? []), url as string])
+}
+const FIRST = [DEFAULT_SET, 'plink']
+
+/** What Settings offers, in order: the sets, then silence. */
+export const SOUND_CHOICES = [...FIRST.filter(name => sets.has(name)), ...[...sets.keys()].filter(name => !FIRST.includes(name)).sort(), SILENT]
 
 let context: AudioContext | null = null
 const loaded = new Map<string, Promise<AudioBuffer | null>>()
 let lastPlayedAt = 0
 let lastUrl: string | null = null
 
-/** On unless the person has turned them off. */
-export function soundsOn(): boolean {
+/** The chosen set, or SILENT. */
+export function soundChoice(): string {
   try {
-    return localStorage.getItem(SETTING) !== '0'
+    const stored = localStorage.getItem(SETTING)
+    if (stored && SOUND_CHOICES.includes(stored)) return stored
+    if (localStorage.getItem(OLD_SETTING) === '0') return SILENT
   } catch {
-    return true
+    // Storage is unavailable; fall through to the default.
   }
+  return SOUND_CHOICES[0]
 }
 
-export function setSoundsOn(on: boolean): void {
+export function setSoundChoice(choice: string): void {
   try {
-    localStorage.setItem(SETTING, on ? '1' : '0')
+    localStorage.setItem(SETTING, choice)
   } catch {
     // The choice then lasts until the page is closed, which is no worse than not having it.
   }
-  if (on) unlockSound()
+  unlockSound()
 }
+
+const urls = () => sets.get(soundChoice()) ?? []
 
 const load = (audio: AudioContext, url: string) => {
   if (!loaded.has(url)) {
@@ -47,28 +68,31 @@ const load = (audio: AudioContext, url: string) => {
 
 /** Call from a tap or click. Until one has happened, the browser will not let anything play. */
 export function unlockSound(): void {
-  if (urls.length === 0 || !soundsOn()) return
+  const wanted = urls()
+  if (wanted.length === 0) return
   try {
     if (!context) {
       // Tells an iPhone these are interface sounds: quiet when the silent switch is on, and no interruption to music.
       const session = (navigator as Navigator & {audioSession?: {type: string}}).audioSession
       if (session) session.type = 'ambient'
       context = new AudioContext()
-      urls.forEach(url => void load(context!, url))
     }
+    // Fetches the chosen set ahead of time, so the first sound is not late.
+    wanted.forEach(url => void load(context!, url))
     if (context.state === 'suspended') void context.resume().catch(() => {})
   } catch {
     // No audio on this device.
   }
 }
 
-/** Plays one of the sounds, chosen at random, if sounds are on and the browser allows it yet. */
+/** Plays one sound from the chosen set, picked at random, if the browser allows it yet. */
 export function playSound(): void {
   const now = Date.now()
-  if (!context || context.state !== 'running' || !soundsOn() || now - lastPlayedAt < MIN_GAP_MS) return
+  const wanted = urls()
+  if (!context || context.state !== 'running' || wanted.length === 0 || now - lastPlayedAt < MIN_GAP_MS) return
   lastPlayedAt = now
   // Not the same one twice running, when there is a choice.
-  const choices = urls.length > 1 ? urls.filter(url => url !== lastUrl) : urls
+  const choices = wanted.length > 1 ? wanted.filter(url => url !== lastUrl) : wanted
   const url = choices[Math.floor(Math.random() * choices.length)]
   lastUrl = url
   const audio = context

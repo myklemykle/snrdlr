@@ -882,9 +882,21 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+.sheet fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sheet legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
 .sheet label {
   display: block;
-  font-weight: 600;
+  padding: 0.3rem 0;
 }
 
 .sheet .note {
