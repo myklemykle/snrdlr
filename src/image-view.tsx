@@ -66,6 +66,37 @@ export function ImageView(props: {
   )
 }
 
+/** Whether this device hands pictures to its own share sheet, as phones and tablets do. */
+function canShareImages(): boolean {
+  try {
+    const sample = new File([new Uint8Array(1)], 'picture.jpg', {type: IMAGE_MIME})
+    return matchMedia('(pointer: coarse)').matches && !!navigator.share && !!navigator.canShare?.({files: [sample]})
+  } catch {
+    return false
+  }
+}
+
+// Each platform has its own sign for "share": Apple's box with an arrow, and the three joined dots
+// used on Android and elsewhere.
+const APPLE = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)
+
+const AppleShareIcon = () => (
+  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 15V3.5" />
+    <path d="M8 7l4-4 4 4" />
+    <path d="M8.5 10.5H7a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6.5a2 2 0 0 0-2-2h-1.5" />
+  </svg>
+)
+
+const ShareIcon = () => (
+  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <circle cx="18" cy="5" r="2.6" fill="currentColor" stroke="none" />
+    <circle cx="6" cy="12" r="2.6" fill="currentColor" stroke="none" />
+    <circle cx="18" cy="19" r="2.6" fill="currentColor" stroke="none" />
+    <path d="M8.2 10.8l7.6-4.5M8.2 13.2l7.6 4.5" />
+  </svg>
+)
+
 /** A picture filling the screen, with a way to keep it. */
 export function ImageViewer(props: {url: string; onClose: () => void}) {
   const {url, onClose} = props
@@ -77,12 +108,12 @@ export function ImageViewer(props: {url: string; onClose: () => void}) {
   }, [])
 
   // Phones offer "Save Image" in their share sheet; elsewhere the browser downloads it.
+  const [sharing] = useState(canShareImages)
   const save = async () => {
     const name = `snrdlr-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`
     try {
-      const file = new File([await (await fetch(url)).blob()], name, {type: IMAGE_MIME})
-      if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({files: [file]})) {
-        await navigator.share({files: [file]})
+      if (sharing) {
+        await navigator.share({files: [new File([await (await fetch(url)).blob()], name, {type: IMAGE_MIME})]})
         return
       }
     } catch (error) {
@@ -101,9 +132,15 @@ export function ImageViewer(props: {url: string; onClose: () => void}) {
       <img src={url} alt="" onClick={event => event.stopPropagation()} />
       <div class="viewer-bar" onClick={event => event.stopPropagation()}>
         {note && <span class="note">{note}</span>}
-        <button type="button" onClick={save}>
-          Save
-        </button>
+        {sharing ? (
+          <button type="button" class="icon" onClick={save} aria-label="Share or save">
+            {APPLE ? <AppleShareIcon /> : <ShareIcon />}
+          </button>
+        ) : (
+          <button type="button" onClick={save}>
+            Save
+          </button>
+        )}
         <button type="button" onClick={onClose} aria-label="Close picture">
           ✕
         </button>
