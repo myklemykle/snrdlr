@@ -339,10 +339,12 @@ describe('session', () => {
     await again.session.sendText('written straight after rejoining')
     await again.session.close()
     const back = await join(network, rejoined, bobIdentity, bob.store)
-    await settle()
 
-    expect(texts(anne.view)).toEqual(['before leaving', 'written straight after rejoining'])
-    expect(texts(back.view)).toEqual(['before leaving', 'written straight after rejoining'])
+    // Waits for the outcome, not a fixed time: a busy machine can take a while to sync.
+    await vi.waitFor(() => {
+      expect(texts(anne.view)).toEqual(['before leaving', 'written straight after rejoining'])
+      expect(texts(back.view)).toEqual(['before leaving', 'written straight after rejoining'])
+    })
   })
 
   it('keeps quiet about a failed connection attempt if someone connects soon after', async () => {
