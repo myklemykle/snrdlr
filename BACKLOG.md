@@ -17,10 +17,14 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Reply. See "How reply would work" below.
   - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
-- **Reactions: follow-ups.** One reaction per person per message; six quick ones plus any typed emoji. Open:
-  - "Another emoji" opens a text box, and the person has to switch to the emoji keyboard themselves; a web page cannot ask for it. A built-in emoji grid would avoid that.
+- **Reactions: follow-ups.** One reaction per person per message; six quick ones, or any emoji from the app's own picker (a page cannot open the system's emoji keyboard). Open:
+  - **Skin tones.** The picker offers each emoji in its default colour only. A pasted emoji with a skin tone works. Add a press-and-hold choice and remember the preference.
+  - **Search is by English name only** ("party popper"), with no keywords ("celebrate") and no other languages.
+  - The picker leaves out emoji newer than the device can draw, by a drawing test that has only been checked in desktop Chrome. Check on the iPhone and the Android phone that no empty boxes appear and nothing obvious is missing.
+  - On an iPhone, check that the picker sits above the keyboard when its search box is in use.
   - Press and hold replaces the phone's own text selection on messages, so "Copy text" copies the whole message only.
-  - Not yet tried by hand on the iPhone or the Android phone; the Android automated test is written but has not been run.
+  - The Android automated test for reactions is written but has not been run.
+  - Offer the picker from the message box on desktop too, where there is no emoji keyboard a click away.
   - Reactions will apply to images once those exist.
 - **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
 - **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.

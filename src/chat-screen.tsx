@@ -1,7 +1,8 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
-import {emojiSize, firstEmoji, splitEmoji} from './emoji'
+import {emojiSize, splitEmoji} from './emoji'
+import {EmojiPicker} from './emoji-picker'
 import {MAX_TEXT_LENGTH} from './envelope'
 import {memberId, type Identity} from './identity'
 import {createInvite, inviteToFragment, type Invite} from './invite'
@@ -259,25 +260,30 @@ export function ChatScreen(props: {
 
   // The menu on one message: reactions, and copying its text.
   const [menu, setMenu] = useState<string | null>(null)
-  const [typingEmoji, setTypingEmoji] = useState(false)
+  // The full emoji picker, open for one message.
+  const [picking, setPicking] = useState<MessageRecord | null>(null)
   const menuOpenedAt = useRef(0)
   const openMenu = (key: string) => {
     menuOpenedAt.current = Date.now()
-    setTypingEmoji(false)
+    setPicking(null)
     setMenu(key)
   }
   const closeMenu = () => {
     // The finger that opened the menu by pressing also lifts; that must not count as a tap outside it.
-    if (Date.now() - menuOpenedAt.current > 400) setMenu(null)
+    if (Date.now() - menuOpenedAt.current <= 400) return
+    setMenu(null)
+    setPicking(null)
   }
   const ownReaction = (message: MessageRecord) =>
     reactions.get(messageKey(message))?.find(tally => tally.by.includes(identity.id))?.emoji ?? null
-  // Choosing the emoji we already chose takes it away.
-  const react = (message: MessageRecord, emoji: string) => {
+  // From the menu or the message itself, choosing the emoji we already chose takes it away. From the
+  // full picker it is left as it is.
+  const react = (message: MessageRecord, emoji: string, toggle = true) => {
     setMenu(null)
-    session.current
-      ?.react({author: message.author, seq: message.seq}, ownReaction(message) === emoji ? '' : emoji)
-      .catch(() => setError('Reaction could not be sent.'))
+    setPicking(null)
+    const same = ownReaction(message) === emoji
+    if (same && !toggle) return
+    session.current?.react({author: message.author, seq: message.seq}, same ? '' : emoji).catch(() => setError('Reaction could not be sent.'))
   }
   const copyText = async (text: string) => {
     setMenu(null)
@@ -491,22 +497,17 @@ export function ChatScreen(props: {
                         {emoji}
                       </button>
                     ))}
-                    <button type="button" aria-label="Another emoji" onClick={() => setTypingEmoji(true)}>
+                    <button
+                      type="button"
+                      aria-label="Another emoji"
+                      onClick={() => {
+                        setMenu(null)
+                        setPicking(message)
+                      }}
+                    >
                       ＋
                     </button>
                   </div>
-                  {typingEmoji && (
-                    <input
-                      ref={element => element?.focus()}
-                      aria-label="Emoji"
-                      placeholder="Type an emoji"
-                      autocomplete="off"
-                      onInput={event => {
-                        const emoji = firstEmoji(event.currentTarget.value)
-                        if (emoji) react(message, emoji)
-                      }}
-                    />
-                  )}
                   {tallies && <p class="who">{tallies.map(tally => `${tally.emoji} ${tally.by.map(nameOf).join(', ')}`).join(' · ')}</p>}
                   <button type="button" class="copy" onClick={() => copyText(text)}>
                     Copy text
@@ -519,7 +520,8 @@ export function ChatScreen(props: {
         <div ref={logEnd} />
       </ol>
 
-      {menu && <div class="menu-backdrop" onClick={closeMenu} />}
+      {(menu || picking) && <div class="menu-backdrop" onClick={closeMenu} />}
+      {picking && <EmojiPicker onPick={emoji => react(picking, emoji, false)} onClose={() => setPicking(null)} />}
 
       <form class="composer" onSubmit={send}>
         <input

@@ -1,7 +1,9 @@
 // Finds emoji in message text so they can be shown a little larger.
 const TONE = '[\\u{1F3FB}-\\u{1F3FF}]?'
 // Characters shown as emoji by default, or made emoji by a variation selector (so plain © and ™ stay text).
-const START = `(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)${TONE}`
+// The flags of England, Scotland and Wales are a black flag followed by invisible tag characters.
+const TAGS = '(?:[\\u{E0020}-\\u{E007E}]+\\u{E007F})?'
+const START = `(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)${TONE}${TAGS}`
 const JOINED = `\\u200D\\p{Extended_Pictographic}\\uFE0F?${TONE}`
 const FLAG = '[\\u{1F1E6}-\\u{1F1FF}]{2}'
 const KEYCAP = '[#*0-9]\\uFE0F\\u20E3'

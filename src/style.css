@@ -571,11 +571,6 @@ button:disabled {
   line-height: 1.2;
 }
 
-.menu input {
-  width: 100%;
-  margin-top: 0.4rem;
-}
-
 .menu .who {
   margin: 0.4rem 0.3rem 0;
   font-size: 0.8rem;
@@ -594,4 +589,90 @@ button:disabled {
 /* Clear of the reactions that hang below the message. */
 .reacted .menu {
   top: calc(100% + 1.4rem);
+}
+
+/* The emoji picker: a panel along the bottom of the screen. */
+.picker {
+  position: fixed;
+  left: 50%;
+  bottom: var(--hidden-below, 0px);
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  width: min(100vw, 40rem);
+  height: min(24rem, calc(var(--visible-height, 100dvh) * 0.6));
+  padding: 0.5rem 0.5rem env(safe-area-inset-bottom);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
+  background: var(--bg);
+  box-shadow: 0 -0.3rem 1rem rgb(0 0 0 / 0.2);
+}
+
+.picker-top {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.picker-top input {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-tabs {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+}
+
+.picker-tabs button,
+.picker .cells button {
+  padding: 0.25rem 0;
+  border: 0;
+  border-radius: 0.5rem;
+  line-height: 1.2;
+}
+
+.picker-tabs button {
+  flex: 1;
+  font-size: 1.2rem;
+}
+
+.picker-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0.3rem;
+  overscroll-behavior: contain;
+}
+
+/* Sections off screen are not laid out until scrolled to, which keeps opening the picker quick. */
+.picker-grid section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30rem;
+}
+
+.picker h3 {
+  margin: 0.5rem 0.3rem 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.picker .cells {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.6rem, 1fr));
+}
+
+.picker .cells button {
+  font-size: 1.6rem;
+}
+
+@media (hover: hover) {
+  .picker .cells button:hover,
+  .picker-tabs button:hover,
+  .menu button:hover {
+    background: var(--bubble);
+  }
 }

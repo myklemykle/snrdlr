@@ -460,7 +460,13 @@ test('people react to a message with an emoji, change it, and take it away', asy
   await openMenu(atBob)
   await expect(bob.locator('.menu .who')).toHaveText('👍 you, Anne')
   await bob.getByRole('button', {name: 'Another emoji'}).click()
-  await bob.getByRole('textbox', {name: 'Emoji'}).fill('🎉')
+  const picker = bob.getByRole('dialog', {name: 'Choose an emoji'})
+  await expect(picker.getByRole('button', {name: 'grinning face', exact: true})).toBeVisible()
+  // With a keyboard, the search box is ready to type in.
+  await expect(picker.getByLabel('Search emoji')).toBeFocused()
+  await bob.keyboard.type('party pop')
+  await picker.getByRole('button', {name: 'party popper'}).click()
+  await expect(picker).toHaveCount(0)
   await expect(atAnne.locator('.reactions button')).toHaveText(['👍', '🎉'])
   await expect(atAnne.locator('.reactions .own')).toHaveText('👍')
 
@@ -476,6 +482,29 @@ test('people react to a message with an emoji, change it, and take it away', asy
   await bob.getByRole('button', {name: 'Back to chats'}).click()
   await expect(chatEntry(bob, 'Reactions')).toBeVisible()
   await expect(bob.locator('.unread')).toHaveCount(0)
+
+  // The picker again: jumping to a group, what was used last time, something pasted in, and closing.
+  await chatEntry(bob, 'Reactions').click()
+  await openMenu(atBob)
+  await bob.getByRole('button', {name: 'Another emoji'}).click()
+  await expect(picker.getByRole('region', {name: 'Recently used'}).getByRole('button')).toHaveText(['🎉'])
+  await picker.getByRole('navigation').getByRole('button', {name: 'Flags'}).click()
+  await expect(picker.getByRole('button', {name: 'chequered flag'})).toBeInViewport()
+  await picker.getByLabel('Search emoji').fill('zzzz')
+  await expect(picker.getByText('No emoji found for "zzzz".')).toBeVisible()
+  await picker.getByLabel('Search emoji').fill('🦄')
+  await expect(picker.locator('.cells button')).toHaveText(['🦄'])
+  await bob.keyboard.press('Escape')
+  await expect(picker).toHaveCount(0)
+  await expect(atBob.locator('.reactions button')).toHaveText(['👍'])
+
+  // Choosing in the picker what Anne already has leaves it alone, where tapping it on the message removes it.
+  await openMenu(atAnne)
+  await anne.getByRole('button', {name: 'Another emoji'}).click()
+  await anne.getByLabel('Search emoji').fill('thumbs up')
+  await anne.getByRole('dialog').getByRole('button', {name: 'thumbs up', exact: true}).click()
+  await expect(anne.getByRole('dialog')).toHaveCount(0)
+  await expect(atAnne.locator('.reactions .own')).toHaveText('👍')
 
   // The same menu copies the message's text, and closes when clicked away from.
   await openMenu(atAnne)
@@ -523,6 +552,23 @@ test('on a touch screen, a long press on a message opens its reactions', async (
 
   await phone.getByRole('button', {name: 'React ❤️'}).tap()
   await expect(anne.locator('.mine', {hasText: 'press me'}).getByRole('button', {name: '❤️ from Phone'})).toBeVisible()
+  await expect(bubble.locator('.reactions .own')).toHaveText('❤️')
+
+  // The full picker fills the bottom of the screen, and does not raise the keyboard until asked.
+  await press(700)
+  await phone.getByRole('button', {name: 'Another emoji'}).tap()
+  const picker = phone.getByRole('dialog', {name: 'Choose an emoji'})
+  await expect(picker.getByRole('button', {name: 'grinning face', exact: true})).toBeVisible()
+  await expect(picker.getByLabel('Search emoji')).not.toBeFocused()
+  const pickerBox = (await picker.boundingBox())!
+  expect(pickerBox.x).toBeGreaterThanOrEqual(0)
+  expect(pickerBox.width).toBeLessThanOrEqual(375)
+  expect(Math.round(pickerBox.y + pickerBox.height)).toBe(667)
+  await picker.getByRole('button', {name: 'winking face', exact: true}).tap()
+  await expect(bubble.locator('.reactions .own')).toHaveText('😉')
+  await expect(anne.locator('.mine', {hasText: 'press me'}).getByRole('button', {name: '😉 from Phone'})).toBeVisible()
+  await press(700)
+  await phone.getByRole('button', {name: 'React ❤️'}).tap()
   await expect(bubble.locator('.reactions .own')).toHaveText('❤️')
 
   // Open again and tap elsewhere: it closes without changing anything.
