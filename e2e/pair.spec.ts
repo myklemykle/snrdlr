@@ -1184,7 +1184,7 @@ test('the build publishes its own version, which matches the one on screen', asy
   await page.goto('/?dev=1')
   await introduce(page, 'Anne')
   const {build} = await (await page.request.get('/version.json')).json()
-  await expect(page.locator('.build').first()).toContainText(`Version ${build}`)
+  await expect(page.locator('.build')).toContainText(`Version ${build}`)
   await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
 })
 

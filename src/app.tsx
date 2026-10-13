@@ -690,7 +690,7 @@ function Home(props: {
         {devMode() && ' · developer mode'}
       </p>
       {update.ready && (
-        <p class="build">
+        <p class="footnote">
           {update.held ? 'A newer version is out; updates are held in this tab.' : 'A newer version is out.'}{' '}
           <button type="button" class="inline" onClick={() => location.reload()}>
             Reload to update
@@ -698,7 +698,7 @@ function Home(props: {
         </p>
       )}
       {devMode() && (
-        <label class="build">
+        <label class="footnote">
           <input type="checkbox" checked={update.held} onChange={event => holdUpdates(event.currentTarget.checked)} /> Hold updates in this tab
           (testing)
         </label>

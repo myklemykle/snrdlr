@@ -923,3 +923,12 @@ button:disabled {
   padding-top: 0.75rem;
   border-top: 1px dashed var(--line);
 }
+
+/* Lines under the version: an update that is waiting, and developer switches. */
+.home .footnote {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  text-align: center;
+  color: var(--muted);
+}
