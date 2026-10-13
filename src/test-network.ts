@@ -13,6 +13,8 @@ export function makeNetwork() {
   return {
     /** Every envelope put on the wire, with who sent it and to whom. */
     sent: [] as {from: string; to?: string; envelope: Uint8Array}[],
+    /** Every answer to a request for a file: who sent it to whom, and whether they had it. */
+    files: [] as {from: string; to: string; hash: string; sent: boolean}[],
     joins: 0,
     /** Who is in the room right now. */
     present: () => [...members.keys()],
@@ -36,6 +38,13 @@ export function makeNetwork() {
           sendSync: async (have, target) => deliver(peerId, target, peer => peer.onSync(have, peerId)),
           ping: async target => {
             if (dead.has(peerId) || dead.has(target) || !members.has(target)) throw new Error('no answer')
+          },
+          requestFile: async (hash, target) => deliver(peerId, target, peer => peer.onFileWanted(hash, peerId)),
+          sendFile: async (hash, data, target) => {
+            this.files.push({from: peerId, to: target, hash, sent: data !== null})
+            deliver(peerId, target, peer => {
+              if (data === null || peer.expectsFile(hash, data.length, peerId)) peer.onFile(hash, data, peerId)
+            })
           },
           routes: async () => [],
           leave: async () => {

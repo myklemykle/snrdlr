@@ -92,6 +92,8 @@ function syncOnce(
         onPeersChange: peerIds => {
           if (peerIds.length > 0) someoneThere = true
         },
+        // A picture still arriving is a reason to stay a little longer.
+        onFiles: () => (lastActivity = Date.now()),
         onStatus: () => {},
         onError: () => {}
       }

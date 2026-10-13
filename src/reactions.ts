@@ -13,7 +13,7 @@ export const messageKey = (message: {author: string; seq: number}) => `${message
  * appeared. A person's latest reaction to a message is the one that counts.
  */
 export function tallyReactions(messages: MessageRecord[]): Map<string, Tally[]> {
-  const reactable = new Set(messages.filter(message => message.content.type === 'text').map(messageKey))
+  const reactable = new Set(messages.filter(({content}) => content.type === 'text' || content.type === 'image').map(messageKey))
   // Target, then reactor, to that person's latest reaction. Their own numbering says which is latest,
   // whatever their clock claimed.
   const latest = new Map<string, Map<string, {seq: number; emoji: string}>>()

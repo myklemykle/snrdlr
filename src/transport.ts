@@ -3,6 +3,7 @@ import {RELAYS} from './relays'
 import {toHex, utf8} from './bytes'
 import type {ChatAuth} from './chats'
 import {MAX_ENVELOPE_BYTES} from './envelope'
+import {MAX_FILE_BYTES} from './files'
 import type {ChatKeys} from './keys'
 import {routeFromStats} from './route'
 import type {VersionVector, Wire, WireHandlers} from './session'
@@ -98,6 +99,31 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     }
   })
 
+  // Files (pictures) are asked for by hash and sent whole; Trystero splits them up on the way.
+  const wants = room.makeAction<string>('want', {
+    onMessage: (hash, {peerId}) => {
+      if (members.has(peerId) && typeof hash === 'string') handlers.onFileWanted(hash, peerId)
+    }
+  })
+  const lacks = room.makeAction<string>('nofile', {
+    onMessage: (hash, {peerId}) => {
+      if (members.has(peerId) && typeof hash === 'string') handlers.onFile(hash, null, peerId)
+    }
+  })
+  const hashOf = (metadata: unknown) => (typeof metadata === 'string' && /^[0-9a-f]{64}$/.test(metadata) ? metadata : null)
+  const files = room.makeAction<Uint8Array>('file', {
+    // Refused before any of it is downloaded unless it is a file we asked this peer for.
+    onReceive: ({byteLength, peerId, metadata}) => {
+      const hash = hashOf(metadata)
+      return hash !== null && members.has(peerId) && byteLength <= MAX_FILE_BYTES && handlers.expectsFile(hash, byteLength, peerId)
+    },
+    onMessage: (data: unknown, {peerId, metadata}) => {
+      const hash = hashOf(metadata)
+      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data instanceof Uint8Array ? data : null
+      if (hash && bytes && members.has(peerId)) handlers.onFile(hash, bytes, peerId)
+    }
+  })
+
   function stateFor(peerId: string): PeerState {
     let state = states.get(peerId)
     if (!state) {
@@ -184,6 +210,14 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     sendSync: async (have, peerId) => {
       const to = targets(peerId)
       if (to.length > 0) await syncs.send(have, {target: to})
+    },
+    requestFile: async (hash, peerId) => {
+      if (members.has(peerId)) await wants.send(hash, {target: peerId})
+    },
+    sendFile: async (hash, data, peerId) => {
+      if (!members.has(peerId)) return
+      if (data) await files.send(data, {target: peerId, metadata: hash})
+      else await lacks.send(hash, {target: peerId})
     },
     ping: peerId =>
       Promise.race([

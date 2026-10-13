@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import {describe, expect, it, vi} from 'vitest'
 import {createIdentity, type Identity} from './identity'
 import {chatKeys, newGroupChat} from './chats'
-import {importMsgKey, sealEnvelope} from './envelope'
+import {importMsgKey, sealEnvelope, type ImageContent} from './envelope'
+import {sealFile} from './files'
 import {issueCert} from './membership'
 import {tallyReactions} from './reactions'
 import {openSession, versionVector, type ConnectionStatus} from './session'
@@ -30,7 +31,13 @@ const admitted = (chat: ChatRecord, identity: Identity): ChatRecord => ({
 
 async function join(network: Network, shared: ChatRecord, identity: Identity, store?: Store, asHeld?: ChatRecord) {
   const chat = asHeld ?? admitted(shared, identity)
-  const state = {messages: [] as MessageRecord[], peers: [] as string[], statuses: [] as ConnectionStatus[], errors: [] as string[]}
+  const state = {
+    messages: [] as MessageRecord[],
+    peers: [] as string[],
+    statuses: [] as ConnectionStatus[],
+    errors: [] as string[],
+    files: new Set() as ReadonlySet<string>
+  }
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
     chat,
@@ -41,7 +48,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
       onMessages: messages => (state.messages = messages),
       onStatus: status => state.statuses.push(status),
       onPeersChange: peers => (state.peers = peers),
-      onError: message => state.errors.push(message)
+      onError: message => state.errors.push(message),
+      onFiles: files => (state.files = files)
     },
     errorDelayMs: 60
   })
@@ -54,6 +62,9 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     },
     get peers() {
       return state.peers
+    },
+    get files() {
+      return state.files
     },
     statuses: state.statuses,
     errors: state.errors
@@ -456,7 +467,7 @@ describe('session', () => {
     await settle()
     network.sent.length = 0
 
-    const wire = network.connect('mallory')({}, {onEnvelope() {}, onSync() {}, onPeersChange() {}, onError() {}})
+    const wire = network.connect('mallory')({}, {onEnvelope() {}, onSync() {}, onPeersChange() {}, onError() {}, onFileWanted() {}, onFile() {}, expectsFile: () => false})
     await settle()
     network.sent.length = 0
     for (const junk of [null, 'everything', [], {'not-an-id': 0}, {[anne.identity.id]: -1}, {[anne.identity.id]: 1.5}]) {
@@ -647,5 +658,109 @@ describe('session', () => {
     await settle()
     expect(tallyReactions(cindy.view).get(key)).toEqual([{emoji: '🎉', by: [anne.identity.id]}])
     expect(texts(cindy.view)).toEqual(['shall we go?'])
+  })
+
+  /** A picture ready to send: the message that describes it, and its encrypted file. */
+  async function picture(bytes: number[], caption?: string): Promise<{image: ImageContent; file: Uint8Array}> {
+    const sealed = await sealFile(new Uint8Array(bytes))
+    const image: ImageContent = {type: 'image', hash: sealed.hash, key: sealed.key, size: sealed.data.length, width: 4, height: 3, preview: new Uint8Array([9])}
+    return {image: caption ? {...image, caption} : image, file: sealed.data}
+  }
+
+  it('sends a picture: the message at once, the file fetched by whoever lacks it', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
+    await settle()
+    const {image, file} = await picture([1, 2, 3, 4], 'the view')
+    await anne.session.postImage(image, file)
+    await settle()
+
+    expect(bob.view.find(m => m.content.type === 'image')?.content).toEqual(image)
+    expect(bob.files.has(image.hash)).toBe(true)
+    expect(await bob.store.getFile(chat.id, image.hash)).toEqual(file)
+    expect(anne.files.has(image.hash)).toBe(true)
+    // Fetched once, and never asked for again.
+    expect(network.files.map(entry => entry.from)).toEqual([anne.identity.id])
+    expect(await bob.store.unreadCount((await bob.store.getChat(chat.id)) ?? chat, bob.identity.id)).toBe(1)
+  })
+
+  it('gets a picture from another member when its sender has gone', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
+    await settle()
+    const {image, file} = await picture([5, 6, 7])
+    await anne.session.postImage(image, file)
+    await settle()
+    await anne.session.close()
+
+    const cindy = await join(network, chat, createIdentity('Cindy'))
+    await settle()
+    expect(cindy.files.has(image.hash)).toBe(true)
+    expect(await cindy.store.getFile(chat.id, image.hash)).toEqual(file)
+    expect(network.files.at(-1)).toMatchObject({from: bob.identity.id, to: cindy.identity.id, sent: true})
+  })
+
+  it('asks someone else when the first person asked does not have the picture', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const {image, file} = await picture([8, 8, 8])
+    await anne.session.postImage(image, file)
+    await anne.session.close()
+
+    // Bob knows of the picture but never got the file. Cindy holds both.
+    const bobStore = await openStore(`session-${counter++}`)
+    const cindyStore = await openStore(`session-${counter++}`)
+    for (const store of [bobStore, cindyStore]) for (const message of anne.view) await store.addMessage(message)
+    await cindyStore.putFile(chat.id, image.hash, file)
+    const bob = await join(network, chat, createIdentity('Bob'), bobStore)
+    const dave = await join(network, chat, createIdentity('Dave'))
+    await settle()
+    expect(dave.files.has(image.hash)).toBe(false)
+
+    const cindy = await join(network, chat, createIdentity('Cindy'), cindyStore)
+    await settle()
+    await settle()
+    for (const person of [bob, dave]) expect(person.files.has(image.hash)).toBe(true)
+    expect(network.files.some(entry => !entry.sent)).toBe(true)
+    expect(cindy.files.has(image.hash)).toBe(true)
+  })
+
+  it('refuses a file that is not what the message described, or that it never asked for', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const {image, file} = await picture([1, 1, 1, 1])
+    await anne.session.postImage(image, file)
+    await anne.session.close()
+
+    // Mallory is in the room and answers every request with something else of the right length.
+    const forged = new Uint8Array(file.length).fill(7)
+    const mallory = network.connect('mallory')(
+      {},
+      {
+        onEnvelope() {},
+        onSync() {},
+        onPeersChange() {},
+        onError() {},
+        onFile() {},
+        expectsFile: () => false,
+        onFileWanted: (hash, peerId) => void mallory.sendFile(hash, forged, peerId)
+      }
+    )
+    const bobStore = await openStore(`session-${counter++}`)
+    for (const message of anne.view) await bobStore.addMessage(message)
+    const bob = await join(network, chat, createIdentity('Bob'), bobStore)
+    await settle()
+    expect(network.files.some(entry => entry.from === 'mallory' && entry.sent)).toBe(true)
+    expect(bob.files.has(image.hash)).toBe(false)
+    expect(await bobStore.getFile(chat.id, image.hash)).toBeUndefined()
+
+    // Unasked for: the right file, pushed at Bob by someone he did not ask. It is not even downloaded.
+    await mallory.sendFile('f'.repeat(64), file, bob.identity.id)
+    await settle()
+    expect(await bobStore.listFiles(chat.id)).toEqual([])
   })
 })

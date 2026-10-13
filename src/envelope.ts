@@ -8,6 +8,7 @@ import {ed25519} from '@noble/curves/ed25519.js'
 import {decode, encode} from 'cbor-x'
 import {bytesEqual, concatBytes, fromHex, toHex, utf8} from './bytes'
 import {isSingleEmoji} from './emoji'
+import {FILE_KEY_BYTES, MAX_FILE_BYTES} from './files'
 import {memberId, MAX_NAME_LENGTH} from './identity'
 
 export const ENVELOPE_VERSION = 1
@@ -28,8 +29,31 @@ export type Content =
    * replaces any earlier one, and an empty emoji takes it away.
    */
   | {type: 'reaction'; target: {author: string; seq: number}; emoji: string}
+  /**
+   * A picture. The message holds what is needed to fetch, check and open the file, which travels
+   * separately (see files.ts), and a tiny preview to show until it arrives.
+   */
+  | ImageContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
+
+export type ImageContent = {
+  type: 'image'
+  /** SHA-256 of the encrypted file, in hex. */
+  hash: string
+  key: Uint8Array
+  /** Bytes in the encrypted file. */
+  size: number
+  width: number
+  height: number
+  /** A very small JPEG of the picture; may be empty. */
+  preview: Uint8Array
+  caption?: string
+}
+
+export const IMAGE_MIME = 'image/jpeg'
+export const MAX_PREVIEW_BYTES = 2048
+const MAX_IMAGE_SIDE = 16384
 
 const MAX_CERT_BYTES = 512
 const MAX_CHAIN_LENGTH = 32
@@ -83,6 +107,20 @@ function encodeContent(content: Content): [string, unknown] {
       return ['group-invite', {g: content.secret, n: content.name, f: content.founder, c: content.chain}]
     case 'reaction':
       return ['reaction', {a: fromHex(content.target.author), s: content.target.seq, e: content.emoji}]
+    case 'image':
+      return [
+        'image',
+        {
+          m: IMAGE_MIME,
+          h: fromHex(content.hash),
+          k: content.key,
+          z: content.size,
+          w: content.width,
+          t: content.height,
+          p: content.preview,
+          ...(content.caption ? {c: content.caption} : {})
+        }
+      ]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -123,6 +161,27 @@ function decodeContent(type: unknown, body: unknown): Content {
     if (!(a instanceof Uint8Array) || a.length !== 32 || !isCount(s) || s === 0) throw new Error('bad reaction body')
     if (typeof e !== 'string' || (e !== '' && !isSingleEmoji(e))) throw new Error('bad reaction body')
     return {type, target: {author: toHex(a), seq: s}, emoji: e}
+  }
+  if (type === 'image') {
+    const {m, h, k, z, w, t, p, c} = (body ?? {}) as Record<string, unknown>
+    // A kind of picture a newer version sends: keep the message for when this device can show it.
+    if (typeof m === 'string' && m !== IMAGE_MIME && m.length <= 64) return {type: 'unknown', kind: 'image'}
+    const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
+    const isSide = (value: unknown): value is number => isCount(value) && value > 0 && value <= MAX_IMAGE_SIDE
+    if (m !== IMAGE_MIME || !isBytes(h, 32) || !isBytes(k, FILE_KEY_BYTES)) throw new Error('bad image body')
+    if (!isCount(z) || z === 0 || z > MAX_FILE_BYTES || !isSide(w) || !isSide(t)) throw new Error('bad image body')
+    if (!(p instanceof Uint8Array) || p.length > MAX_PREVIEW_BYTES) throw new Error('bad image body')
+    if (c !== undefined && (typeof c !== 'string' || c.length === 0 || c.length > MAX_TEXT_LENGTH)) throw new Error('bad image body')
+    return {
+      type,
+      hash: toHex(h),
+      key: new Uint8Array(k),
+      size: z,
+      width: w,
+      height: t,
+      preview: new Uint8Array(p),
+      ...(c ? {caption: c as string} : {})
+    }
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
   if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}

@@ -5,6 +5,8 @@ import {emojiSize, splitEmoji} from './emoji'
 import {EmojiPicker} from './emoji-picker'
 import {MAX_TEXT_LENGTH} from './envelope'
 import {memberId, type Identity} from './identity'
+import {prepareImage, type PreparedImage} from './image'
+import {ImageView, ImageViewer} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
@@ -32,6 +34,7 @@ const BUSY_LABELS: Record<Exclude<ConnectionStatus, 'idle'>, string> = {
 // How long a finger must rest on a message to open its menu, and how far it may drift meanwhile.
 const LONG_PRESS_MS = 450
 const LONG_PRESS_SLOP_PX = 10
+const MAX_ATTACHED = 10
 
 export function ChatScreen(props: {
   chat: ChatRecord
@@ -56,6 +59,8 @@ export function ChatScreen(props: {
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState('')
   const session = useRef<Session | null>(null)
+  // Which pictures' files are on this device.
+  const [files, setFiles] = useState<ReadonlySet<string>>(new Set())
   const logEnd = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -80,7 +85,8 @@ export function ChatScreen(props: {
             setPeers(peerIds)
             if (peerIds.length > 0) setError(null)
           },
-          onError: message => !cancelled && setError(message)
+          onError: message => !cancelled && setError(message),
+          onFiles: held => !cancelled && setFiles(held)
         }
       })
       if (cancelled) void opened.close()
@@ -191,7 +197,7 @@ export function ChatScreen(props: {
       (messages ?? []).filter(message => {
         const {type} = message.content
         if (type === 'profile') return message.author !== identity.id && firstProfiles.has(message)
-        return type === 'text' || type === 'group-invite'
+        return type === 'text' || type === 'image' || type === 'group-invite'
       }),
     [messages]
   )
@@ -250,12 +256,56 @@ export function ChatScreen(props: {
   }, [messages])
   const founderId = chat.kind === 'group' ? memberId(chat.context) : null
 
-  const send = (event: Event) => {
+  // Pictures chosen but not yet sent, shown above the message box. What is typed there becomes the caption.
+  const [attached, setAttached] = useState<(PreparedImage & {url: string})[]>([])
+  const [preparing, setPreparing] = useState(0)
+  const [viewing, setViewing] = useState<string | null>(null)
+  const filePicker = useRef<HTMLInputElement>(null)
+  // The strip of pictures waiting to be sent takes room from the log; keep the newest message in view.
+  useEffect(() => {
+    if (atEnd.current) logEnd.current?.scrollIntoView({block: 'end'})
+  }, [attached.length, preparing > 0])
+  const attachedCount = useRef(0)
+  attachedCount.current = attached.length + preparing
+  const attach = async (chosen: File[]) => {
+    const room = MAX_ATTACHED - attachedCount.current
+    if (chosen.length > room) setError(`Up to ${MAX_ATTACHED} pictures can be sent at once.`)
+    for (const file of chosen.slice(0, Math.max(0, room))) {
+      setPreparing(count => count + 1)
+      try {
+        const prepared = await prepareImage(file)
+        setAttached(current => [...current, {...prepared, url: URL.createObjectURL(prepared.shown)}])
+      } catch {
+        setError(`"${file.name}" isn't a picture this browser can open.`)
+      } finally {
+        setPreparing(count => count - 1)
+      }
+    }
+  }
+  const detach = (entry: {url: string}) => {
+    URL.revokeObjectURL(entry.url)
+    setAttached(current => current.filter(other => other !== entry))
+  }
+  const imagesIn = (list: FileList | null | undefined) => [...(list ?? [])].filter(file => file.type.startsWith('image/'))
+
+  const send = async (event: Event) => {
     event.preventDefault()
     const text = draft.trim()
-    if (!text || !session.current) return
+    if (!session.current || preparing > 0 || (!text && attached.length === 0)) return
     setDraft('')
-    session.current.sendText(text).catch(() => setError('Message could not be sent.'))
+    if (attached.length === 0) return session.current.sendText(text).catch(() => setError('Message could not be sent.'))
+    const sending = attached
+    setAttached([])
+    try {
+      // The caption goes with the first picture.
+      for (const [index, {image, file}] of sending.entries()) {
+        await session.current.postImage(index === 0 && text ? {...image, caption: text} : image, file)
+      }
+    } catch {
+      setError('Picture could not be sent.')
+    } finally {
+      sending.forEach(entry => URL.revokeObjectURL(entry.url))
+    }
   }
 
   // The menu on one message: reactions, and copying its text.
@@ -363,7 +413,17 @@ export function ChatScreen(props: {
   }
 
   return (
-    <main class="chat">
+    <main
+      class="chat"
+      // Pictures can be dropped anywhere on the chat.
+      onDragOver={event => event.dataTransfer?.types.includes('Files') && event.preventDefault()}
+      onDrop={event => {
+        const dropped = imagesIn(event.dataTransfer?.files)
+        if (dropped.length === 0) return
+        event.preventDefault()
+        void attach(dropped)
+      }}
+    >
       <header>
         <button type="button" class="back" onClick={onBack} aria-label="Back to chats">
           ‹
@@ -442,9 +502,10 @@ export function ChatScreen(props: {
               </li>
             ]
           }
-          if (message.content.type !== 'text') return separator
-          const {text} = message.content
-          const size = emojiSize(text)
+          if (message.content.type !== 'text' && message.content.type !== 'image') return separator
+          const image = message.content.type === 'image' ? message.content : null
+          const text = message.content.type === 'text' ? message.content.text : (message.content.caption ?? '')
+          const size = image ? null : emojiSize(text)
           const tallies = reactions.get(key)
           const own = ownReaction(message)
           const open = menu === key
@@ -452,7 +513,7 @@ export function ChatScreen(props: {
             separator,
             <li
               key={key}
-              class={`${mine ? 'mine' : 'theirs'}${size ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}`}
+              class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}`}
               onPointerDown={event => startPress(event, key)}
               onPointerMove={movePress}
               onPointerUp={cancelPress}
@@ -462,7 +523,21 @@ export function ChatScreen(props: {
               onContextMenu={event => (press.current || open) && event.preventDefault()}
             >
               {!mine && <span class="author">{nameOf(message.author)}</span>}
-              {splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
+              {image && (
+                <ImageView
+                  store={store}
+                  chatId={chat.id}
+                  image={image}
+                  held={files.has(image.hash)}
+                  connected={connected}
+                  from={nameOf(message.author)}
+                  // The tap that ends a long press must not also open the picture.
+                  onOpen={url => !menu && Date.now() - menuOpenedAt.current > 700 && setViewing(url)}
+                />
+              )}
+              {image
+                ? text && <span class="caption">{splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}</span>
+                : splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
                 {formatTime(message.sentAt)}
               </time>
@@ -510,9 +585,11 @@ export function ChatScreen(props: {
                   </div>
                   {tallies && <p class="who">{tallies.map(tally => `${tally.emoji} ${tally.by.map(nameOf).join(', ')}`).join(' · ')}</p>}
                   {/* Shows what will be copied, as much of it as fits. */}
-                  <button type="button" class="copy" aria-label={`Copy “${text.slice(0, 120)}”`} onClick={() => copyText(text)}>
-                    Copy “<span class="snippet">{text.slice(0, 120)}</span>”
-                  </button>
+                  {text && (
+                    <button type="button" class="copy" aria-label={`Copy “${text.slice(0, 120)}”`} onClick={() => copyText(text)}>
+                      Copy “<span class="snippet">{text.slice(0, 120)}</span>”
+                    </button>
+                  )}
                 </div>
               )}
             </li>
@@ -524,16 +601,58 @@ export function ChatScreen(props: {
       {(menu || picking) && <div class="menu-backdrop" onClick={closeMenu} />}
       {picking && <EmojiPicker onPick={emoji => react(picking, emoji, false)} onClose={() => setPicking(null)} />}
 
+      {viewing && <ImageViewer url={viewing} onClose={() => setViewing(null)} />}
+
+      {(attached.length > 0 || preparing > 0) && (
+        <ul class="attached" aria-label="Pictures to send">
+          {attached.map((entry, index) => (
+            <li key={entry.url}>
+              <img src={entry.url} alt={`Picture ${index + 1} to send`} />
+              <button type="button" aria-label={`Remove picture ${index + 1}`} onClick={() => detach(entry)}>
+                ✕
+              </button>
+            </li>
+          ))}
+          {preparing > 0 && <li class="busy">Preparing…</li>}
+        </ul>
+      )}
+
       <form class="composer" onSubmit={send}>
+        <input
+          ref={filePicker}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          aria-label="Pictures to add"
+          onChange={event => {
+            void attach(imagesIn(event.currentTarget.files))
+            // So that choosing the same picture again is noticed.
+            event.currentTarget.value = ''
+          }}
+        />
+        <button type="button" class="attach" aria-label="Add a picture" disabled={!messages} onClick={() => filePicker.current?.click()}>
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
+            <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
+            <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+          </svg>
+        </button>
         <input
           value={draft}
           onInput={event => setDraft(event.currentTarget.value)}
-          placeholder={connected ? 'Message' : 'Message (delivered when you are both here)'}
+          onPaste={event => {
+            const pasted = imagesIn(event.clipboardData?.files)
+            if (pasted.length === 0) return
+            event.preventDefault()
+            void attach(pasted)
+          }}
+          placeholder={attached.length > 0 ? 'Add a caption (optional)' : connected ? 'Message' : 'Message (delivered when you are both here)'}
           maxLength={MAX_TEXT_LENGTH}
           aria-label="Message"
           autocomplete="off"
         />
-        <button type="submit" disabled={!messages || !draft.trim()}>
+        <button type="submit" disabled={!messages || preparing > 0 || (!draft.trim() && attached.length === 0)}>
           Send
         </button>
       </form>

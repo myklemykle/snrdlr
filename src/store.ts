@@ -39,6 +39,8 @@ interface Schema extends DBSchema {
       received: [chatId: string, receivedAt: number]
     }
   }
+  /** Encrypted files that messages refer to, such as images. */
+  files: {key: [chatId: string, hash: string]; value: {chatId: string; hash: string; data: Uint8Array; addedAt: number}}
   /** Chats that were left: just enough to carry on our numbering if we are invited back. */
   left: {key: string; value: {ownSeq: number}}
 }
@@ -46,7 +48,7 @@ interface Schema extends DBSchema {
 export type Store = ReturnType<typeof wrap>
 
 export async function openStore(name = 'snrdlr') {
-  const db = await openDB<Schema>(name, 4, {
+  const db = await openDB<Schema>(name, 5, {
     upgrade(db, oldVersion, _newVersion, upgrade) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
@@ -61,6 +63,7 @@ export async function openStore(name = 'snrdlr') {
       if (oldVersion > 0 && oldVersion < 4) {
         for (const store of ['chats', 'messages', 'left'] as const) void upgrade.objectStore(store).clear()
       }
+      if (oldVersion < 5) db.createObjectStore('files', {keyPath: ['chatId', 'hash']})
     }
   })
   return wrap(db)
@@ -90,12 +93,13 @@ function wrap(db: IDBPDatabase<Schema>) {
      * other members still hold our messages and a rejoin must not reuse their sequence numbers.
      */
     async deleteChat(id: string, selfId: string): Promise<void> {
-      const tx = db.transaction(['chats', 'messages', 'left'], 'readwrite')
+      const tx = db.transaction(['chats', 'messages', 'left', 'files'], 'readwrite')
       const chat = await tx.objectStore('chats').get(id)
       const ownKeys = await tx.objectStore('messages').getAllKeys(IDBKeyRange.bound([id, selfId, 0], [id, selfId, Infinity]))
       const ownSeq = Math.max(chat?.ownSeqFloor ?? 0, ...ownKeys.map(([, , seq]) => seq))
       if (ownSeq > 0) await tx.objectStore('left').put({ownSeq}, id)
       await tx.objectStore('messages').delete(IDBKeyRange.bound([id], [id, []]))
+      await tx.objectStore('files').delete(IDBKeyRange.bound([id], [id, []]))
       await tx.objectStore('chats').delete(id)
       await tx.done
     },
@@ -117,11 +121,16 @@ function wrap(db: IDBPDatabase<Schema>) {
       if (chat && (chat.readAt ?? 0) < at) await tx.store.put({...chat, readAt: at})
       await tx.done
     },
-    /** How many text messages from other people have arrived since the chat was last looked at. */
+    /** Which of a chat's files are held, by hash. */
+    listFiles: async (chatId: string) => (await db.getAllKeys('files', IDBKeyRange.bound([chatId], [chatId, []]))).map(([, hash]) => hash),
+    getFile: async (chatId: string, hash: string) => (await db.get('files', [chatId, hash]))?.data,
+    putFile: (chatId: string, hash: string, data: Uint8Array) => db.put('files', {chatId, hash, data, addedAt: Date.now()}).then(() => undefined),
+
+    /** How many messages and pictures from other people have arrived since the chat was last looked at. */
     async unreadCount(chat: ChatRecord, selfId: string): Promise<number> {
       const since = IDBKeyRange.bound([chat.id, chat.readAt ?? chat.createdAt], [chat.id, Infinity], true)
       const arrived = await db.getAllFromIndex('messages', 'received', since)
-      return arrived.filter(message => message.author !== selfId && message.content.type === 'text').length
+      return arrived.filter(message => message.author !== selfId && (message.content.type === 'text' || message.content.type === 'image')).length
     },
 
     /** A chat's messages in display order: by logical clock, then author. */

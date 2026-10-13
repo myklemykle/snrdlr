@@ -255,3 +255,53 @@ test('a long press on a message opens its reactions, and the phone can react and
   await desk.locator('.mine', {hasText: 'press me'}).locator('.reactions button').click()
   await expect(bubble.locator('.reactions .own')).toHaveText('❤️2')
 })
+
+test('the phone sends a picture and receives one', async ({browser}) => {
+  const desk = await newDesk(browser)
+  await deskInvitesMoto(desk, 'Pictures')
+  await connected(moto)
+  const photo = (page: Page, width: number, height: number) =>
+    page
+      .evaluate(
+        ([w, h]) => {
+          const canvas = document.createElement('canvas')
+          canvas.width = w
+          canvas.height = h
+          const context = canvas.getContext('2d')!
+          context.fillStyle = '#28f'
+          context.fillRect(0, 0, w, h)
+          context.fillStyle = '#fd0'
+          context.fillRect(w / 4, h / 4, w / 2, h / 2)
+          return canvas.toDataURL('image/jpeg', 0.9).split(',')[1]
+        },
+        [width, height]
+      )
+      .then(base64 => ({name: 'photo.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(base64, 'base64')}))
+
+  // From the phone: shrunk on the phone itself before it leaves.
+  await moto.getByLabel('Pictures to add').setInputFiles(await photo(desk, 3200, 2400))
+  await expect(moto.getByRole('img', {name: 'Picture 1 to send'})).toBeVisible({timeout: 20_000})
+  await moto.getByLabel('Message').fill('from the phone')
+  await moto.getByRole('button', {name: 'Send'}).click()
+  const atDesk = desk.locator('.theirs.image img.full')
+  await expect(atDesk).toBeVisible({timeout: 30_000})
+  await expect.poll(() => atDesk.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([1600, 1200])
+  await expect(desk.locator('.theirs.image')).toContainText('from the phone')
+
+  // To the phone: it shows, fits the screen, and opens full screen on a tap.
+  await desk.getByLabel('Pictures to add').setInputFiles(await photo(desk, 900, 1600))
+  await expect(desk.getByRole('img', {name: 'Picture 1 to send'})).toBeVisible()
+  await desk.getByRole('button', {name: 'Send'}).click()
+  const atMoto = moto.locator('.theirs.image')
+  await expect(atMoto.locator('img.full')).toBeVisible({timeout: 30_000})
+  const box = (await atMoto.boundingBox())!
+  expect(box.x + box.width).toBeLessThanOrEqual(await moto.evaluate(() => innerWidth))
+  await atMoto.locator('.picture').tap()
+  await expect(moto.getByRole('dialog', {name: 'Picture'})).toBeVisible()
+  await moto.getByRole('button', {name: 'Close picture'}).tap()
+  await expect(moto.getByRole('dialog', {name: 'Picture'})).toHaveCount(0)
+
+  // Both are still there after a reload.
+  await moto.reload()
+  await expect(moto.locator('.log .image img.full')).toHaveCount(2, {timeout: 30_000})
+})

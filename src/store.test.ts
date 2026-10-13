@@ -120,4 +120,19 @@ describe('store', () => {
     expect(kept.content).toEqual({type: 'text', text: 'original'})
     expect([...kept.envelope]).toEqual([1, 2, 3])
   })
+
+  it('keeps files per chat, and forgets them with the chat', async () => {
+    const store = await openStore(`store-files-${Date.now()}`)
+    const data = new Uint8Array([1, 2, 3])
+    await store.putFile('chat-a', 'aa', data)
+    await store.putFile('chat-a', 'bb', data)
+    await store.putFile('chat-b', 'aa', new Uint8Array([9]))
+    expect((await store.listFiles('chat-a')).sort()).toEqual(['aa', 'bb'])
+    expect(await store.getFile('chat-a', 'aa')).toEqual(data)
+    expect(await store.getFile('chat-a', 'zz')).toBeUndefined()
+
+    await store.deleteChat('chat-a', 'me')
+    expect(await store.listFiles('chat-a')).toEqual([])
+    expect(await store.getFile('chat-b', 'aa')).toEqual(new Uint8Array([9]))
+  })
 })

@@ -594,6 +594,161 @@ test('on a touch screen, a long press on a message opens its reactions', async (
   await expect(bubble.locator('.reactions button')).toHaveText(['❤️'])
 })
 
+/** A JPEG made in the page, optionally with a camera-style metadata block holding `secret`. */
+async function makePhoto(page: Page, width: number, height: number, secret?: string) {
+  const base64 = await page.evaluate(
+    ([w, h]) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const context = canvas.getContext('2d')!
+      const gradient = context.createLinearGradient(0, 0, w, h)
+      gradient.addColorStop(0, '#f80')
+      gradient.addColorStop(1, '#08f')
+      context.fillStyle = gradient
+      context.fillRect(0, 0, w, h)
+      context.fillStyle = '#fff'
+      context.fillRect(w / 4, h / 4, w / 8, h / 8)
+      return canvas.toDataURL('image/jpeg', 0.9).split(',')[1]
+    },
+    [width, height]
+  )
+  const jpeg = Buffer.from(base64, 'base64')
+  if (!secret) return jpeg
+  const payload = Buffer.concat([Buffer.from('Exif\0\0'), Buffer.from(secret)])
+  const block = Buffer.concat([Buffer.from([0xff, 0xe1, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload])
+  return Buffer.concat([jpeg.subarray(0, 2), block, jpeg.subarray(2)])
+}
+
+const photoFile = (buffer: Buffer, name = 'photo.jpg') => ({name, mimeType: 'image/jpeg', buffer})
+
+test('people send pictures: shrunk, stripped of camera details, with a caption, a reaction and a full-screen view', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Pictures')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  const photo = await makePhoto(anne, 3000, 2000, 'SECRET-GPS-POSITION')
+  expect(photo.includes('SECRET-GPS-POSITION')).toBe(true)
+  await anne.getByLabel('Pictures to add').setInputFiles(photoFile(photo))
+  await expect(anne.getByRole('img', {name: 'Picture 1 to send'})).toBeVisible()
+  await expect(anne.getByLabel('Message')).toHaveAttribute('placeholder', 'Add a caption (optional)')
+  await anne.getByLabel('Message').fill('the view from the top')
+  await anne.getByRole('button', {name: 'Send'}).click()
+  await expect(anne.getByRole('list', {name: 'Pictures to send'})).toHaveCount(0)
+
+  // Bob gets the message, then the picture itself: 1600 pixels on its longest side, as a plain JPEG.
+  const atBob = bob.locator('.theirs.image')
+  await expect(atBob).toContainText('the view from the top')
+  const full = atBob.locator('img.full')
+  await expect(full).toBeVisible({timeout: 20_000})
+  await expect.poll(() => full.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([1600, 1067])
+  const received = await full.evaluate(async (img: HTMLImageElement) => {
+    const bytes = new Uint8Array(await (await fetch(img.src)).arrayBuffer())
+    return {size: bytes.length, start: [bytes[0], bytes[1]], text: new TextDecoder('latin1').decode(bytes)}
+  })
+  expect(received.start).toEqual([0xff, 0xd8])
+  expect(received.size).toBeLessThan(600 * 1024)
+  expect(received.text).not.toContain('SECRET-GPS-POSITION')
+  // The sender sees the same shrunken picture.
+  await expect(anne.locator('.mine.image img.full')).toBeVisible()
+
+  // It opens full screen and closes again.
+  await atBob.getByRole('button', {name: 'Picture from Anne. Open'}).click()
+  const viewer = bob.getByRole('dialog', {name: 'Picture'})
+  await expect(viewer.locator('img')).toBeVisible()
+  await expect(viewer.getByRole('button', {name: 'Save'})).toBeVisible()
+  await bob.keyboard.press('Escape')
+  await expect(viewer).toHaveCount(0)
+
+  // Reactions work on pictures, and the menu offers the caption to copy.
+  await atBob.hover()
+  await atBob.getByRole('button', {name: 'React or copy'}).click()
+  await expect(bob.getByRole('button', {name: 'Copy “the view from the top”'})).toBeVisible()
+  await bob.getByRole('button', {name: 'React ❤️'}).click()
+  await expect(anne.locator('.mine.image').getByRole('button', {name: '❤️ from Bob'})).toBeVisible()
+
+  // The picture is stored: it is still there after a reload, and counts as one message.
+  await bob.reload()
+  await expect(bob.locator('.theirs.image img.full')).toBeVisible({timeout: 20_000})
+  await expect(bob.locator('.log li:not(.event)')).toHaveCount(1)
+})
+
+test('several pictures at once, by choosing, pasting and dropping; and a file that is not a picture', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Album')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  const wide = (await makePhoto(anne, 800, 400)).toString('base64')
+  const tall = (await makePhoto(anne, 300, 900)).toString('base64')
+
+  // Two chosen together.
+  await anne.getByLabel('Pictures to add').setInputFiles([photoFile(Buffer.from(wide, 'base64'), 'a.jpg'), photoFile(Buffer.from(tall, 'base64'), 'b.jpg')])
+  const waiting = anne.getByRole('list', {name: 'Pictures to send'}).getByRole('img')
+  await expect(waiting).toHaveCount(2)
+
+  // One pasted into the message box, one dropped on the chat.
+  const hand = (event: 'paste' | 'drop', selector: string) =>
+    anne.evaluate(
+      ([kind, target, data]) => {
+        const bytes = Uint8Array.from(atob(data), char => char.charCodeAt(0))
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'handed.jpg', {type: 'image/jpeg'}))
+        const made =
+          kind === 'paste'
+            ? new ClipboardEvent('paste', {clipboardData: transfer, bubbles: true, cancelable: true})
+            : new DragEvent('drop', {dataTransfer: transfer, bubbles: true, cancelable: true})
+        document.querySelector(target)!.dispatchEvent(made)
+      },
+      [event, selector, wide] as const
+    )
+  await hand('paste', '[aria-label="Message"]')
+  await expect(waiting).toHaveCount(3)
+  await hand('drop', '.log')
+  await expect(waiting).toHaveCount(4)
+
+  // Something that only claims to be a picture is refused, and one can be taken back out.
+  await anne.getByLabel('Pictures to add').setInputFiles(photoFile(Buffer.from('not a picture at all'), 'notes.jpg'))
+  await expect(anne.locator('.error')).toHaveText('"notes.jpg" isn\'t a picture this browser can open.')
+  await anne.getByRole('button', {name: 'Remove picture 4'}).click()
+  await expect(waiting).toHaveCount(3)
+
+  // Sent with nothing typed: three pictures, three messages, in order, each its own shape.
+  await anne.getByRole('button', {name: 'Send'}).click()
+  const got = bob.locator('.theirs.image img.full')
+  await expect(got).toHaveCount(3, {timeout: 30_000})
+  await expect
+    .poll(() => got.evaluateAll((images: HTMLImageElement[]) => images.map(img => `${img.naturalWidth}x${img.naturalHeight}`)))
+    .toEqual(['800x400', '300x900', '800x400'])
+  await expect(bob.locator('.theirs.image .caption')).toHaveCount(0)
+})
+
+test('a picture reaches someone who was away, through a third person, after its sender has gone', async ({browser}) => {
+  const [anne, bob, kay] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Relayed')
+  await Promise.all([bob.goto(invite), kay.goto(invite)])
+  await Promise.all([introduce(bob, 'Bob'), introduce(kay, 'Kay')])
+  await expect(anne.locator('.status')).toHaveText(/Connected to 2/, {timeout: 30_000})
+
+  // Bob goes away. Anne sends a picture, which Kay receives; then Anne leaves too.
+  await bob.goto('about:blank')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await anne.getByLabel('Pictures to add').setInputFiles(photoFile(await makePhoto(anne, 640, 480)))
+  await expect(anne.getByRole('img', {name: 'Picture 1 to send'})).toBeVisible()
+  await anne.getByRole('button', {name: 'Send'}).click()
+  await expect(kay.locator('.theirs.image img.full')).toBeVisible({timeout: 20_000})
+  await anne.goto('about:blank')
+  await expect(kay.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+
+  // Bob comes back with only Kay there, and still gets the picture.
+  await bob.goto('/')
+  await chatEntry(bob, 'Relayed').click()
+  await expect(bob.locator('.theirs.image img.full')).toBeVisible({timeout: 30_000})
+  await expect(bob.locator('.theirs.image .author')).toHaveText('Anne')
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

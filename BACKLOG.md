@@ -53,19 +53,27 @@ This changes the message format, so it needs a rule for how older app versions t
 
 ## Images and audio messages
 
-Wanted after Phase 4. The proposal doc lists file transfer as a non-goal for v1, so this extends the plan. No foundation work is needed first, provided media stays out of the message log:
+### Pictures: built
 
-- A media message is a small signed message holding a reference: the file's hash, size, type, its own encryption key and a tiny thumbnail. The file is fetched separately, on demand, from any member who has it.
-- Files get their own table in storage, and their own fetch-by-hash request next to sync.
-- Older app versions keep message types they do not recognise, so they will not lose these messages.
+A picture message is a small signed message holding the file's hash, size, dimensions, a key of its own and a tiny preview. The file is encrypted with that key, kept in its own table, and fetched automatically by hash from any member who has it. Before sending, the device shrinks the picture to 1600 pixels on its longest side and re-encodes it as a JPEG, which removes location and camera details. Several can be sent at once (up to ten), with a caption on the first; they can be chosen, pasted or dropped. Reactions work on them. A stay-connected computer fetches every picture, so it can pass them on.
 
-To settle when building it:
+Still open:
 
-- Do the automatic TURN cut-off first; relayed media uses real data.
-- Strip location and other metadata from photos, and downscale them, before sending.
+- **Not yet tried on real phones.** Choosing from the camera and the photo library, a real photo's rotation, HEIC photos from an iPhone, and saving through the share sheet. The Android automated test is written but has not been run.
+- **Animated GIFs become still pictures**, because shrinking redraws them. Keeping animation means sending the file untouched, with a size limit.
+- **No progress bar.** A picture shows its blurred preview and "Loading…" until it is all here.
+- **The viewer is basic**: no pinch to zoom of its own, no swiping between pictures, and Android's back button leaves the chat instead of closing it.
+- **No "original size" option**, and nothing bigger than 2 MB once encrypted is accepted.
+- **Pictures are kept until the chat is left.** Add a "storage used" view, and a way to delete a picture from this device.
+- **iPhone storage.** Safari can clear a site's data after seven days without a visit unless the app is installed to the home screen (Phase 3). Pictures make that loss more noticeable.
+- **A device that never gets the file** keeps asking every half minute while connected. Fine for now; a file nobody has any more should eventually show as gone.
+- **Sending is all-at-once per picture**; a connection that drops midway starts that picture again.
+
+### Audio: to do
+
 - Audio formats: iPhones and Android/desktop browsers record differently; test on real devices that each can play the other's.
-- The bot (Phase 5) would need to hold encrypted files as well as messages.
-- Images first, then audio.
+- Audio can use the same file transfer as pictures.
+- The bot (Phase 5) would need to hold encrypted files as well as messages. Each file already has its own key, so it can.
 
 ## Notifications on iPhone without deciding up front
 

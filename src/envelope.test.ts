@@ -150,4 +150,26 @@ describe('envelope', () => {
       await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).rejects.toThrow('bad reaction body')
     }
   })
+
+  it('round-trips a picture, and keeps one of a kind it does not know for a later version', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const image = {
+      type: 'image',
+      hash: 'cd'.repeat(32),
+      key: new Uint8Array(32).fill(5),
+      size: 123_456,
+      width: 1600,
+      height: 1200,
+      preview: new Uint8Array([1, 2, 3])
+    } as const
+    for (const content of [image, {...image, caption: 'the view ⛰️'}, {...image, preview: new Uint8Array(0)}]) {
+      const message = {...hello, seq: 2, content}
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, message))).toEqual({...message, author: anne.id})
+    }
+    for (const broken of [{size: 0}, {size: 3 * 1024 * 1024}, {width: 0}, {height: 20_000}, {preview: new Uint8Array(4000)}, {key: new Uint8Array(5)}]) {
+      const message = {...hello, seq: 2, content: {...image, ...broken}}
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, message))).rejects.toThrow('bad image body')
+    }
+  })
 })

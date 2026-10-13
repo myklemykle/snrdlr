@@ -7,7 +7,8 @@
 // Authors: a message is only kept if its author is known to be a member. Members show that through the
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
-import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type Message} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type ImageContent, type Message} from './envelope'
+import {fileHash, MAX_FILE_BYTES} from './files'
 import type {Identity} from './identity'
 import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
@@ -23,12 +24,21 @@ export type WireHandlers = {
   onSync: (have: unknown, peerId: string) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
+  /** A peer asks for a file. */
+  onFileWanted: (hash: string, peerId: string) => void
+  /** A peer sends a file, or says (with null) that it does not have it. */
+  onFile: (hash: string, data: Uint8Array | null, peerId: string) => void
+  /** Whether a file a peer is about to send is one we asked that peer for; anything else is not downloaded. */
+  expectsFile: (hash: string, byteLength: number, peerId: string) => boolean
 }
 
 export type Wire = {
   /** Sends to everyone connected, or to one peer. */
   send: (envelope: Uint8Array, peerId?: string) => Promise<void>
   sendSync: (have: VersionVector, peerId?: string) => Promise<void>
+  requestFile: (hash: string, peerId: string) => Promise<void>
+  /** Sends a file to the peer who asked, or null to say we do not have it. */
+  sendFile: (hash: string, data: Uint8Array | null, peerId: string) => Promise<void>
   /** Rejects if the peer does not answer. */
   ping: (peerId: string) => Promise<void>
   routes: () => Promise<Route[]>
@@ -48,6 +58,8 @@ export type SessionHandlers = {
   onStatus: (status: ConnectionStatus) => void
   onPeersChange: (peerIds: string[]) => void
   onError: (message: string) => void
+  /** The hashes of the files held for this chat, whenever that changes. */
+  onFiles?: (held: ReadonlySet<string>) => void
 }
 
 export type Session = {
@@ -58,6 +70,8 @@ export type Session = {
   postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
   react: (target: {author: string; seq: number}, emoji: string) => Promise<void>
+  /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
+  postImage: (image: ImageContent, file: Uint8Array) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -76,6 +90,11 @@ const SEARCH_GRACE_MS = 8_000
 // Connection attempts often fail once and then succeed, for example while a phone changes network.
 // A failure is only reported if nobody has connected this long after it.
 const ERROR_DELAY_MS = 15_000
+// Files are fetched a few at a time. A peer that has not sent one after this long is given up on, and
+// one that said it lacks a file is not asked again for a while.
+const MAX_FILE_REQUESTS = 3
+const FILE_TIMEOUT_MS = 45_000
+const FILE_RETRY_MS = 25_000
 
 const compare = (a: MessageRecord, b: MessageRecord) =>
   a.lamport - b.lamport || a.author.localeCompare(b.author) || a.seq - b.seq
@@ -184,6 +203,58 @@ export async function openSession(options: {
   const ownSeq = () =>
     messages.reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
 
+  // Files: the pictures that messages refer to travel separately. Whatever is missing is asked for, one
+  // peer at a time, from whoever is connected; any member who holds a file hands it on.
+  const heldFiles = new Set(await store.listFiles(chat.id))
+  const asked = new Map<string, {peerId: string; at: number}>()
+  const lacking = new Map<string, number>()
+  let serving: Promise<void> = Promise.resolve()
+  const publishFiles = () => handlers.onFiles?.(new Set(heldFiles))
+  const missingFiles = () => {
+    const missing = new Map<string, ImageContent>()
+    for (const {content} of messages) if (content.type === 'image' && !heldFiles.has(content.hash)) missing.set(content.hash, content)
+    return missing
+  }
+  function fetchFiles() {
+    if (closed || !wire || peers.length === 0) return
+    const now = Date.now()
+    for (const [hash, request] of asked) {
+      if (now - request.at > FILE_TIMEOUT_MS || !peers.includes(request.peerId)) asked.delete(hash)
+    }
+    for (const hash of missingFiles().keys()) {
+      if (asked.size >= MAX_FILE_REQUESTS) break
+      if (asked.has(hash)) continue
+      const peerId = peers.find(candidate => now - (lacking.get(`${hash}:${candidate}`) ?? -Infinity) > FILE_RETRY_MS)
+      if (!peerId) continue
+      asked.set(hash, {peerId, at: now})
+      void wire.requestFile(hash, peerId).catch(() => asked.delete(hash))
+    }
+  }
+  async function receiveFile(hash: string, data: Uint8Array | null, peerId: string) {
+    if (asked.get(hash)?.peerId !== peerId) return
+    asked.delete(hash)
+    const wanted = missingFiles().get(hash)
+    // Checked against the hash in the signed message, so it does not matter who passed the file on.
+    const genuine = data && wanted && data.length === wanted.size && data.length <= MAX_FILE_BYTES && (await fileHash(data)) === hash
+    if (genuine && !closed) {
+      await store.putFile(chat.id, hash, data)
+      heldFiles.add(hash)
+      publishFiles()
+    } else lacking.set(`${hash}:${peerId}`, Date.now())
+    fetchFiles()
+  }
+  function serveFile(hash: string, peerId: string, via: Wire) {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return
+    // One at a time, so several requests do not crowd out messages.
+    serving = serving
+      .then(async () => {
+        if (wire !== via || !peers.includes(peerId)) return
+        const data = heldFiles.has(hash) ? await store.getFile(chat.id, hash) : undefined
+        await via.sendFile(hash, data ?? null, peerId)
+      })
+      .catch(() => {})
+  }
+
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
   async function post(content: Content): Promise<void> {
     for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
@@ -209,6 +280,7 @@ export async function openSession(options: {
     // Already stored but not on screen: another session of this chat (a background sync, another tab)
     // stored it after we loaded the history. Without this it would stay hidden until a reload.
     if (!closed && (isNew || !holds(record.author, record.seq))) insert(record)
+    if (record.content.type === 'image') fetchFiles()
   }
 
   async function receive(envelope: Uint8Array) {
@@ -264,7 +336,16 @@ export async function openSession(options: {
           handlers.onPeersChange(peerIds)
           if (peerIds.length > 0 && status === 'searching') setStatus('idle')
           for (const peerId of newcomers) void via.sendSync(versionVector(messages), peerId).catch(() => {})
+          fetchFiles()
         }),
+      onFileWanted: (hash, peerId) =>
+        void ready.then(via => {
+          if (live()) serveFile(hash, peerId, via)
+        }),
+      onFile: (hash, data, peerId) => {
+        if (live()) void receiveFile(hash, data, peerId).catch(() => {})
+      },
+      expectsFile: (hash, byteLength, peerId) => live() && asked.get(hash)?.peerId === peerId && missingFiles().get(hash)?.size === byteLength,
       onError: message => {
         if (live()) reportUnlessSomeoneConnects(message)
       }
@@ -293,6 +374,7 @@ export async function openSession(options: {
   }
 
   publish()
+  publishFiles()
   handlers.onStatus(status)
   // Not awaited: connecting can take seconds, and messages can be written and queued meanwhile.
   void openWire().catch(() => {
@@ -312,6 +394,7 @@ export async function openSession(options: {
   // Catches anything missed in between, for example when not every pair of members is directly connected.
   const resync = setInterval(() => {
     if (peers.length > 0) void wire?.sendSync(versionVector(messages)).catch(() => {})
+    fetchFiles()
   }, RESYNC_INTERVAL_MS)
 
   return {
@@ -319,6 +402,12 @@ export async function openSession(options: {
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
+    async postImage(image, file) {
+      await store.putFile(chat.id, image.hash, file)
+      heldFiles.add(image.hash)
+      publishFiles()
+      await post(image)
+    },
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return
       if (peers.length === 0) {
