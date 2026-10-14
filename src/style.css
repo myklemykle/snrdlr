@@ -890,6 +890,36 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+/* The parts of Settings brought over from the front page. */
+.sheet section {
+  margin: 0 0 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.sheet section section {
+  margin: 0;
+  padding-top: 0.25rem;
+  border-top: 0;
+}
+
+.sheet h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sheet section .note {
+  margin: 0.25rem 0 0.6rem;
+}
+
+.sheet .build {
+  margin-bottom: 1rem;
+}
+
 .sheet fieldset {
   margin: 0;
   padding: 0;

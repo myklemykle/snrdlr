@@ -22,6 +22,14 @@ async function introduce(page: Page, name: string) {
 }
 
 /** A chat's row on the home screen. */
+/** Opens Settings, where joining someone, adding a device and staying connected are, unless it is open already. */
+async function openSettings(page: Page) {
+  const sheet = page.getByRole('dialog', {name: 'Settings'})
+  if ((await sheet.count()) === 0) await page.getByRole('button', {name: 'Settings'}).click()
+  return sheet
+}
+const closeSettings = (page: Page) => page.getByRole('dialog', {name: 'Settings'}).getByRole('button', {name: 'Done'}).click()
+
 const chatEntry = (page: Page, name: string) => page.locator('.chats .open', {hasText: name})
 
 async function send(page: Page, text: string) {
@@ -355,7 +363,7 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await bob.goto('/')
   await introduce(bob, 'Bob')
 
-  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await anne.getByRole('button', {name: 'Chat with one person'}).click()
   await expect(anne.getByRole('img', {name: 'Code to chat with me'})).toBeVisible()
   await anne.getByRole('button', {name: 'Copy link'}).click()
   const code = await anne.evaluate(() => navigator.clipboard.readText())
@@ -406,7 +414,7 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   // No invite button here; pairing again reopens the same chat instead of making another.
   await expect(anne.getByRole('button', {name: 'Invite', exact: true})).toHaveCount(0)
   await bob.getByRole('button', {name: 'Back to chats'}).click()
-  await bob.getByRole('button', {name: 'Show my code'}).click()
+  await bob.getByRole('button', {name: 'Chat with one person'}).click()
   await bob.getByRole('button', {name: 'Copy link'}).click()
   const bobsCode = await bob.evaluate(() => navigator.clipboard.readText())
   await anne.goto(bobsCode)
@@ -424,7 +432,7 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await introduce(anne, 'Anne')
   await bob.goto('/')
   await introduce(bob, 'Bob')
-  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await anne.getByRole('button', {name: 'Chat with one person'}).click()
   await anne.getByRole('button', {name: 'Copy link'}).click()
   await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
   await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
@@ -473,6 +481,7 @@ test('a computer set to stay connected passes messages between people who are ne
   await kay.getByRole('button', {name: 'Back to chats'}).click()
   const keeping = kay.locator('.keeping')
   await expect(keeping).toHaveCount(0)
+  await openSettings(kay)
   await kay.getByLabel('Keep every chat connected').check()
   await expect(keeping).toHaveText(/Keeping 1 chat connected, with 2 devices online/, {timeout: 30_000})
 
@@ -490,14 +499,17 @@ test('a computer set to stay connected passes messages between people who are ne
   await expect(bob.locator('.theirs', {hasText: 'for bob, whenever he is back'})).toContainText('Anne', {timeout: 30_000})
 
   // Opening the chat on Kay's computer and leaving it again keeps it connected throughout.
+  await closeSettings(kay)
   await chatEntry(kay, 'Relay').click()
   await expect(kay.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await kay.getByRole('button', {name: 'Back to chats'}).click()
+  await openSettings(kay)
   await expect(keeping).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
 
   // A second tab in the same browser leaves the job to the first.
   const second = await kay.context().newPage()
   await second.goto('/')
+  await openSettings(second)
   await expect(second.getByLabel('Keep every chat connected')).toBeChecked()
   await expect(second.locator('.keeping')).toHaveText('Another snrdlr tab in this browser is already doing this.')
   // When the first tab closes, the second takes over, and the choice has survived the reload.
@@ -1136,8 +1148,10 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
 
   // A message in a chat that is not on screen is heard too, on a computer that stays connected.
   await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await openSettings(bob)
   await bob.getByLabel('Keep every chat connected').check()
   await expect(bob.locator('.keeping')).toHaveText(/with 1 device online/, {timeout: 30_000})
+  await closeSettings(bob)
   await send(anne, 'are you there?')
   await expect(chatEntry(bob, 'Sounds').getByLabel('1 unread')).toBeVisible({timeout: 15_000})
   await expect.poll(() => played(bob)).toBe(2)
@@ -1245,7 +1259,9 @@ test('developer mode: a standing link lets someone join later, with the inviter 
 
   // Turned on from the address, which is then tidied; the home screen says so.
   await anne.goto('/?dev=1')
+  await openSettings(anne)
   await expect(anne.locator('.build')).toContainText('developer mode')
+  await closeSettings(anne)
   expect(anne.url()).not.toContain('dev=')
   await anne.getByLabel('Chat name').fill('Demo')
   await anne.getByRole('button', {name: 'Start a group'}).click()
@@ -1290,6 +1306,7 @@ test('developer mode: a standing link lets someone join later, with the inviter 
 
   // Developer mode is turned off the same way.
   await anne.goto('/?dev=0')
+  await openSettings(anne)
   await expect(anne.locator('.build')).not.toContainText('developer mode')
 })
 
@@ -1354,7 +1371,7 @@ test('a "chat with me" code and a standing link both let a stranger in; develope
   await introduce(anne, 'Anne')
 
   const viaCode = await newStranger(browser)
-  await anne.getByRole('button', {name: 'Show my code'}).click()
+  await anne.getByRole('button', {name: 'Chat with one person'}).click()
   await anne.getByRole('button', {name: 'Copy link'}).click()
   await viaCode.goto(await anne.evaluate(() => navigator.clipboard.readText()))
   await introduce(viaCode, 'Coded')
@@ -1407,10 +1424,12 @@ test('an open tab moves to a newer version by itself once idle, but not mid-task
 
   await page.goto('/?dev=1')
   await introduce(page, 'Anne')
+  await openSettings(page)
   await page.getByLabel('Keep every chat connected').check()
   await expect(page.locator('.running')).toHaveText(/^This tab has been running for under a minute, since /)
   await page.waitForTimeout(2500)
   expect(loads).toHaveLength(1)
+  await closeSettings(page)
 
   // A newer build appears while a message is half typed: the tab stays put.
   await page.getByLabel('Chat name').fill('Updates')
@@ -1426,6 +1445,7 @@ test('an open tab moves to a newer version by itself once idle, but not mid-task
   // Held for testing: still put, and the home screen says an update is waiting.
   await page.getByLabel('Message').fill('')
   await page.getByRole('button', {name: 'Back to chats'}).click()
+  await openSettings(page)
   await page.getByLabel('Hold updates in this tab').check()
   await expect(page.getByText('A newer version is out; updates are held in this tab.')).toBeVisible()
   await page.waitForTimeout(3500)
@@ -1434,6 +1454,7 @@ test('an open tab moves to a newer version by itself once idle, but not mid-task
   // Released and left alone: it reloads by itself, says so, and carries on keeping chats connected.
   await page.getByLabel('Hold updates in this tab').uncheck()
   await expect.poll(() => loads.length, {timeout: 15_000}).toBe(2)
+  await openSettings(page)
   await expect(page.locator('.running')).toHaveText(/^This tab updated itself at .* and has been running for under a minute since\.$/)
   await expect(page.locator('.keeping')).toHaveText(/Keeping 1 chat connected/)
 
@@ -1448,6 +1469,7 @@ test('the build publishes its own version, which matches the one on screen', asy
   await page.goto('/?dev=1')
   await introduce(page, 'Anne')
   const {build} = await (await page.request.get('/version.json')).json()
+  await openSettings(page)
   await expect(page.locator('.build')).toContainText(`Version ${build}`)
   await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
 })
@@ -1597,7 +1619,7 @@ test('on a small phone, a home screen longer than the screen scrolls all the way
   await expect(phone.getByRole('button', {name: 'Settings'})).toBeInViewport()
   await expect(phone.getByRole('heading', {name: 'Your chats'})).toBeInViewport()
   await phone.evaluate(() => scrollTo(0, document.documentElement.scrollHeight))
-  await expect(phone.locator('.build')).toBeInViewport()
+  await expect(chatEntry(phone, 'Chat 1')).toBeInViewport()
 })
 
 test('someone joins from inside the app, by scanning a code with the camera or pasting a link', async ({browser}) => {
@@ -1648,8 +1670,9 @@ test('someone joins from inside the app, by scanning a code with the camera or p
   await introduce(paster, 'Paster')
   await expect(paster.getByRole('heading', {name: 'Scanned'})).toBeVisible({timeout: 15_000})
 
-  // The same two ways in are on the front page of someone already using the app.
+  // The same two ways in are in Settings for someone already using the app.
   await paster.getByRole('button', {name: 'Back to chats'}).click()
+  await openSettings(paster)
   await expect(paster.getByRole('button', {name: 'Scan a code'})).toBeVisible()
   await expect(paster.getByRole('button', {name: 'Paste a link'})).toBeVisible()
 })
@@ -1713,6 +1736,7 @@ test('a computer with no camera shows its code, and the phone adds it: same pers
 
 test('the phone shows its code, and a new device that opens it is added once the numbers match', async ({browser}) => {
   const {anne, bob} = await anneAndBob(browser)
+  await openSettings(anne)
   await anne.getByRole('button', {name: 'Add a device'}).click()
   await expect(anne.getByRole('img', {name: 'Code to add a device'})).toBeVisible()
   await expect(anne.getByText('Waiting for the other device')).toBeVisible()
@@ -1727,7 +1751,8 @@ test('the phone shows its code, and a new device that opens it is added once the
   const check = (await computer.locator('.check').textContent())!
   await expect(anne.locator('.check')).toHaveText(check, {timeout: 30_000})
   await anne.getByRole('button', {name: 'Add it'}).click()
-  await anne.getByRole('button', {name: 'Done'}).click()
+  await anne.locator('.device-code').getByRole('button', {name: 'Done'}).click()
+  await closeSettings(anne)
   await isAnne(computer, anne, bob)
 
   // The phone let it in, so the phone has nothing to warn about. A device the phone did not let in, it
@@ -1735,6 +1760,7 @@ test('the phone shows its code, and a new device that opens it is added once the
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.locator('.device-news')).toHaveCount(0)
   await computer.getByRole('button', {name: 'Back to chats'}).click()
+  await openSettings(computer)
   await computer.getByRole('button', {name: 'Add a device'}).click()
   await computer.getByRole('button', {name: 'Copy link'}).click()
   const tablet = await newStranger(browser)
@@ -1785,10 +1811,11 @@ test('the app can be installed, and opens with no network once it has been opene
   await context.setOffline(false)
 })
 
-test('the home screen says which build is running', async ({browser}) => {
+test('settings say which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')
   await introduce(anne, 'Anne')
+  await openSettings(anne)
   await expect(anne.getByText(/^Version \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · [0-9a-f]{7,}$/)).toBeVisible()
 })
 
@@ -1801,6 +1828,7 @@ test('a malformed or old-format invite link lands on the home screen with an exp
 
 test('a device link pasted into the app works as well as one opened, and an old one says when it ran out', async ({browser}) => {
   const {anne} = await anneAndBob(browser)
+  await openSettings(anne)
   await anne.getByRole('button', {name: 'Add a device'}).click()
   await anne.getByRole('button', {name: 'Copy link'}).click()
   const link = await anne.evaluate(() => navigator.clipboard.readText())

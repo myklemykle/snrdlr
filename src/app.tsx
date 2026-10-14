@@ -1,3 +1,4 @@
+import type {ComponentChildren} from 'preact'
 import {useEffect, useRef, useState} from 'preact/hooks'
 import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
@@ -449,8 +450,9 @@ function AddThisBrowser(props: {store: Store; identity: Identity}) {
 }
 
 /** Choices that apply to the whole app on this device. */
-function Settings(props: {onClose: () => void}) {
-  const {onClose} = props
+/** Sounds, and below them the rest of what is set up now and then, which the front page hands in. */
+function Settings(props: {onClose: () => void; children?: ComponentChildren}) {
+  const {onClose, children} = props
   const [sounds, setSounds] = useState(soundChoice)
   const [volume, setVolume] = useState(() => soundVolume(soundChoice()))
   useEffect(() => {
@@ -506,6 +508,7 @@ function Settings(props: {onClose: () => void}) {
           {sounds === SILENT ? 'No sounds.' : 'Plays a sound when a message arrives or is sent, while snrdlr is open.'} On a phone, sounds follow the
           silent switch. 100% is each sound as it was made; above that, loud sounds may distort.
         </p>
+        {children}
         <button type="button" onClick={onClose}>
           Done
         </button>
@@ -562,6 +565,7 @@ function Home(props: {
     return () => clearInterval(timer)
   }, [])
   const [addingDevice, setAddingDevice] = useState(false)
+  useUpdateHold(addingDevice)
   const [deviceNews, setDeviceNews] = useState<NewDevice[]>([])
   useEffect(() => onNewDevices(setDeviceNews), [])
   const [pairing, setPairing] = useState<Invite | null>(null)
@@ -671,7 +675,79 @@ function Home(props: {
           </svg>
         </button>
       </p>
-      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <Settings onClose={() => setSettingsOpen(false)}>
+          <section>
+            <h3>Join someone</h3>
+            <p class="note">To join someone else's group or chat with them, scan their code while they have it on screen.</p>
+            <JoinByCode />
+          </section>
+
+          {!installed() && onIos() && (
+            <section>
+              <h3>Install on this iPhone</h3>
+              <p class="note">
+                The installed app is what will be able to notify you. Tap the Share button, then <b>Add to Home Screen</b>. Open it from your
+                Home Screen and tap <b>Add this app to my snrdlr</b>, then <b>Open in Safari</b>.
+              </p>
+            </section>
+          )}
+
+          <section>
+            <h3>Your devices</h3>
+            {addingDevice ? (
+              <DeviceCode role="existing" store={store} identity={identity} onClose={() => setAddingDevice(false)} />
+            ) : (
+              <>
+                <p class="note">Use snrdlr as yourself on another phone or computer too, with the same chats.</p>
+                <button type="button" onClick={() => setAddingDevice(true)}>
+                  Add a device
+                </button>
+              </>
+            )}
+          </section>
+
+          {install && (
+            <section class="install">
+              <h3>Install</h3>
+              <p class="note">Puts snrdlr on your home screen, where it opens like any other app. Your chats stay as they are.</p>
+              <button type="button" onClick={install}>
+                Install snrdlr
+              </button>
+            </section>
+          )}
+
+          {(desktop || stay) && (
+            <section class="keep">
+              <h3>Stay connected</h3>
+              <label>
+                <input type="checkbox" checked={stay} onChange={event => onStay(event.currentTarget.checked)} /> Keep every chat connected while
+                this tab is open
+              </label>
+              {keep && (
+                <p class="keeping" role="status">
+                  {keepSummary(keep)}
+                </p>
+              )}
+              {keep && <p class="note running">{runningSummary(update, now)}</p>}
+              <p class="note">
+                For a computer that stays on. People in your chats who are never online at the same time still get each other's messages,
+                because this computer holds them in between. Leave this tab open and keep the computer from sleeping.
+              </p>
+            </section>
+          )}
+          <p class="build">
+            Version {__BUILD__}
+            {devMode() && ' · developer mode'}
+          </p>
+          {devMode() && (
+            <label class="footnote">
+              <input type="checkbox" checked={update.held} onChange={event => holdUpdates(event.currentTarget.checked)} /> Hold updates in this
+              tab (testing)
+            </label>
+          )}
+        </Settings>
+      )}
       {profileOpen && <ProfileEditor store={store} identity={identity} onIdentity={onIdentity} onClose={() => setProfileOpen(false)} />}
       {notice && <p class="error">{notice}</p>}
       {deviceNews.map(device => (
@@ -690,6 +766,41 @@ function Home(props: {
           </button>
         </p>
       ))}
+
+      {pairing ? (
+        <section class="invite">
+          <QrCode text={pairingUrl} label="Code to chat with me" />
+          <p>Whoever scans this while it is on your screen starts a direct chat with you, and it opens here too. It stops working when you hide it.</p>
+          <button type="button" onClick={copyPairing}>
+            {copied ? 'Copied' : 'Copy link'}
+          </button>{' '}
+          <button type="button" onClick={() => setPairing(null)}>
+            Hide my code
+          </button>
+        </section>
+      ) : (
+        <button
+          type="button"
+          class="start"
+          onClick={() => {
+            setCopied(false)
+            setPairing(createInvite(identity))
+          }}
+        >
+          Chat with one person
+        </button>
+      )}
+
+      <form class="new-group" onSubmit={start}>
+        <button type="submit">Start a group</button>
+        <input
+          value={name}
+          onInput={event => setName(event.currentTarget.value)}
+          placeholder="Group name (optional)"
+          maxLength={MAX_NAME_LENGTH}
+          aria-label="Chat name"
+        />
+      </form>
 
       {chats && chats.length > 0 && <h2>Your chats</h2>}
       {chats && chats.length > 0 && (
@@ -727,100 +838,6 @@ function Home(props: {
         </ul>
       )}
 
-      <h2>Chat with one person</h2>
-      {pairing ? (
-        <section class="invite">
-          <QrCode text={pairingUrl} label="Code to chat with me" />
-          <p>Whoever scans this while it is on your screen starts a direct chat with you, and it opens here too. It stops working when you hide it.</p>
-          <button type="button" onClick={copyPairing}>
-            {copied ? 'Copied' : 'Copy link'}
-          </button>{' '}
-          <button type="button" onClick={() => setPairing(null)}>
-            Hide my code
-          </button>
-        </section>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setCopied(false)
-            setPairing(createInvite(identity))
-          }}
-        >
-          Show my code
-        </button>
-      )}
-
-      <h2>New group</h2>
-      <form onSubmit={start}>
-        <input
-          value={name}
-          onInput={event => setName(event.currentTarget.value)}
-          placeholder="Name (optional)"
-          maxLength={MAX_NAME_LENGTH}
-          aria-label="Chat name"
-        />
-        <button type="submit">Start a group</button>
-      </form>
-      <h2>Join someone</h2>
-      <p class="note">To join someone else's group or chat with them, scan their code while they have it on screen.</p>
-      <JoinByCode />
-
-      {!installed() && onIos() && (
-        <section class="move">
-          <h2>Install on this iPhone</h2>
-          <p class="note">
-            The installed app is what will be able to notify you. Tap the Share button, then <b>Add to Home Screen</b>. Open it from your Home
-            Screen and tap <b>Add this app to my snrdlr</b>, then <b>Open in Safari</b>.
-          </p>
-        </section>
-      )}
-
-      <h2>Your devices</h2>
-      {addingDevice ? (
-        <DeviceCode role="existing" store={store} identity={identity} onClose={() => setAddingDevice(false)} />
-      ) : (
-        <>
-          <p class="note">Use snrdlr as yourself on another phone or computer too, with the same chats.</p>
-          <button type="button" onClick={() => setAddingDevice(true)}>
-            Add a device
-          </button>
-        </>
-      )}
-
-      {install && (
-        <section class="install">
-          <h2>Install</h2>
-          <p class="note">Puts snrdlr on your home screen, where it opens like any other app. Your chats stay as they are.</p>
-          <button type="button" onClick={install}>
-            Install snrdlr
-          </button>
-        </section>
-      )}
-
-      {(desktop || stay) && (
-        <section class="keep">
-          <h2>Stay connected</h2>
-          <label>
-            <input type="checkbox" checked={stay} onChange={event => onStay(event.currentTarget.checked)} /> Keep every chat connected while
-            this tab is open
-          </label>
-          {keep && (
-            <p class="keeping" role="status">
-              {keepSummary(keep)}
-            </p>
-          )}
-          {keep && <p class="note running">{runningSummary(update, now)}</p>}
-          <p class="note">
-            For a computer that stays on. People in your chats who are never online at the same time still get each other's messages,
-            because this computer holds them in between. Leave this tab open and keep the computer from sleeping.
-          </p>
-        </section>
-      )}
-      <p class="build">
-        Version {__BUILD__}
-        {devMode() && ' · developer mode'}
-      </p>
       {update.ready && (
         <p class="footnote">
           {update.held ? 'A newer version is out; updates are held in this tab.' : 'A newer version is out.'}{' '}
@@ -828,12 +845,6 @@ function Home(props: {
             Reload to update
           </button>
         </p>
-      )}
-      {devMode() && (
-        <label class="footnote">
-          <input type="checkbox" checked={update.held} onChange={event => holdUpdates(event.currentTarget.checked)} /> Hold updates in this tab
-          (testing)
-        </label>
       )}
     </main>
   )

@@ -12,7 +12,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - The sound for sending plays when the message is known to have reached another member's device. Each device now answers what it receives with a short note (how many messages it holds from that author). A device on an older copy of the app does not send the note, so the sound can be up to half a minute late.
   - **Delivered marks.** The same report could show, per message, that it has reached someone (and later, everyone). Not built.
   - The snrdl sounds are credited to Elan Katin in the README; under what licence they are shared is not recorded.
-- **Settings.** A window opened from the gear on the home screen, holding only the choice of sounds so far. Candidates to move or add there: changing your name, the stay-connected switch, the version line, storage used.
+- **Settings.** A window opened from the gear on the home screen. It holds the sounds, joining someone (scan or paste), installing, adding a device, the stay-connected switch and the version line. The front page keeps only Chat with one person, Start a group and the chat list (14 October 2026). Candidates to add: storage used.
 - **Names and nicknames.**
   - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
   - Rename a group: built. Any member can, from the pencil beside the chat's name; everyone gets the new name and a line saying who changed it. Direct chats stay named after the other person. Open: two groups can now end up with the same name on one device.
@@ -36,7 +36,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - A change made on the front page reaches each chat when that chat next connects, not at once (a stay-connected tab can take a couple of hours).
   - Taking a profile back only stops showing it; what was shown stays in other members' history. Say so more plainly, or build real deletion.
   - No line in the chat when someone changes their name; the "joined" line keeps the old one.
-  - Own messages keep the app's blue rather than the person's own colour.
+  - **Own messages in your own colour** (requested 14 October 2026). Your own messages keep the app's blue. Show them in the colour you chose instead, in the chats where your colour is shown.
   - The tiny photo is cut from the middle of the picture; no cropping tool.
   - The profile is per device, like everything else.
 - **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.
