@@ -29,7 +29,7 @@ const isBytes = (value: unknown, length?: number): value is Uint8Array => value 
 export async function packMove(store: Store, identity: IdentitySecrets & {id: string}): Promise<string> {
   const chats: ChatRecord[] = []
   for (const chat of await store.listChats()) {
-    const ownSeq = (await store.listMessages(chat.id)).reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
+    const ownSeq = (await store.listMessages(chat.id)).reduce((max, message) => (message.author === identity.id && message.device === identity.device ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
     const {readAt: _readAt, ...kept} = chat
     chats.push({...kept, ownSeqFloor: ownSeq})
   }

@@ -8,7 +8,7 @@
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
 import {latestCards, sameCard} from './cards'
-import {importMsgKey, openEnvelope, sealEnvelope, type CardContent, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import {memberId, type Identity} from './identity'
 import {openAsMember, sealForMembers, type Recipient} from './store-seal'
@@ -85,9 +85,10 @@ export type Session = {
   /** Gives a group chat a new name, for every member. */
   rename: (name: string) => Promise<void>
   /** Changes the words of one of our own messages, or a picture's caption. */
-  edit: (seq: number, text: string) => Promise<void>
+  /** New words for one of our own messages, written on this device or another of ours. */
+  edit: (target: {device: string; seq: number}, text: string) => Promise<void>
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
-  react: (target: {author: string; seq: number}, emoji: string) => Promise<void>
+  react: (target: MessageRef, emoji: string) => Promise<void>
   /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
   postImage: (image: ImageContent, file: Uint8Array) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
@@ -118,19 +119,21 @@ const FILE_TIMEOUT_MS = 45_000
 const FILE_RETRY_MS = 25_000
 
 const compare = (a: MessageRecord, b: MessageRecord) =>
-  a.lamport - b.lamport || a.author.localeCompare(b.author) || a.seq - b.seq
+  a.lamport - b.lamport || a.author.localeCompare(b.author) || a.device.localeCompare(b.device) || a.seq - b.seq
 
+/** How many messages are held from each stream (one person on one device), counting from 1 without a gap. */
 export function versionVector(messages: MessageRecord[]): VersionVector {
   const held = new Map<string, Set<number>>()
-  for (const {author, seq} of messages) {
-    if (!held.has(author)) held.set(author, new Set())
-    held.get(author)!.add(seq)
+  for (const message of messages) {
+    const stream = streamOf(message)
+    if (!held.has(stream)) held.set(stream, new Set())
+    held.get(stream)!.add(message.seq)
   }
   const vector: VersionVector = {}
-  for (const [author, seqs] of held) {
+  for (const [stream, seqs] of held) {
     let count = 0
     while (seqs.has(count + 1)) count++
-    vector[author] = count
+    vector[stream] = count
   }
   return vector
 }
@@ -139,8 +142,8 @@ function parseVector(value: unknown): VersionVector | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const entries = Object.entries(value)
   if (entries.length > MAX_VECTOR_AUTHORS) return null
-  for (const [author, count] of entries) {
-    if (!/^[0-9a-f]{64}$/.test(author) || !Number.isSafeInteger(count) || count < 0) return null
+  for (const [stream, count] of entries) {
+    if (!/^[0-9a-f]{64}(\.[0-9a-f]{16})?$/.test(stream) || !Number.isSafeInteger(count) || count < 0) return null
   }
   return value as VersionVector
 }
@@ -228,9 +231,12 @@ export async function openSession(options: {
   // otherwise number its next message just after the last one it happened to see, and the message would
   // appear far up everyone's history instead of at the end.
   const nextLamport = (now: number) => Math.max(lamportNow() + 1, now)
-  const holds = (author: string, seq: number) => messages.some(message => message.author === author && message.seq === seq)
-  const ownSeq = () =>
-    messages.reduce((max, message) => (message.author === identity.id ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
+  const holds = (record: MessageRecord) =>
+    messages.some(message => message.author === record.author && message.device === record.device && message.seq === record.seq)
+  /** Written on this device. Our other devices number their messages separately. */
+  const fromHere = (message: MessageRecord) => message.author === identity.id && message.device === identity.device
+  const ownStream = streamOf({author: identity.id, device: identity.device})
+  const ownSeq = () => messages.reduce((max, message) => (fromHere(message) ? Math.max(max, message.seq) : max), chat.ownSeqFloor ?? 0)
 
   // Files: the pictures that messages refer to travel separately. Whatever is missing is asked for, one
   // peer at a time, from whoever is connected; any member who holds a file hands it on.
@@ -291,24 +297,24 @@ export async function openSession(options: {
   // It is a small note, not the full account of everything held that sync exchanges.
   const undelivered = new Map<number, MessageRecord>()
   const noteDelivered = (have: VersionVector) => {
-    const reached = have[identity.id] ?? 0
+    const reached = have[ownStream] ?? 0
     const arrived = [...undelivered.values()].filter(record => record.seq <= reached)
     if (arrived.length === 0) return
     for (const record of arrived) undelivered.delete(record.seq)
     handlers.onDelivered?.(arrived)
   }
-  const acks = new Map<string, {timer: ReturnType<typeof setTimeout>; authors: Set<string>}>()
-  const acknowledge = (peerId: string, author: string) => {
+  const acks = new Map<string, {timer: ReturnType<typeof setTimeout>; streams: Set<string>}>()
+  const acknowledge = (peerId: string, stream: string) => {
     const pending = acks.get(peerId)
-    if (pending) return void pending.authors.add(author)
-    const authors = new Set([author])
+    if (pending) return void pending.streams.add(stream)
+    const streams = new Set([stream])
     const timer = setTimeout(() => {
       acks.delete(peerId)
       if (closed || !peers.includes(peerId)) return
-      const held = versionVector(messages.filter(message => authors.has(message.author)))
+      const held = versionVector(messages.filter(message => streams.has(streamOf(message))))
       if (Object.keys(held).length > 0) void wire?.sendAck(held, peerId).catch(() => {})
     }, ACK_DELAY_MS)
-    acks.set(peerId, {timer, authors})
+    acks.set(peerId, {timer, streams})
   }
 
   // The mailbox: our own messages are left with the relay as they are written, and whatever it holds
@@ -318,7 +324,7 @@ export async function openSession(options: {
   let storedSeq = chat.storedSeq ?? 0
   const shelving = new Set<number>()
   const onShelf = new Set<number>()
-  const ownHeld = () => messages.filter(message => message.author === identity.id).sort((a, b) => a.seq - b.seq)
+  const ownHeld = () => messages.filter(fromHere).sort((a, b) => a.seq - b.seq)
   // The relay would already have thrown away anything older than this, so it is not worth leaving there.
   const freshFrom = Date.now() - KEEP_SECONDS * 1000
   /** The members a stored message is locked to: ourselves, and everyone whose invitation and key we have seen. */
@@ -330,12 +336,16 @@ export async function openSession(options: {
   }
   function shelve(record: MessageRecord) {
     const mailbox = box
-    if (!mailbox || shelving.has(record.seq)) return
-    shelving.add(record.seq)
+    if (!mailbox) return
+    // Only this device's messages are tracked; one written on another of ours is just left again.
+    const tracked = fromHere(record)
+    if (tracked && shelving.has(record.seq)) return
+    if (tracked) shelving.add(record.seq)
     void sealForMembers(chat.id, record.envelope, recipients())
       .then(locked => mailbox.post(locked, record.sentAt))
       .catch(() => false)
       .then(kept => {
+      if (!tracked) return
       shelving.delete(record.seq)
       if (!kept || closed) return
       onShelf.add(record.seq)
@@ -372,7 +382,7 @@ export async function openSession(options: {
       const sentAt = Date.now()
       const message = {seq: ownSeq() + 1, lamport: nextLamport(sentAt), sentAt, content}
       const envelope = await sealEnvelope(context, identity, message)
-      const record: MessageRecord = {...message, author: identity.id, chatId: chat.id, receivedAt: message.sentAt, envelope}
+      const record: MessageRecord = {...message, author: identity.id, device: identity.device, chatId: chat.id, receivedAt: message.sentAt, envelope}
       if (await store.addMessage(record)) {
         insert(record)
         undelivered.set(record.seq, record)
@@ -392,7 +402,7 @@ export async function openSession(options: {
     const isNew = await store.addMessage(record)
     // Already stored but not on screen: another session of this chat (a background sync, another tab)
     // stored it after we loaded the history. Without this it would stay hidden until a reload.
-    if (!closed && (isNew || !holds(record.author, record.seq))) insert(record)
+    if (!closed && (isNew || !holds(record))) insert(record)
     // Someone whose key we had not seen: leave our own introduction with the relay again, now locked to
     // them as well, so that they can learn our key from it even if we are never online together.
     if (isNew && !closed && record.content.type === 'profile' && record.author !== identity.id) {
@@ -402,24 +412,24 @@ export async function openSession(options: {
     if (record.content.type === 'image' || record.content.type === 'card') fetchFiles()
   }
 
-  /** Takes in a message from the network. Returns its author, or null if it was not a genuine message. */
+  /** Takes in a message from the network. Returns its stream, or null if it was not a genuine message. */
   async function receive(envelope: Uint8Array): Promise<string | null> {
-    let author: string | null = null
+    let stream: string | null = null
     try {
       const message = await openEnvelope(context, envelope)
-      author = message.author
+      stream = streamOf(message)
       // A certificate proves itself, so it counts even if the message carrying it cannot be kept yet.
       const someoneNew = learnFrom(message.content)
       if (roster.has(message.author)) await keep(message, envelope)
       else held = [...held, {message, envelope}].slice(-MAX_HELD)
-      if (!someoneNew) return author
+      if (!someoneNew) return stream
       const ready = held.filter(entry => roster.has(entry.message.author))
       held = held.filter(entry => !roster.has(entry.message.author))
       for (const entry of ready) await keep(entry.message, entry.envelope)
     } catch (error) {
       console.warn('dropped a message:', error instanceof Error ? error.message : error)
     }
-    return author
+    return stream
   }
 
   // Sends a peer everything they say they lack. Their vector is the only evidence of what they hold:
@@ -428,7 +438,7 @@ export async function openSession(options: {
     const have = parseVector(value)
     if (!have) return
     noteDelivered(have)
-    const missing = messages.filter(message => message.seq > (have[message.author] ?? 0))
+    const missing = messages.filter(message => message.seq > (have[streamOf(message)] ?? 0))
     for (const message of missing) {
       if (wire !== via || !peers.includes(peerId)) return
       try {
@@ -447,8 +457,8 @@ export async function openSession(options: {
     const ready = new Promise<Wire>(resolve => (wireReady = resolve))
     const opened = await options.connect(keys, {
       onEnvelope: (envelope, peerId) =>
-        void receive(envelope).then(author => {
-          if (author && live()) acknowledge(peerId, author)
+        void receive(envelope).then(stream => {
+          if (stream && live()) acknowledge(peerId, stream)
         }),
       onAck: have => {
         const held = parseVector(have)
@@ -552,7 +562,7 @@ export async function openSession(options: {
     postGroupInvite: invite => post(invite),
     rename: name => post({type: 'rename', name}),
     shareCard,
-    edit: (seq, text) => post({type: 'edit', target: seq, text}),
+    edit: (target, text) => post({type: 'edit', target: {device: target.device, seq: target.seq}, text}),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
     async postImage(image, file) {
       await store.putFile(chat.id, image.hash, file)

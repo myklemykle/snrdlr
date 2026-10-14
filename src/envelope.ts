@@ -29,25 +29,44 @@ export type Content =
    * The author's reaction to another message. Each person has at most one per message: their latest
    * replaces any earlier one, and an empty emoji takes it away.
    */
-  | {type: 'reaction'; target: {author: string; seq: number}; emoji: string}
+  | {type: 'reaction'; target: MessageRef; emoji: string}
   /**
    * A picture. The message holds what is needed to fetch, check and open the file, which travels
    * separately (see files.ts), and a tiny preview to show until it arrives.
    */
   | ImageContent
   /**
-   * The author's new words for one of their own earlier messages, named by its number: a message in
-   * words, or a picture's caption. Their latest edit is the one that counts.
+   * The author's new words for one of their own earlier messages, written on any of their devices and
+   * named by that device and its number: a message in words, or a picture's caption. Their latest edit
+   * is the one that counts.
    */
-  | {type: 'edit'; target: number; text: string}
+  | {type: 'edit'; target: {device: string; seq: number}; text: string}
   /** A new name for a group chat. Any member may give one; the latest is the chat's name. */
   | {type: 'rename'; name: string}
   | CardContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
-/** Points at another message in the same chat, by its author and that author's numbering. */
-export type MessageRef = {author: string; seq: number}
+/** Points at another message in the same chat, by its author, the device it was written on, and that device's numbering. */
+export type MessageRef = {author: string; device: string; seq: number}
+
+/** Bytes in a device tag. A person's first device has none (''), and its messages carry no tag. */
+export const DEVICE_BYTES = 8
+
+/**
+ * Each device numbers its own messages, so what is counted and synced is a stream of messages: one
+ * person on one device. Named by the author's ID, then the device tag if there is one.
+ */
+export const streamOf = (message: {author: string; device: string}) => (message.device ? `${message.author}.${message.device}` : message.author)
+
+/**
+ * Whether one of a person's messages was written after another. On one device its numbering says so;
+ * across their devices the logical clock is all there is, with the device and number to break ties.
+ */
+export const writtenAfter = (a: Pick<Message, 'lamport' | 'device' | 'seq'>, b: Pick<Message, 'lamport' | 'device' | 'seq'>) =>
+  a.device === b.device ? a.seq > b.seq : (a.lamport - b.lamport || a.device.localeCompare(b.device)) > 0
+
+const isDevice = (value: unknown): value is Uint8Array => value instanceof Uint8Array && value.length === DEVICE_BYTES
 
 export type ImageContent = {
   type: 'image'
@@ -103,7 +122,9 @@ const isChain = (value: unknown): value is Uint8Array[] =>
 export type Message = {
   /** Member ID of the author. */
   author: string
-  /** The author's own counter in this chat, from 1. */
+  /** Which of the author's devices wrote it: hex, or '' for their first. */
+  device: string
+  /** That device's own counter in this chat, from 1. */
   seq: number
   /** Logical clock; the UI orders by (lamport, author). */
   lamport: number
@@ -114,7 +135,7 @@ export type Message = {
 
 export type ChatContext = {chatId: string; msgKey: CryptoKey}
 
-export type Author = {id: string; signSecret: Uint8Array; signPublic: Uint8Array}
+export type Author = {id: string; signSecret: Uint8Array; signPublic: Uint8Array; device?: string}
 
 export function importMsgKey(raw: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.importKey('raw', new Uint8Array(raw), 'AES-GCM', false, ['encrypt', 'decrypt'])
@@ -126,9 +147,12 @@ function seqBytes(seq: number): Uint8Array {
   return bytes
 }
 
-// Every field before the payload has a fixed length, so the concatenation is unambiguous.
-const boundBytes = (label: string, chatId: string, author: Uint8Array, seq: number) =>
-  concatBytes(utf8(`snrdlr/v1/${label}\0`), utf8(chatId), author, seqBytes(seq))
+// Every field before the payload has a fixed length, so the concatenation is unambiguous. A device tag
+// changes the label, so a message with one can never be read as one without.
+const boundBytes = (label: string, chatId: string, author: Uint8Array, seq: number, device?: Uint8Array) =>
+  device
+    ? concatBytes(utf8(`snrdlr/v1/${label}-d\0`), utf8(chatId), author, device, seqBytes(seq))
+    : concatBytes(utf8(`snrdlr/v1/${label}\0`), utf8(chatId), author, seqBytes(seq))
 
 const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 
@@ -151,12 +175,13 @@ function decodePicture(body: Record<string, unknown>): PictureRef {
   return {hash: toHex(h), key: new Uint8Array(k), size: z, width: w, height: t, preview: new Uint8Array(p)}
 }
 
-const encodeRef = (ref: MessageRef) => [fromHex(ref.author), ref.seq]
+const encodeRef = (ref: MessageRef) => (ref.device ? [fromHex(ref.author), ref.seq, fromHex(ref.device)] : [fromHex(ref.author), ref.seq])
 
 function decodeRef(value: unknown): MessageRef {
-  const [a, s] = Array.isArray(value) && value.length === 2 ? (value as unknown[]) : []
+  const [a, s, d] = Array.isArray(value) && (value.length === 2 || value.length === 3) ? (value as unknown[]) : []
   if (!(a instanceof Uint8Array) || a.length !== 32 || !isCount(s) || s === 0) throw new Error('bad reference to a message')
-  return {author: toHex(a), seq: s}
+  if (d !== undefined && !isDevice(d)) throw new Error('bad reference to a message')
+  return {author: toHex(a), device: d ? toHex(d) : '', seq: s}
 }
 
 function encodeContent(content: Content): [string, unknown] {
@@ -172,7 +197,10 @@ function encodeContent(content: Content): [string, unknown] {
     case 'group-invite':
       return ['group-invite', {g: content.secret, n: content.name, f: content.founder, c: content.chain}]
     case 'reaction':
-      return ['reaction', {a: fromHex(content.target.author), s: content.target.seq, e: content.emoji}]
+      return [
+        'reaction',
+        {a: fromHex(content.target.author), s: content.target.seq, e: content.emoji, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}
+      ]
     case 'image':
       return [
         'image',
@@ -197,7 +225,7 @@ function encodeContent(content: Content): [string, unknown] {
         }
       ]
     case 'edit':
-      return ['edit', {s: content.target, t: content.text}]
+      return ['edit', {s: content.target.seq, t: content.text, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -245,9 +273,10 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {type, name: body}
   }
   if (type === 'edit') {
-    const {s, t} = (body ?? {}) as Record<string, unknown>
+    const {s, t, d} = (body ?? {}) as Record<string, unknown>
     if (!isCount(s) || s === 0 || typeof t !== 'string' || t.length > MAX_TEXT_LENGTH) throw new Error('bad edit body')
-    return {type, target: s, text: t}
+    if (d !== undefined && !isDevice(d)) throw new Error('bad edit body')
+    return {type, target: {device: d ? toHex(d) : '', seq: s}, text: t}
   }
   if (type === 'profile') {
     const {name, dh, c} = (body ?? {}) as {name?: unknown; dh?: unknown; c?: unknown}
@@ -275,10 +304,11 @@ function decodeContent(type: unknown, body: unknown): Content {
     }
   }
   if (type === 'reaction') {
-    const {a, s, e} = (body ?? {}) as Record<string, unknown>
+    const {a, s, e, d} = (body ?? {}) as Record<string, unknown>
     if (!(a instanceof Uint8Array) || a.length !== 32 || !isCount(s) || s === 0) throw new Error('bad reaction body')
+    if (d !== undefined && !isDevice(d)) throw new Error('bad reaction body')
     if (typeof e !== 'string' || (e !== '' && !isSingleEmoji(e))) throw new Error('bad reaction body')
-    return {type, target: {author: toHex(a), seq: s}, emoji: e}
+    return {type, target: {author: toHex(a), device: d ? toHex(d) : '', seq: s}, emoji: e}
   }
   if (type === 'image') {
     const {m, h, k, z, w, t, p, c, r} = (body ?? {}) as Record<string, unknown>
@@ -304,20 +334,24 @@ function decodeContent(type: unknown, body: unknown): Content {
   throw new Error('bad message type')
 }
 
-export async function sealEnvelope(context: ChatContext, author: Author, message: Omit<Message, 'author'>): Promise<Uint8Array> {
+export async function sealEnvelope(context: ChatContext, author: Author, message: Omit<Message, 'author' | 'device'>): Promise<Uint8Array> {
   const authorBytes = fromHex(author.id)
+  const device = author.device ? fromHex(author.device) : undefined
+  if (device && device.length !== DEVICE_BYTES) throw new Error('bad device tag')
   // The signed payload travels as bytes, so verifying never depends on re-encoding it identically.
   const payload = new Uint8Array(encode([...encodeContent(message.content), message.lamport, message.sentAt]))
-  const signature = ed25519.sign(concatBytes(boundBytes('msg', context.chatId, authorBytes, message.seq), payload), author.signSecret)
+  const signature = ed25519.sign(concatBytes(boundBytes('msg', context.chatId, authorBytes, message.seq, device), payload), author.signSecret)
   const inner = new Uint8Array(encode({p: payload, k: author.signPublic, g: signature}))
 
   const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
   const ciphertext = await crypto.subtle.encrypt(
-    {name: 'AES-GCM', iv: nonce, additionalData: boundBytes('env', context.chatId, authorBytes, message.seq)},
+    {name: 'AES-GCM', iv: nonce, additionalData: boundBytes('env', context.chatId, authorBytes, message.seq, device)},
     context.msgKey,
     inner
   )
-  return new Uint8Array(encode({v: ENVELOPE_VERSION, a: authorBytes, s: message.seq, n: nonce, c: new Uint8Array(ciphertext)}))
+  return new Uint8Array(
+    encode({v: ENVELOPE_VERSION, a: authorBytes, ...(device ? {d: device} : {}), s: message.seq, n: nonce, c: new Uint8Array(ciphertext)})
+  )
 }
 
 /** Decrypts and verifies an envelope. Throws on anything malformed, tampered with, or from another chat. */
@@ -325,16 +359,18 @@ export async function openEnvelope(context: ChatContext, envelope: Uint8Array): 
   if (envelope.length > MAX_ENVELOPE_BYTES) throw new Error('envelope too large')
   const outer = decode(envelope) as Record<string, unknown> | null
   if (typeof outer !== 'object' || outer === null) throw new Error('malformed envelope')
-  const {v, a, s, n, c} = outer
+  const {v, a, d, s, n, c} = outer
   if (v !== ENVELOPE_VERSION) throw new Error(`unsupported envelope version: ${String(v)}`)
   if (!(a instanceof Uint8Array) || a.length !== 32) throw new Error('bad author')
+  if (d !== undefined && !isDevice(d)) throw new Error('bad device tag')
+  const device = d === undefined ? undefined : new Uint8Array(d)
   if (!isCount(s) || s === 0) throw new Error('bad sequence number')
   if (!(n instanceof Uint8Array) || n.length !== NONCE_BYTES) throw new Error('bad nonce')
   if (!(c instanceof Uint8Array)) throw new Error('bad ciphertext')
 
   const decrypted = await crypto.subtle
     .decrypt(
-      {name: 'AES-GCM', iv: new Uint8Array(n), additionalData: boundBytes('env', context.chatId, a, s)},
+      {name: 'AES-GCM', iv: new Uint8Array(n), additionalData: boundBytes('env', context.chatId, a, s, device)},
       context.msgKey,
       new Uint8Array(c)
     )
@@ -352,7 +388,7 @@ export async function openEnvelope(context: ChatContext, envelope: Uint8Array): 
   if (!bytesEqual(fromHex(memberId(k)), a)) throw new Error('author does not match signing key')
   let signed = false
   try {
-    signed = ed25519.verify(g, concatBytes(boundBytes('msg', context.chatId, a, s), p), k)
+    signed = ed25519.verify(g, concatBytes(boundBytes('msg', context.chatId, a, s, device), p), k)
   } catch {
     // An invalid key or signature encoding is just a failed verification.
   }
@@ -362,5 +398,5 @@ export async function openEnvelope(context: ChatContext, envelope: Uint8Array): 
   if (!Array.isArray(payload) || payload.length !== 4) throw new Error('malformed payload')
   const [type, body, lamport, sentAt] = payload as unknown[]
   if (!isCount(lamport) || !isCount(sentAt)) throw new Error('bad clock')
-  return {author: toHex(a), seq: s, lamport, sentAt, content: decodeContent(type, body)}
+  return {author: toHex(a), device: device ? toHex(device) : '', seq: s, lamport, sentAt, content: decodeContent(type, body)}
 }

@@ -36,16 +36,16 @@ interface Schema extends DBSchema {
   identity: {key: 'self'; value: IdentitySecrets}
   chats: {key: string; value: ChatRecord}
   messages: {
-    key: [chatId: string, author: string, seq: number]
+    key: [chatId: string, author: string, device: string, seq: number]
     value: MessageRecord
     indexes: {
-      order: [chatId: string, lamport: number, author: string, seq: number]
+      order: [chatId: string, lamport: number, author: string, device: string, seq: number]
       received: [chatId: string, receivedAt: number]
     }
   }
   /** Encrypted files that messages refer to, such as images. */
   files: {key: [chatId: string, hash: string]; value: {chatId: string; hash: string; data: Uint8Array; addedAt: number}}
-  /** Chats that were left: just enough to carry on our numbering if we are invited back. */
+  /** Chats that were left: just enough to carry on this device's numbering if we are invited back. */
   left: {key: string; value: {ownSeq: number}}
 }
 
@@ -59,7 +59,7 @@ export type StoreHooks = {
 }
 
 export async function openStore(name = 'snrdlr', hooks: StoreHooks = {}) {
-  const db = await openDB<Schema>(name, 5, {
+  const db = await openDB<Schema>(name, 6, {
     blocked: () => hooks.onBlocked?.(),
     // Without this, a tab left open on an old version would stop every newer tab from starting.
     blocking(_current, _blocked, event) {
@@ -70,20 +70,34 @@ export async function openStore(name = 'snrdlr', hooks: StoreHooks = {}) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
         db.createObjectStore('chats', {keyPath: 'id'})
-        const messages = db.createObjectStore('messages', {keyPath: ['chatId', 'author', 'seq']})
-        messages.createIndex('order', ['chatId', 'lamport', 'author', 'seq'])
       }
       if (oldVersion < 2) db.createObjectStore('left')
-      if (oldVersion < 3) upgrade.objectStore('messages').createIndex('received', ['chatId', 'receivedAt'])
       // Version 4 changed how chats are keyed and who may join them. Chats from before cannot be opened,
       // so they are dropped; the identity is kept.
       if (oldVersion > 0 && oldVersion < 4) {
         for (const store of ['chats', 'messages', 'left'] as const) void upgrade.objectStore(store).clear()
       }
       if (oldVersion < 5) db.createObjectStore('files', {keyPath: ['chatId', 'hash']})
+      // Version 6 numbers messages per device, so a message is now named by its device as well. Every
+      // message stored before then came from a first device, which has no tag.
+      if (oldVersion > 0 && oldVersion < 6) {
+        const old = upgrade.objectStore('messages')
+        void old.getAll().then(records => {
+          db.deleteObjectStore('messages')
+          const messages = makeMessages(db)
+          for (const record of records) void messages.put({...record, device: record.device ?? ''})
+        })
+      } else if (oldVersion < 6) makeMessages(db)
     }
   })
   return wrap(db)
+}
+
+function makeMessages(db: IDBPDatabase<Schema>) {
+  const messages = db.createObjectStore('messages', {keyPath: ['chatId', 'author', 'device', 'seq']})
+  messages.createIndex('order', ['chatId', 'lamport', 'author', 'device', 'seq'])
+  messages.createIndex('received', ['chatId', 'receivedAt'])
+  return messages
 }
 
 function wrap(db: IDBPDatabase<Schema>) {
@@ -106,14 +120,16 @@ function wrap(db: IDBPDatabase<Schema>) {
       return saved
     },
     /**
-     * Forgets a chat and its history on this device. Remembers only how far our own numbering got, since
-     * other members still hold our messages and a rejoin must not reuse their sequence numbers.
+     * Forgets a chat and its history on this device. Remembers only how far this device's numbering got,
+     * since other members still hold its messages and a rejoin must not reuse their sequence numbers.
      */
-    async deleteChat(id: string, selfId: string): Promise<void> {
+    async deleteChat(id: string, self: {id: string; device: string}): Promise<void> {
       const tx = db.transaction(['chats', 'messages', 'left', 'files'], 'readwrite')
       const chat = await tx.objectStore('chats').get(id)
-      const ownKeys = await tx.objectStore('messages').getAllKeys(IDBKeyRange.bound([id, selfId, 0], [id, selfId, Infinity]))
-      const ownSeq = Math.max(chat?.ownSeqFloor ?? 0, ...ownKeys.map(([, , seq]) => seq))
+      const ownKeys = await tx
+        .objectStore('messages')
+        .getAllKeys(IDBKeyRange.bound([id, self.id, self.device, 0], [id, self.id, self.device, Infinity]))
+      const ownSeq = Math.max(chat?.ownSeqFloor ?? 0, ...ownKeys.map(([, , , seq]) => seq))
       if (ownSeq > 0) await tx.objectStore('left').put({ownSeq}, id)
       await tx.objectStore('messages').delete(IDBKeyRange.bound([id], [id, []]))
       await tx.objectStore('files').delete(IDBKeyRange.bound([id], [id, []]))
@@ -166,10 +182,10 @@ function wrap(db: IDBPDatabase<Schema>) {
       // An array sorts after any number, so [chatId, []] is past every clock value.
       db.getAllFromIndex('messages', 'order', IDBKeyRange.bound([chatId], [chatId, []])),
 
-    /** Stores a message; false if this (author, seq) is already held. */
+    /** Stores a message; false if this (author, device, seq) is already held. */
     async addMessage(message: MessageRecord): Promise<boolean> {
       const tx = db.transaction('messages', 'readwrite')
-      const isNew = (await tx.store.getKey([message.chatId, message.author, message.seq])) === undefined
+      const isNew = (await tx.store.getKey([message.chatId, message.author, message.device, message.seq])) === undefined
       if (isNew) await tx.store.add(message)
       await tx.done
       return isNew

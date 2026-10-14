@@ -1,7 +1,7 @@
 // A person's card: the optional extras of their profile (icon, photo, contact, colour) as they have
 // chosen to show them in one chat. Their name travels separately, in their "joined" message.
 import {bytesEqual} from './bytes'
-import type {CardContent} from './envelope'
+import {writtenAfter, type CardContent} from './envelope'
 import type {MessageRecord} from './store'
 
 /** Whether a card shows anything at all. An empty one is how a person takes theirs back. */
@@ -18,15 +18,15 @@ export function sameCard(a: CardContent, b: CardContent): boolean {
   )
 }
 
-/** Each member's current card: the latest they posted, by their own numbering. Empty ones are left out. */
+/** Each member's current card: the latest they posted, on any of their devices. Empty ones are left out. */
 export function latestCards(messages: MessageRecord[]): Map<string, CardContent> {
-  const latest = new Map<string, {seq: number; card: CardContent}>()
+  const latest = new Map<string, MessageRecord & {content: CardContent}>()
   for (const message of messages) {
     if (message.content.type !== 'card') continue
     const earlier = latest.get(message.author)
-    if (!earlier || message.seq > earlier.seq) latest.set(message.author, {seq: message.seq, card: message.content})
+    if (!earlier || writtenAfter(message, earlier)) latest.set(message.author, message as MessageRecord & {content: CardContent})
   }
-  return new Map([...latest].filter(([, {card}]) => !cardIsEmpty(card)).map(([author, {card}]) => [author, card]))
+  return new Map([...latest].filter(([, {content}]) => !cardIsEmpty(content)).map(([author, {content}]) => [author, content]))
 }
 
 /** The colours offered for tinting messages. */

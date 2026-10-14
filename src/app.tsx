@@ -745,7 +745,7 @@ function Home(props: {
   const leave = async (id: string) => {
     // Stops anything still syncing this chat in the background before its history is deleted.
     await claimChat(id)
-    await store.deleteChat(id, identity.id)
+    await store.deleteChat(id, identity)
     unclaimChat(id)
     setLeaving(null)
     await refresh()

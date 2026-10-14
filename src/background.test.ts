@@ -169,7 +169,7 @@ describe('keepChats', () => {
     const chat = await store.saveChat(makeChat('Later'))
     await until(() => networkFor(chat.id).present().includes(kay.id))
 
-    await store.deleteChat(chat.id, kay.id)
+    await store.deleteChat(chat.id, kay)
     await until(() => !networkFor(chat.id).present().includes(kay.id))
     await stop()
   })

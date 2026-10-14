@@ -441,13 +441,13 @@ export function ChatScreen(props: {
       // A caption can be taken away; a message in words has to say something.
       if (!session.current || (!text && editing.content.type !== 'image')) return
       const changed = text !== wordsOf(editing)
-      const {seq} = editing
+      const {device, seq} = editing
       stopEditing()
-      if (changed) await session.current.edit(seq, text).catch(() => setError('The change could not be sent.'))
+      if (changed) await session.current.edit({device, seq}, text).catch(() => setError('The change could not be sent.'))
       return
     }
     if (!session.current || preparing > 0 || (!text && attached.length === 0)) return
-    const replyTo: MessageRef | undefined = replyingTo ? {author: replyingTo.author, seq: replyingTo.seq} : undefined
+    const replyTo: MessageRef | undefined = replyingTo ? {author: replyingTo.author, device: replyingTo.device, seq: replyingTo.seq} : undefined
     setDraft('')
     setReplyingTo(null)
     if (attached.length === 0) return session.current.sendText(text, replyTo).catch(() => setError('Message could not be sent.'))
@@ -505,7 +505,7 @@ export function ChatScreen(props: {
     setPicking(null)
     const same = ownReaction(message) === emoji
     if (same && !toggle) return
-    session.current?.react({author: message.author, seq: message.seq}, same ? '' : emoji).catch(() => setError('Reaction could not be sent.'))
+    session.current?.react({author: message.author, device: message.device, seq: message.seq}, same ? '' : emoji).catch(() => setError('Reaction could not be sent.'))
   }
   const replyTo = (message: MessageRecord) => {
     setMenu(null)

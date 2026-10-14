@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto'
+import {openDB} from 'idb'
 import {describe, expect, it} from 'vitest'
 import {createIdentity, loadIdentity} from './identity'
 import {openStore, type ChatRecord, type MessageRecord} from './store'
@@ -20,6 +21,7 @@ const chat = (overrides: Partial<ChatRecord>): ChatRecord => ({
 const message = (overrides: Partial<MessageRecord>): MessageRecord => ({
   chatId: 'chat-a',
   author: 'aa',
+  device: '',
   seq: 1,
   lamport: 1,
   sentAt: 0,
@@ -76,7 +78,7 @@ describe('store', () => {
     await store.addMessage(message({author: 'them', seq: 7, lamport: 3}))
     await store.addMessage(message({chatId: 'chat-b', author: 'me', seq: 1}))
 
-    await store.deleteChat('chat-a', 'me')
+    await store.deleteChat('chat-a', {id: 'me', device: ''})
 
     expect((await store.listChats()).map(c => c.name)).toEqual(['B'])
     expect(await store.listMessages('chat-a')).toEqual([])
@@ -84,7 +86,7 @@ describe('store', () => {
 
     // Rejoining picks the numbering back up, once; leaving again without writing keeps it.
     expect((await store.saveChat(chatA)).ownSeqFloor).toBe(2)
-    await store.deleteChat('chat-a', 'me')
+    await store.deleteChat('chat-a', {id: 'me', device: ''})
     expect((await store.saveChat(chatA)).ownSeqFloor).toBe(2)
     expect((await store.getChat('chat-a'))!.ownSeqFloor).toBe(2)
   })
@@ -121,6 +123,36 @@ describe('store', () => {
     expect([...kept.envelope]).toEqual([1, 2, 3])
   })
 
+  it('holds the same number from two devices of one person as two messages', async () => {
+    const store = await openStore(freshName())
+    expect(await store.addMessage(message({}))).toBe(true)
+    expect(await store.addMessage(message({device: '0123456789abcdef', lamport: 2}))).toBe(true)
+    expect(await store.addMessage(message({device: '0123456789abcdef', lamport: 2}))).toBe(false)
+    expect((await store.listMessages('chat-a')).map(m => m.device)).toEqual(['', '0123456789abcdef'])
+  })
+
+  it('keeps messages stored before devices were told apart, as from a first device', async () => {
+    const name = freshName()
+    // The layout of version 5.
+    const old = await openDB(name, 5, {
+      upgrade(db) {
+        db.createObjectStore('identity')
+        db.createObjectStore('chats', {keyPath: 'id'})
+        db.createObjectStore('left')
+        db.createObjectStore('files', {keyPath: ['chatId', 'hash']})
+        const messages = db.createObjectStore('messages', {keyPath: ['chatId', 'author', 'seq']})
+        messages.createIndex('order', ['chatId', 'lamport', 'author', 'seq'])
+        messages.createIndex('received', ['chatId', 'receivedAt'])
+      }
+    })
+    const {device: _, ...before} = message({})
+    await old.put('messages', before)
+    old.close()
+    const store = await openStore(name)
+    expect(await store.listMessages('chat-a')).toEqual([{...before, device: ''}])
+    expect(await store.addMessage(message({}))).toBe(false)
+  })
+
   it('keeps files per chat, and forgets them with the chat', async () => {
     const store = await openStore(`store-files-${Date.now()}`)
     const data = new Uint8Array([1, 2, 3])
@@ -131,7 +163,7 @@ describe('store', () => {
     expect(await store.getFile('chat-a', 'aa')).toEqual(data)
     expect(await store.getFile('chat-a', 'zz')).toBeUndefined()
 
-    await store.deleteChat('chat-a', 'me')
+    await store.deleteChat('chat-a', {id: 'me', device: ''})
     expect(await store.listFiles('chat-a')).toEqual([])
     expect(await store.getFile('chat-b', 'aa')).toEqual(new Uint8Array([9]))
   })

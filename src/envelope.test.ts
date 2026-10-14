@@ -11,7 +11,7 @@ async function makeChat(): Promise<ChatContext> {
   return {chatId: keys.roomId, msgKey: await importMsgKey(keys.msgKey)}
 }
 
-const hello: Omit<Message, 'author'> = {seq: 1, lamport: 3, sentAt: 1_760_000_000_000, content: {type: 'text', text: 'hello ⛰️'}}
+const hello: Omit<Message, 'author'> = {device: '', seq: 1, lamport: 3, sentAt: 1_760_000_000_000, content: {type: 'text', text: 'hello ⛰️'}}
 
 /** Re-encodes an envelope with some of its clear fields replaced. */
 function rewrite(envelope: Uint8Array, changes: Record<string, unknown>): Uint8Array {
@@ -109,6 +109,7 @@ describe('envelope', () => {
 
     expect(await openEnvelope(chat, envelope)).toEqual({
       author: anne.id,
+      device: '',
       seq: 5,
       lamport: 9,
       sentAt: 1_760_000_000_000,
@@ -140,7 +141,7 @@ describe('envelope', () => {
   it('round-trips a reaction and its removal, and refuses one that is not a single emoji', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
-    const target = {author: 'ab'.repeat(32), seq: 7}
+    const target = {author: 'ab'.repeat(32), device: '', seq: 7}
     for (const emoji of ['👍', '👨‍👩‍👧', '']) {
       const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
       expect(await openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).toEqual({...reaction, author: anne.id})
@@ -154,14 +155,14 @@ describe('envelope', () => {
   it('round-trips a reply in words and one that is a picture, and refuses one that points nowhere', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
-    const replyTo = {author: 'ab'.repeat(32), seq: 7}
+    const replyTo = {author: 'ab'.repeat(32), device: '', seq: 7}
     const words = {...hello, seq: 2, content: {type: 'text', text: 'yes, at six', replyTo}} as const
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, words))).toEqual({...words, author: anne.id})
     const image = {type: 'image', hash: 'cd'.repeat(32), key: new Uint8Array(32).fill(5), size: 1000, width: 4, height: 3, preview: new Uint8Array(0), replyTo} as const
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, {...hello, seq: 3, content: image}))).toEqual({...hello, seq: 3, content: image, author: anne.id})
     // An ordinary message still travels exactly as before, so older versions of the app read it.
     expect(await openEnvelope(chat, await sealEnvelope(chat, anne, hello))).toEqual({...hello, author: anne.id})
-    for (const bad of [{author: 'ab'.repeat(32), seq: 0}, {author: 'ab'.repeat(8), seq: 1}]) {
+    for (const bad of [{author: 'ab'.repeat(32), device: '', seq: 0}, {author: 'ab'.repeat(8), device: '', seq: 1}, {author: 'ab'.repeat(32), device: 'ab', seq: 1}]) {
       const reply = {...hello, seq: 2, content: {type: 'text', text: 'hm', replyTo: bad}} as const
       await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reply))).rejects.toThrow('bad reference to a message')
     }
@@ -200,14 +201,30 @@ describe('envelope', () => {
     }
   })
 
+  it("carries a device's tag, which cannot be taken off or changed", async () => {
+    const chat = await makeChat()
+    const anne = {...createIdentity('Anne'), device: '0123456789abcdef'}
+    const sealed = await sealEnvelope(chat, anne, hello)
+    expect(await openEnvelope(chat, sealed)).toEqual({...hello, author: anne.id, device: anne.device})
+    await expect(openEnvelope(chat, rewrite(sealed, {d: undefined}))).rejects.toThrow(/decrypt/)
+    await expect(openEnvelope(chat, rewrite(sealed, {d: new Uint8Array(8)}))).rejects.toThrow(/decrypt/)
+    await expect(openEnvelope(chat, rewrite(sealed, {d: new Uint8Array(3)}))).rejects.toThrow('bad device tag')
+    // An edit or reaction can name a message from any device.
+    const target = {author: anne.id, device: anne.device, seq: 4}
+    const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji: '👍'}} as const
+    expect((await openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).content).toEqual(reaction.content)
+    const edit = {...hello, seq: 3, content: {type: 'edit', target: {device: anne.device, seq: 4}, text: 'x'}} as const
+    expect((await openEnvelope(chat, await sealEnvelope(chat, anne, edit))).content).toEqual(edit.content)
+  })
+
   it('round-trips an edit, and refuses one that names no message', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
     for (const text of ['hello there', '']) {
-      const edit = {...hello, seq: 2, content: {type: 'edit', target: 1, text}} as const
+      const edit = {...hello, seq: 2, content: {type: 'edit', target: {device: '', seq: 1}, text}} as const
       expect(await openEnvelope(chat, await sealEnvelope(chat, anne, edit))).toEqual({...edit, author: anne.id})
     }
-    const bad = {...hello, seq: 2, content: {type: 'edit', target: 0, text: 'x'}} as const
+    const bad = {...hello, seq: 2, content: {type: 'edit', target: {device: '', seq: 0}, text: 'x'}} as const
     await expect(openEnvelope(chat, await sealEnvelope(chat, anne, bad))).rejects.toThrow('bad edit body')
   })
 

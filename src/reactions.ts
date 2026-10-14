@@ -1,4 +1,5 @@
 // Works out which reactions each message is showing, from the reaction messages in the log.
+import {streamOf, writtenAfter} from './envelope'
 import type {MessageRecord} from './store'
 
 /** Offered at a tap; any other emoji can be typed. */
@@ -6,7 +7,8 @@ export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'
 
 export type Tally = {emoji: string; by: string[]}
 
-export const messageKey = (message: {author: string; seq: number}) => `${message.author}:${message.seq}`
+/** Names a message: its stream (author and device), then its number there. */
+export const messageKey = (message: {author: string; device: string; seq: number}) => `${streamOf(message)}:${message.seq}`
 
 /**
  * For each message that has reactions: the emoji on it and who chose each, in the order they first
@@ -14,9 +16,8 @@ export const messageKey = (message: {author: string; seq: number}) => `${message
  */
 export function tallyReactions(messages: MessageRecord[]): Map<string, Tally[]> {
   const reactable = new Set(messages.filter(({content}) => content.type === 'text' || content.type === 'image').map(messageKey))
-  // Target, then reactor, to that person's latest reaction. Their own numbering says which is latest,
-  // whatever their clock claimed.
-  const latest = new Map<string, Map<string, {seq: number; emoji: string}>>()
+  // Target, then reactor, to that person's latest reaction, on whichever of their devices.
+  const latest = new Map<string, Map<string, {message: MessageRecord; emoji: string}>>()
   for (const message of messages) {
     if (message.content.type !== 'reaction') continue
     const target = messageKey(message.content.target)
@@ -24,10 +25,10 @@ export function tallyReactions(messages: MessageRecord[]): Map<string, Tally[]> 
     if (!latest.has(target)) latest.set(target, new Map())
     const byReactor = latest.get(target)!
     const earlier = byReactor.get(message.author)
-    if (!earlier || message.seq > earlier.seq) {
+    if (!earlier || writtenAfter(message, earlier.message)) {
       // Deleting first keeps the map in the order of each person's current reaction.
       byReactor.delete(message.author)
-      byReactor.set(message.author, {seq: message.seq, emoji: message.content.emoji})
+      byReactor.set(message.author, {message, emoji: message.content.emoji})
     }
   }
   const tallies = new Map<string, Tally[]>()

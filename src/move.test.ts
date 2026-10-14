@@ -11,7 +11,7 @@ describe('moving to the installed app', () => {
     const old = await openStore('move-old')
     const chat = await old.saveChat(newGroupChat(anne, 'Picnic', [], 1000))
     const record = (author: string, seq: number) =>
-      ({chatId: chat.id, author, seq, lamport: seq, sentAt: 0, receivedAt: 0, content: {type: 'text', text: 'x'}, envelope: new Uint8Array(1)}) as never
+      ({chatId: chat.id, author, device: '', seq, lamport: seq, sentAt: 0, receivedAt: 0, content: {type: 'text', text: 'x'}, envelope: new Uint8Array(1)}) as never
     for (const [author, seq] of [[anne.id, 1], [anne.id, 2], ['ab'.repeat(32), 9]] as const) await old.addMessage(record(author, seq))
 
     const code = await packMove(old, anne)

@@ -6,6 +6,7 @@ import {importMsgKey, openEnvelope, sealEnvelope, type ImageContent} from './env
 import {sealFile} from './files'
 import {issueCert} from './membership'
 import {latestCards} from './cards'
+import {latestEdits} from './edits'
 import type {OpenMailbox} from './mailbox'
 import {tallyReactions} from './reactions'
 import {openSession, versionVector, type ConnectionStatus} from './session'
@@ -48,7 +49,7 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     chat,
     identity,
     store: ownStore,
-    connect: network.connect(identity.id),
+    connect: network.connect(identity.device ? `${identity.id}.${identity.device}` : identity.id),
     mailbox,
     handlers: {
       onMessages: messages => (state.messages = messages),
@@ -102,6 +103,43 @@ describe('versionVector', () => {
 })
 
 describe('session', () => {
+  it('lets one person write from two devices: each numbers its own messages, and everyone sees one person', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = createIdentity('Anne')
+    const desk = {...anne, device: '0123456789abcdef'}
+    const phone = await join(network, chat, anne)
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await phone.session.sendText('from my phone')
+    await settle()
+    // The desktop was away for that, and catches up from Bob, who has it.
+    await phone.session.close()
+    const computer = await join(network, chat, desk)
+    await vi.waitFor(() => expect(texts(computer.view)).toEqual(['from my phone']))
+    await computer.session.sendText('from my desk')
+    await vi.waitFor(() => expect(texts(bob.view)).toEqual(['from my phone', 'from my desk']))
+    const fromAnne = bob.view.filter(m => m.content.type === 'text')
+    expect(fromAnne.map(m => [m.author, m.device])).toEqual([
+      [anne.id, ''],
+      [anne.id, desk.device]
+    ])
+    // Two streams, each counting from 1: the same numbers on different devices are different messages.
+    expect(versionVector(bob.view)[`${anne.id}.${desk.device}`]).toBeGreaterThan(0)
+    expect(versionVector(bob.view)[anne.id]).toBeGreaterThan(0)
+
+    // The desktop can fix a message written on the phone, since it is the same person.
+    const phoneMessage = fromAnne[0]
+    await computer.session.edit({device: phoneMessage.device, seq: phoneMessage.seq}, 'from my phone, fixed')
+    await vi.waitFor(() => expect([...latestEdits(bob.view).values()]).toEqual(['from my phone, fixed']))
+
+    // And the phone, back again, gets what the desktop wrote while it was away.
+    const again = await join(network, chat, anne, phone.store)
+    await vi.waitFor(() => expect(texts(again.view)).toEqual(['from my phone', 'from my desk']))
+    await again.session.sendText('phone again')
+    await vi.waitFor(() => expect(texts(computer.view)).toEqual(['from my phone', 'from my desk', 'phone again']))
+    expect(again.view.findLast(m => m.content.type === 'text')!.device).toBe('')
+  })
+
   it('delivers signed messages both ways and stores them on both devices', async () => {
     const network = makeNetwork()
     const chat = makeChat()
@@ -342,7 +380,7 @@ describe('session', () => {
     await bob.session.sendText('before leaving')
     await settle()
     await bob.session.close()
-    await bob.store.deleteChat(chat.id, bobIdentity.id)
+    await bob.store.deleteChat(chat.id, bobIdentity)
     expect(await bob.store.listMessages(chat.id)).toEqual([])
 
     // Invited back: the chat is saved again, and Bob writes before sync has returned his old messages.
@@ -585,7 +623,7 @@ describe('session', () => {
     const context = {chatId: chat.id, msgKey: await importMsgKey(chatKeys(chat).msgKey)}
     const old = {seq: 1, lamport: 1, sentAt: 1, content: {type: 'profile', name: 'Bob', dh: bobIdentity.dhPublic}} as const
     const envelope = await sealEnvelope(context, bobIdentity, old)
-    await bobStore.addMessage({...old, author: bobIdentity.id, chatId: chat.id, receivedAt: 1, envelope})
+    await bobStore.addMessage({...old, author: bobIdentity.id, device: '', chatId: chat.id, receivedAt: 1, envelope})
 
     const anne = await join(network, chat, createIdentity('Anne'))
     const bob = await join(network, chat, bobIdentity, bobStore, bobChat)
@@ -777,7 +815,7 @@ describe('session', () => {
     const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
     await anne.session.sendText('shall we go?')
     await settle()
-    const replyTo = {author: anne.identity.id, seq: anne.view.find(m => m.content.type === 'text')!.seq}
+    const replyTo = {author: anne.identity.id, device: '', seq: anne.view.find(m => m.content.type === 'text')!.seq}
     await bob.session.sendText('yes, at six', replyTo)
     await settle()
     expect(anne.view.at(-1)!.content).toEqual({type: 'text', text: 'yes, at six', replyTo})
@@ -793,7 +831,7 @@ describe('session', () => {
     const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
     await anne.session.sendText('shall we go?')
     await settle()
-    const target = {author: anne.identity.id, seq: anne.view.find(m => m.content.type === 'text')!.seq}
+    const target = {author: anne.identity.id, device: '', seq: anne.view.find(m => m.content.type === 'text')!.seq}
     const key = `${target.author}:${target.seq}`
 
     await bob.session.react(target, '👍')

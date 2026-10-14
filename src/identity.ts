@@ -12,9 +12,15 @@ export type IdentitySecrets = {
   signSecret: Uint8Array
   /** X25519 key, from which direct-chat keys are derived. */
   dhSecret: Uint8Array
+  /**
+   * This device's tag, in hex. Every device of one person shares the keys above, but numbers its own
+   * messages; the tag keeps the numbers apart. A person's first device has none.
+   */
+  device?: string
 }
 
 export type Identity = IdentitySecrets & {
+  device: string
   /** Hash of the signing public key; how other members refer to this person. */
   id: string
   signPublic: Uint8Array
@@ -27,7 +33,7 @@ export const cleanName = (name: string) => name.trim().slice(0, MAX_NAME_LENGTH)
 
 export function loadIdentity(secrets: IdentitySecrets): Identity {
   const signPublic = ed25519.getPublicKey(secrets.signSecret)
-  return {...secrets, id: memberId(signPublic), signPublic, dhPublic: x25519.getPublicKey(secrets.dhSecret)}
+  return {...secrets, device: secrets.device ?? '', id: memberId(signPublic), signPublic, dhPublic: x25519.getPublicKey(secrets.dhSecret)}
 }
 
 export function createIdentity(name = ''): Identity {
