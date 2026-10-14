@@ -1,12 +1,13 @@
-import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
+import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
+import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
 import {EmojiPicker} from './emoji-picker'
-import {MAX_TEXT_LENGTH, type MessageRef} from './envelope'
+import {IMAGE_MIME, MAX_TEXT_LENGTH, type ImageContent, type MessageRef} from './envelope'
 import {memberId, type Identity} from './identity'
 import {prepareImage, type PreparedImage} from './image'
-import {ImageView, ImageViewer} from './image-view'
+import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
@@ -38,6 +39,19 @@ const BUSY_LABELS: Record<Exclude<ConnectionStatus, 'idle'>, string> = {
 const LONG_PRESS_MS = 450
 const LONG_PRESS_SLOP_PX = 10
 const MAX_ATTACHED = 10
+
+/** A small picture beside the words where a picture message is quoted. */
+function QuoteThumb(props: {store: Store; chatId: string; image: ImageContent; held: boolean}) {
+  const {store, chatId, image, held} = props
+  const url = useImageUrl(store, chatId, image, held)
+  // Until the picture itself is on this device, its tiny preview stands in.
+  const preview = useMemo(
+    () => (image.preview.length > 0 ? URL.createObjectURL(new Blob([new Uint8Array(image.preview)], {type: IMAGE_MIME})) : null),
+    [image.hash]
+  )
+  useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview])
+  return <span class="thumb">{(url ?? preview) && <img class={url ? '' : 'blur'} src={url ?? preview!} alt="" draggable={false} />}</span>
+}
 
 export function ChatScreen(props: {
   chat: ChatRecord
@@ -217,6 +231,12 @@ export function ChatScreen(props: {
     [messages]
   )
   const reactions = useMemo(() => tallyReactions(messages ?? []), [messages])
+  const edits = useMemo(() => latestEdits(messages ?? []), [messages])
+  /** What a message says now: its words or its caption, as last edited. */
+  const wordsOf = (message: MessageRecord) => {
+    const {content} = message
+    return edits.get(messageKey(message)) ?? (content.type === 'text' ? content.text : content.type === 'image' ? (content.caption ?? '') : '')
+  }
 
   // When the on-screen keyboard opens or changes height the log gets shorter. If the newest message was
   // in view, keep it in view; otherwise the keyboard would push it out of sight.
@@ -328,10 +348,19 @@ export function ChatScreen(props: {
   const quoteOf = (message: MessageRecord) => {
     const {content} = message
     const who = message.author === identity.id ? 'You' : nameOf(message.author)
-    if (content.type === 'text') return {who, text: content.text.slice(0, 200)}
-    if (content.type === 'image') return {who, text: content.caption ? `Picture: ${content.caption.slice(0, 200)}` : 'Picture'}
-    return {who, text: ''}
+    const words = wordsOf(message).slice(0, 200)
+    if (content.type === 'image') return {who, text: words ? `Picture: ${words}` : 'Picture', shown: words || 'Picture', image: content}
+    return {who, text: words, shown: words, image: null}
   }
+  const quoteBody = (quote: ReturnType<typeof quoteOf>, who = quote.who) => (
+    <>
+      {quote.image && <QuoteThumb store={store} chatId={chat.id} image={quote.image} held={files.has(quote.image.hash)} />}
+      <span class="words">
+        <span class="who">{who}</span>
+        <span class="said">{quote.shown}</span>
+      </span>
+    </>
+  )
   // Going to a quoted message marks it for a moment, so it can be found among its neighbours.
   const [marked, setMarked] = useState<string | null>(null)
   const markTimer = useRef(0)
@@ -345,9 +374,40 @@ export function ChatScreen(props: {
     markTimer.current = window.setTimeout(() => setMarked(null), 1600)
   }
 
+  // One of our own messages being reworded in the message box. What was being typed is set aside meanwhile.
+  const [editing, setEditing] = useState<MessageRecord | null>(null)
+  const setAside = useRef('')
+  const startEditing = (message: MessageRecord) => {
+    setMenu(null)
+    setReplyingTo(null)
+    if (!editing) setAside.current = draft
+    setEditing(message)
+    setDraft(wordsOf(message))
+    messageBox.current?.focus()
+  }
+  const stopEditing = () => {
+    setEditing(null)
+    setDraft(setAside.current)
+    setAside.current = ''
+  }
+  const editLast = () => {
+    const last = [...(messages ?? [])].reverse().find(({author, content}) => author === identity.id && (content.type === 'text' || content.type === 'image'))
+    if (last) startEditing(last)
+    return !!last
+  }
+
   const send = async (event: Event) => {
     event.preventDefault()
     const text = draft.trim()
+    if (editing) {
+      // A caption can be taken away; a message in words has to say something.
+      if (!session.current || (!text && editing.content.type !== 'image')) return
+      const changed = text !== wordsOf(editing)
+      const {seq} = editing
+      stopEditing()
+      if (changed) await session.current.edit(seq, text).catch(() => setError('The change could not be sent.'))
+      return
+    }
     if (!session.current || preparing > 0 || (!text && attached.length === 0)) return
     const replyTo: MessageRef | undefined = replyingTo ? {author: replyingTo.author, seq: replyingTo.seq} : undefined
     setDraft('')
@@ -384,6 +444,13 @@ export function ChatScreen(props: {
     setMenu(null)
     setPicking(null)
   }
+  // Escape puts a message's menu away. Listening from the moment the menu shows, not a frame later.
+  useLayoutEffect(() => {
+    if (!menu) return
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setMenu(null)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [menu])
   const ownReaction = (message: MessageRecord) =>
     reactions.get(messageKey(message))?.find(tally => tally.by.includes(identity.id))?.emoji ?? null
   // From the menu or the message itself, choosing the emoji we already chose takes it away. From the
@@ -397,6 +464,7 @@ export function ChatScreen(props: {
   }
   const replyTo = (message: MessageRecord) => {
     setMenu(null)
+    if (editing) stopEditing()
     setReplyingTo(message)
     messageBox.current?.focus()
   }
@@ -431,7 +499,7 @@ export function ChatScreen(props: {
   useEffect(() => cancelPress, [])
 
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null)
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -594,7 +662,8 @@ export function ChatScreen(props: {
           }
           if (message.content.type !== 'text' && message.content.type !== 'image') return separator
           const image = message.content.type === 'image' ? message.content : null
-          const text = message.content.type === 'text' ? message.content.text : (message.content.caption ?? '')
+          const text = wordsOf(message)
+          const edited = edits.has(key)
           const size = image ? null : emojiSize(text)
           const tallies = reactions.get(key)
           const own = ownReaction(message)
@@ -607,7 +676,7 @@ export function ChatScreen(props: {
             <li
               key={key}
               data-key={key}
-              class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size && !replied ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}${marked === key ? ' marked' : ''}`}
+              class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size && !replied ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}${marked === key || (editing && messageKey(editing) === key) ? ' marked' : ''}`}
               onPointerDown={event => startPress(event, key)}
               onPointerMove={movePress}
               onPointerUp={cancelPress}
@@ -626,8 +695,7 @@ export function ChatScreen(props: {
                     // The tap that ends a long press must not also go to the quoted message.
                     onClick={() => !menu && Date.now() - menuOpenedAt.current > 700 && showMessage(messageKey(original!))}
                   >
-                    <span class="who">{quote.who}</span>
-                    <span class="said">{quote.text}</span>
+                    {quoteBody(quote)}
                   </button>
                 ) : (
                   <span class="quote gone">A message that isn't on this device</span>
@@ -648,6 +716,7 @@ export function ChatScreen(props: {
                 ? text && <span class="caption">{splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}</span>
                 : splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
+                {edited && 'edited · '}
                 {formatTime(message.sentAt)}
               </time>
               {tallies && (
@@ -696,6 +765,11 @@ export function ChatScreen(props: {
                   <button type="button" class="reply" onClick={() => replyTo(message)}>
                     Reply
                   </button>
+                  {mine && (
+                    <button type="button" class="reply" onClick={() => startEditing(message)}>
+                      {image ? (text ? 'Edit caption' : 'Add a caption') : 'Edit'}
+                    </button>
+                  )}
                   {/* Shows what will be copied, as much of it as fits. */}
                   {text && (
                     <button type="button" class="copy" aria-label={`Copy “${text.slice(0, 120)}”`} onClick={() => copyText(text)}>
@@ -717,11 +791,16 @@ export function ChatScreen(props: {
 
       {replyingTo && (
         <p class="replying">
-          <span class="quote">
-            <span class="who">Replying to {quoteOf(replyingTo).who === 'You' ? 'yourself' : quoteOf(replyingTo).who}</span>
-            <span class="said">{quoteOf(replyingTo).text}</span>
-          </span>
+          <span class="quote">{quoteBody(quoteOf(replyingTo), `Replying to ${replyingTo.author === identity.id ? 'yourself' : nameOf(replyingTo.author)}`)}</span>
           <button type="button" aria-label="Cancel reply" onClick={() => setReplyingTo(null)}>
+            ✕
+          </button>
+        </p>
+      )}
+      {editing && (
+        <p class="replying">
+          <span class="quote">{quoteBody(quoteOf(editing), editing.content.type === 'image' ? 'Editing your caption' : 'Editing your message')}</span>
+          <button type="button" aria-label="Cancel edit" onClick={stopEditing}>
             ✕
           </button>
         </p>
@@ -755,7 +834,7 @@ export function ChatScreen(props: {
             event.currentTarget.value = ''
           }}
         />
-        <button type="button" class="attach" aria-label="Add a picture" disabled={!messages} onClick={() => filePicker.current?.click()}>
+        <button type="button" class="attach" aria-label="Add a picture" disabled={!messages || editing !== null} onClick={() => filePicker.current?.click()}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
             <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
             <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
@@ -766,21 +845,31 @@ export function ChatScreen(props: {
           ref={messageBox}
           value={draft}
           onInput={event => setDraft(event.currentTarget.value)}
-          onKeyDown={event => event.key === 'Escape' && setReplyingTo(null)}
+          onKeyDown={event => {
+            if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)
+            // As in other chat apps: the up arrow in an empty box rewords the last thing we said.
+            else if (event.key === 'ArrowUp' && !editing && draft === '' && attached.length === 0 && editLast()) event.preventDefault()
+          }}
           onPaste={event => {
             const pasted = imagesIn(event.clipboardData?.files)
             if (pasted.length === 0) return
             event.preventDefault()
             void attach(pasted)
           }}
-          placeholder={attached.length > 0 ? 'Add a caption (optional)' : connected ? 'Message' : 'Message (delivered when you are both here)'}
+          placeholder={editing ? (editing.content.type === 'image' ? 'Caption (leave empty for none)' : 'Message') : attached.length > 0 ? 'Add a caption (optional)' : connected ? 'Message' : 'Message (delivered when you are both here)'}
           maxLength={MAX_TEXT_LENGTH}
           aria-label="Message"
           autocomplete="off"
         />
-        <button type="submit" disabled={!messages || preparing > 0 || (!draft.trim() && attached.length === 0)}>
-          Send
-        </button>
+        {editing ? (
+          <button type="submit" disabled={!draft.trim() && editing.content.type !== 'image'}>
+            Save
+          </button>
+        ) : (
+          <button type="submit" disabled={!messages || preparing > 0 || (!draft.trim() && attached.length === 0)}>
+            Send
+          </button>
+        )}
       </form>
     </main>
   )

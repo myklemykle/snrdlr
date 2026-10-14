@@ -35,6 +35,11 @@ export type Content =
    * separately (see files.ts), and a tiny preview to show until it arrives.
    */
   | ImageContent
+  /**
+   * The author's new words for one of their own earlier messages, named by its number: a message in
+   * words, or a picture's caption. Their latest edit is the one that counts.
+   */
+  | {type: 'edit'; target: number; text: string}
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -137,6 +142,8 @@ function encodeContent(content: Content): [string, unknown] {
           ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
         }
       ]
+    case 'edit':
+      return ['edit', {s: content.target, t: content.text}]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -151,6 +158,11 @@ function decodeContent(type: unknown, body: unknown): Content {
     const {t, r} = (body ?? {}) as Record<string, unknown>
     if (typeof t !== 'string' || t.length === 0 || t.length > MAX_TEXT_LENGTH) throw new Error('bad reply body')
     return {type: 'text', text: t, replyTo: decodeRef(r)}
+  }
+  if (type === 'edit') {
+    const {s, t} = (body ?? {}) as Record<string, unknown>
+    if (!isCount(s) || s === 0 || typeof t !== 'string' || t.length > MAX_TEXT_LENGTH) throw new Error('bad edit body')
+    return {type, target: s, text: t}
   }
   if (type === 'profile') {
     const {name, dh, c} = (body ?? {}) as {name?: unknown; dh?: unknown; c?: unknown}

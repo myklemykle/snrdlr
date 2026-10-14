@@ -19,7 +19,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
-- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions, reply and a copy button in it. Still to add:
+- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions, reply, edit and a copy button in it. Still to add:
   - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
 - **Reactions: follow-ups.** One reaction per person per message; six quick ones, or any emoji from the app's own picker (a page cannot open the system's emoji keyboard). Open:
@@ -56,8 +56,17 @@ A reply is an ordinary message whose encrypted payload also names the message it
 
 Open:
 - Swipe a message sideways to reply, as other chat apps do on phones.
-- A small thumbnail in the quote when the message answered is a picture.
 - Loading a quoted message that is not on this device.
+
+### How editing works (built)
+
+An edit is a message of its own that names one of the author's earlier messages by its number and gives the new words. It can only name the author's own messages, so nobody can change what someone else said. The latest edit counts; the message shows "edited" beside its time. Edit is in the message menu on your own messages; the words go into the message box with a Save button, and what you were typing comes back afterwards. On a keyboard, the up arrow in an empty message box edits your last message. A picture's caption can be added, changed or removed the same way.
+
+Open:
+- The earlier wording stays in every member's log; the app just does not show it. Decide whether to show an edit history, and say plainly somewhere that editing does not unsend.
+- Deleting a message (the same mechanism, with the same caveat).
+- A time limit on editing, if wanted.
+- An older copy of the app keeps an edit unseen until it updates.
 
 ## Images and audio messages
 

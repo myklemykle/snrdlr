@@ -74,6 +74,8 @@ export type Session = {
   postCert: (cert: Uint8Array) => Promise<void>
   /** In a direct chat: lets the other person into a group we have started. */
   postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
+  /** Changes the words of one of our own messages, or a picture's caption. */
+  edit: (seq: number, text: string) => Promise<void>
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
   react: (target: {author: string; seq: number}, emoji: string) => Promise<void>
   /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
@@ -448,6 +450,7 @@ export async function openSession(options: {
     sendText: (text, replyTo) => post({type: 'text', text, ...(replyTo ? {replyTo} : {})}),
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
+    edit: (seq, text) => post({type: 'edit', target: seq, text}),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
     async postImage(image, file) {
       await store.putFile(chat.id, image.hash, file)

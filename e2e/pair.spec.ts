@@ -609,15 +609,104 @@ test('people reply to a message: it is quoted above the answer, and tapping the 
   await anne.getByRole('button', {name: 'Send'}).click()
   const picture = bob.locator('.theirs.image')
   await expect(picture.getByRole('button', {name: 'In reply to You: yes, at six'})).toBeVisible()
+  await expect(picture.locator('.quote .thumb')).toHaveCount(0)
   await picture.hover()
   await picture.getByRole('button', {name: 'React or copy'}).click()
   await bob.getByRole('button', {name: 'Reply', exact: true}).click()
   await send(bob, 'lovely')
   await expect(anne.locator('.theirs', {hasText: 'lovely'}).getByRole('button', {name: 'In reply to You: Picture'})).toBeVisible()
+  // Where a picture is quoted, a small copy of it shows beside the words.
+  await expect(bob.locator('.replying')).toHaveCount(0)
+  for (const quote of [anne.locator('.theirs', {hasText: 'lovely'}).locator('.quote'), bob.locator('.mine', {hasText: 'lovely'}).locator('.quote')]) {
+    await expect(quote.locator('.thumb img:not(.blur)')).toBeVisible({timeout: 20_000})
+    expect(await quote.locator('.thumb img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(400)
+  }
 
   // Replies are part of the history.
   await bob.reload()
   await expect(bob.locator('.mine', {hasText: 'yes, at six'}).getByRole('button', {name: 'In reply to Anne: shall we go?'})).toBeVisible()
+})
+
+test('people edit what they said: the new words replace the old for everyone, marked as edited', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Edits')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await send(anne, 'see you at fve')
+  await expect(bob.locator('.theirs', {hasText: 'see you at fve'})).toBeVisible()
+  const box = anne.getByLabel('Message')
+  const menuOn = async (bubble: ReturnType<Page['locator']>) => {
+    await bubble.hover()
+    await bubble.getByRole('button', {name: 'React or copy'}).click()
+  }
+
+  // Anne is half way through something else when she spots the mistake.
+  await box.fill('half typed')
+  await menuOn(anne.locator('.mine', {hasText: 'see you at fve'}))
+  await anne.getByRole('button', {name: 'Edit', exact: true}).click()
+  await expect(anne.locator('.replying')).toContainText('Editing your message')
+  await expect(box).toHaveValue('see you at fve')
+  await expect(box).toBeFocused()
+  await expect(anne.locator('.mine.marked')).toHaveText(/see you at fve/)
+  await expect(anne.getByRole('button', {name: 'Send'})).toHaveCount(0)
+  await box.fill('see you at five')
+  await anne.getByRole('button', {name: 'Save'}).click()
+
+  // The message changes in place for both, says it was edited, and what she was typing comes back.
+  await expect(anne.locator('.replying')).toHaveCount(0)
+  await expect(box).toHaveValue('half typed')
+  for (const page of [anne, bob]) {
+    const bubble = page.locator('.mine, .theirs').filter({hasText: 'see you at five'})
+    await expect(bubble).toHaveCount(1)
+    await expect(bubble.locator('.time')).toContainText('edited')
+    await expect(page.locator('.mine, .theirs')).toHaveCount(1)
+    await expect(page.getByText('see you at fve')).toHaveCount(0)
+  }
+
+  // Only the person who said it can change it.
+  await menuOn(bob.locator('.theirs', {hasText: 'see you at five'}))
+  await expect(bob.getByRole('button', {name: 'Reply', exact: true})).toBeVisible()
+  await expect(bob.getByRole('button', {name: 'Edit', exact: true})).toHaveCount(0)
+  await bob.keyboard.press('Escape')
+  await expect(bob.locator('.menu')).toHaveCount(0)
+
+  // The up arrow in an empty box edits the last thing said; Escape backs out; saving it unchanged sends nothing.
+  await box.fill('')
+  await box.press('ArrowUp')
+  await expect(box).toHaveValue('see you at five')
+  await box.press('Escape')
+  await expect(box).toHaveValue('')
+  await expect(anne.locator('.replying')).toHaveCount(0)
+  await box.press('ArrowUp')
+  await box.fill('see you at five, by the gate')
+  await box.press('Enter')
+  await expect(bob.locator('.theirs', {hasText: 'see you at five, by the gate'})).toBeVisible()
+
+  // A reply quotes the words as they are now, and an edit is still there after a reload.
+  await menuOn(bob.locator('.theirs', {hasText: 'by the gate'}))
+  await bob.getByRole('button', {name: 'Reply', exact: true}).click()
+  await send(bob, 'ok')
+  await expect(anne.getByRole('button', {name: 'In reply to You: see you at five, by the gate'})).toBeVisible()
+  await bob.reload()
+  await expect(bob.locator('.theirs', {hasText: 'see you at five, by the gate'}).locator('.time')).toContainText('edited')
+
+  // A picture's caption can be added, changed and taken away.
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await anne.getByLabel('Pictures to add').setInputFiles(photoFile(await makePhoto(anne, 400, 300)))
+  await anne.getByRole('button', {name: 'Send'}).click()
+  await expect(bob.locator('.theirs.image')).toBeVisible()
+  await menuOn(anne.locator('.mine.image'))
+  await anne.getByRole('button', {name: 'Add a caption'}).click()
+  await expect(anne.getByLabel('Add a picture')).toBeDisabled()
+  await box.fill('the gate')
+  await box.press('Enter')
+  await expect(bob.locator('.theirs.image .caption')).toHaveText('the gate')
+  await menuOn(anne.locator('.mine.image'))
+  await anne.getByRole('button', {name: 'Edit caption'}).click()
+  await box.fill('')
+  await anne.getByRole('button', {name: 'Save'}).click()
+  await expect(bob.locator('.theirs.image .caption')).toHaveCount(0)
+  await expect(bob.locator('.theirs.image .time')).toContainText('edited')
 })
 
 test('on a touch screen, a long press on a message opens its reactions', async ({browser}) => {

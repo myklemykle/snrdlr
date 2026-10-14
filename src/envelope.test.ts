@@ -167,6 +167,17 @@ describe('envelope', () => {
     }
   })
 
+  it('round-trips an edit, and refuses one that names no message', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    for (const text of ['hello there', '']) {
+      const edit = {...hello, seq: 2, content: {type: 'edit', target: 1, text}} as const
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, edit))).toEqual({...edit, author: anne.id})
+    }
+    const bad = {...hello, seq: 2, content: {type: 'edit', target: 0, text: 'x'}} as const
+    await expect(openEnvelope(chat, await sealEnvelope(chat, anne, bad))).rejects.toThrow('bad edit body')
+  })
+
   it('round-trips a picture, and keeps one of a kind it does not know for a later version', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')

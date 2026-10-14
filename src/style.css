@@ -1027,3 +1027,39 @@ button:disabled {
 .menu .reply + .copy {
   margin-top: 0;
 }
+
+.quote:has(.thumb) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.quote .words {
+  display: block;
+  min-width: 0;
+}
+
+.quote .thumb {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.quote .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.quote .thumb .blur {
+  filter: blur(3px);
+  transform: scale(1.2);
+}
+
+.menu .reply + .reply {
+  margin-top: 0;
+}
