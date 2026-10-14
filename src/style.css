@@ -1306,3 +1306,18 @@ button:disabled {
 .over-sheet .picker {
   z-index: 9;
 }
+
+.sheet label.everywhere {
+  margin-top: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.sheet span.everywhere {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.sheet.profile fieldset {
+  margin-top: 0.5rem;
+}

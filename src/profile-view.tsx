@@ -7,7 +7,7 @@ import {IMAGE_MIME, MAX_CONTACT_LENGTH, type CardContent, type PictureRef} from 
 import {cleanName, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {openImage, prepareAvatar, prepareImage} from './image'
 import {useImageUrl} from './image-view'
-import {loadProfile, PROFILE_FILES, profileCard, saveProfile, type Profile} from './profile'
+import {loadProfile, PART_LABELS, PROFILE_FILES, profileCard, saveProfile, type Part, type Profile} from './profile'
 import type {Store} from './store'
 
 /** The longest side of a profile photo. */
@@ -84,7 +84,7 @@ export function ProfileCard(props: {
   chatId: string
   files: ReadonlySet<string>
   /** Set when the profile is our own. */
-  own?: {shown: boolean; everywhere: boolean; empty: boolean; onShow: (shown: boolean) => void}
+  own?: {parts: {part: Part; everywhere: boolean; shown: boolean}[]; onShow: (part: Part, shown: boolean) => void}
   onClose: () => void
 }) {
   const {name, id, card, store, chatId, files, own, onClose} = props
@@ -101,20 +101,23 @@ export function ProfileCard(props: {
         {card?.contact && <Contact contact={card.contact} />}
         {!card && !own && <p class="note">{name} isn't showing a profile in this chat.</p>}
         {own &&
-          (own.empty ? (
+          (own.parts.length === 0 ? (
             <p class="note">Your profile is empty. Fill it in from the front page, with the button beside Settings.</p>
-          ) : own.everywhere ? (
-            <p class="note">You show your profile in every chat. That can be changed from the front page.</p>
           ) : (
-            <>
-              <label>
-                <input type="checkbox" checked={own.shown} onChange={event => own.onShow(event.currentTarget.checked)} /> Show my profile in this chat
-              </label>
+            <fieldset>
+              <legend>Show in this chat</legend>
+              {own.parts.map(({part, everywhere, shown}) => (
+                <label key={part}>
+                  <input type="checkbox" checked={shown} disabled={everywhere} onChange={event => own.onShow(part, event.currentTarget.checked)} />{' '}
+                  {PART_LABELS[part]}
+                  {everywhere && <span class="everywhere"> · shown in every chat</span>}
+                </label>
+              ))}
               <p class="note">
-                {own.shown ? 'People in this chat can see it.' : 'People in this chat see only your name.'} Turning it off stops showing it, but anyone
-                who has already seen it may have kept what they saw.
+                {own.parts.some(({shown}) => shown) ? 'Above is what people in this chat see.' : 'People in this chat see only your name.'} Unticking
+                stops showing something, but anyone who has already seen it may have kept it. What is shown in every chat is set from the front page.
               </p>
-            </>
+            </fieldset>
           ))}
         <button type="button" onClick={onClose}>
           Done
@@ -201,6 +204,18 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
     }
   }
 
+  const everywhere = (part: Part) => (
+    <label class="everywhere">
+      <input
+        type="checkbox"
+        checked={profile.show[part].everywhere}
+        aria-label={`Show my ${PART_LABELS[part].toLowerCase()} in every chat`}
+        onChange={event => change({show: {...profile.show, [part]: {...profile.show[part], everywhere: event.currentTarget.checked}}})}
+      />{' '}
+      Show in every chat
+    </label>
+  )
+
   const card = profileCard(profile)
   return (
     <>
@@ -212,7 +227,10 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
           Name
           <input value={name} onInput={event => setName(event.currentTarget.value)} maxLength={MAX_NAME_LENGTH} required autocomplete="off" />
         </label>
-        <p class="note">Everything below is optional.</p>
+        <p class="note">
+          Everything below is optional, and each part is shown only where you choose: in every chat, or just in the chats where you turn it on. To do
+          that, open your own profile inside the chat, from the menu on one of your messages. Your name is always shown.
+        </p>
 
         <fieldset>
           <legend>Icon</legend>
@@ -241,6 +259,7 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
               event.currentTarget.value = ''
             }}
           />
+          {everywhere('icon')}
         </fieldset>
 
         <fieldset>
@@ -258,6 +277,7 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
               />
             ))}
           </div>
+          {everywhere('color')}
         </fieldset>
 
         <fieldset>
@@ -292,6 +312,7 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
               />
             )}
           </div>
+          {everywhere('contact')}
         </fieldset>
 
         <fieldset>
@@ -324,23 +345,9 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
               event.currentTarget.value = ''
             }}
           />
+          {everywhere('photo')}
         </fieldset>
 
-        <fieldset>
-          <legend>Who sees it</legend>
-          <label>
-            <input type="radio" name="share" checked={!profile.shareAll} onChange={() => change({shareAll: false})} /> Only chats where I turn it on
-          </label>
-          <label>
-            <input type="radio" name="share" checked={profile.shareAll} onChange={() => change({shareAll: true})} /> Every chat
-          </label>
-          <p class="note">
-            {profile.shareAll
-              ? 'Everyone in every chat you are in can see this, as each chat next connects.'
-              : 'To turn it on in a chat, open your own profile there from the menu on one of your messages.'}{' '}
-            Your name is always shown.
-          </p>
-        </fieldset>
 
         {problem && <p class="error">{problem}</p>}
         <div class="row end">

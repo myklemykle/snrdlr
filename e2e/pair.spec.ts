@@ -355,11 +355,18 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await own.hover()
   await own.getByRole('button', {name: 'React or copy'}).click()
   await bob.getByRole('button', {name: 'Your profile'}).click()
-  await bob.getByLabel('Show my profile in this chat').check()
-  await bob.getByRole('button', {name: 'Done'}).click()
-  await expect(card.getByRole('link', {name: '@bob.b'})).toHaveAttribute('href', 'https://instagram.com/bob.b')
-  await card.getByRole('button', {name: 'Done'}).click()
+  // First just his colour; his contact stays back until he chooses to show that too.
+  const ownCard = bob.getByRole('dialog', {name: 'Your profile'})
+  await ownCard.getByLabel('Colour').check()
   await expect(anne.locator('.theirs', {hasText: 'yes'})).toHaveClass(/tinted/)
+  await expect(card.getByRole('link')).toHaveCount(0)
+  await ownCard.getByLabel('Contact').check()
+  await expect(card.getByRole('link', {name: '@bob.b'})).toHaveAttribute('href', 'https://instagram.com/bob.b')
+  await ownCard.getByLabel('Contact').uncheck()
+  await expect(card.getByRole('link')).toHaveCount(0)
+  await expect(anne.locator('.theirs', {hasText: 'yes'})).toHaveClass(/tinted/)
+  await ownCard.getByRole('button', {name: 'Done'}).click()
+  await card.getByRole('button', {name: 'Done'}).click()
 
   // No invite button here; pairing again reopens the same chat instead of making another.
   await expect(anne.getByRole('button', {name: 'Invite', exact: true})).toHaveCount(0)
@@ -1427,7 +1434,8 @@ test('people have profiles: shown in every chat or only where turned on, with an
   await editor.getByLabel('Contact', {exact: true}).fill('anne@example.com')
   await editor.getByLabel('Profile photo').setInputFiles(photoFile(await makePhoto(anne, 1200, 900)))
   await expect(editor.getByRole('img', {name: 'Your profile photo'})).toBeVisible()
-  await editor.getByLabel('Every chat').check()
+  // Her icon, colour and photo go to every chat; her email only where she turns it on.
+  for (const part of ['icon', 'colour', 'photo']) await editor.getByLabel(`Show my ${part} in every chat`).check()
   await editor.getByRole('button', {name: 'Save'}).click()
   await expect(editor).toHaveCount(0)
 
@@ -1448,7 +1456,7 @@ test('people have profiles: shown in every chat or only where turned on, with an
   await bob.getByRole('button', {name: "Anne's profile"}).click()
   const card = bob.getByRole('dialog', {name: "Anne's profile"})
   await expect(card.getByRole('heading', {name: 'Anne'})).toBeVisible()
-  await expect(card.getByRole('link', {name: 'anne@example.com'})).toHaveAttribute('href', 'mailto:anne@example.com')
+  await expect(card.getByRole('link')).toHaveCount(0)
   const photo = card.getByRole('img', {name: 'Profile photo'})
   await expect(photo).toBeVisible({timeout: 20_000})
   expect(await photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800)
@@ -1471,7 +1479,7 @@ test('people have profiles: shown in every chat or only where turned on, with an
   await bobEditor.getByRole('button', {name: 'Purple'}).click()
   await bobEditor.getByLabel('Tiny photo for your icon').setInputFiles(photoFile(await makePhoto(bob, 600, 400)))
   await expect(bobEditor.locator('img.avatar')).toBeVisible()
-  await expect(bobEditor.getByLabel('Only chats where I turn it on')).toBeChecked()
+  for (const part of ['icon', 'colour']) await expect(bobEditor.getByLabel(`Show my ${part} in every chat`)).not.toBeChecked()
   await bobEditor.getByLabel('Name').fill('Bobby')
   await bobEditor.getByRole('button', {name: 'Save'}).click()
   await expect(bob.locator('.greeting')).toContainText('Hello, Bobby.')
@@ -1485,8 +1493,10 @@ test('people have profiles: shown in every chat or only where turned on, with an
   await own.getByRole('button', {name: 'React or copy'}).click()
   await bob.getByRole('button', {name: 'Your profile'}).click()
   const ownCard = bob.getByRole('dialog', {name: 'Your profile'})
-  await ownCard.getByLabel('Show my profile in this chat').check()
+  await ownCard.getByLabel('Colour').check()
   await expect(his).toHaveClass(/tinted/)
+  await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
+  await ownCard.getByLabel('Icon').check()
   await expect(his.locator('.author img.avatar')).toBeVisible()
   expect(await his.locator('.author img.avatar').evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([96, 96])
   if (process.env.SHOTS) {
@@ -1495,10 +1505,28 @@ test('people have profiles: shown in every chat or only where turned on, with an
     await bob.setViewportSize({width: 390, height: 700})
     await bob.screenshot({path: process.env.SHOTS + '/p-own.png'})
   }
-  await ownCard.getByLabel('Show my profile in this chat').uncheck()
+  await ownCard.getByLabel('Colour').uncheck()
+  await ownCard.getByLabel('Icon').uncheck()
   await expect(his).not.toHaveClass(/tinted/)
   await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
   await ownCard.getByRole('button', {name: 'Done'}).click()
+
+  // Anne's own profile here: what goes everywhere is fixed, and she lets this chat have her email.
+  const mine = anne.locator('.mine', {hasText: 'hello from anne'})
+  await mine.hover()
+  await mine.getByRole('button', {name: 'React or copy'}).click()
+  await anne.getByRole('button', {name: 'Your profile'}).click()
+  const anneCard = anne.getByRole('dialog', {name: 'Your profile'})
+  await expect(anneCard.getByLabel('Colour')).toBeChecked()
+  await expect(anneCard.getByLabel('Colour')).toBeDisabled()
+  await expect(anneCard.getByLabel('Contact')).not.toBeChecked()
+  await anneCard.getByLabel('Contact').check()
+  await anneCard.getByRole('button', {name: 'Done'}).click()
+  await hers.hover()
+  await hers.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: "Anne's profile"}).click()
+  await expect(bob.getByRole('link', {name: 'anne@example.com'})).toHaveAttribute('href', 'mailto:anne@example.com')
+  await bob.keyboard.press('Escape')
 
   // Anne's profile travels to a direct chat too, and opens from its header.
   if (process.env.SHOTS) {

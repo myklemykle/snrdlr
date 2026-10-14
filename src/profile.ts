@@ -16,29 +16,54 @@ export type Profile = {
   photo?: PictureRef
   contact?: {kind: ContactKind; value: string}
   color?: string
-  /** Shown in every chat; otherwise only in the chats listed. */
-  shareAll: boolean
-  chats: string[]
+  /** For each part, where it is shown: in every chat, or only in the chats listed. */
+  show: Record<Part, Showing>
 }
 
-type Stored = Omit<Profile, 'avatar' | 'photo'> & {avatar?: string; photo?: Omit<PictureRef, 'key' | 'preview'> & {key: string; preview: string}}
+/** The parts of a profile that can each be shown or kept back. The icon is the emoji or the tiny photo. */
+export const PARTS = ['icon', 'color', 'contact', 'photo'] as const
+export type Part = (typeof PARTS)[number]
+export const PART_LABELS: Record<Part, string> = {icon: 'Icon', color: 'Colour', contact: 'Contact', photo: 'Photo'}
+export type Showing = {everywhere: boolean; chats: string[]}
+
+const nowhere = (): Showing => ({everywhere: false, chats: []})
+const showNowhere = (): Record<Part, Showing> => ({icon: nowhere(), color: nowhere(), contact: nowhere(), photo: nowhere()})
+
+/** Whether the profile has anything in this part to show. */
+export const hasPart = (profile: Profile, part: Part) =>
+  part === 'icon' ? !!(profile.icon || profile.avatar) : part === 'contact' ? !!profile.contact?.value.trim() : !!profile[part]
+
+type Stored = Omit<Profile, 'avatar' | 'photo' | 'show'> & {
+  avatar?: string
+  photo?: Omit<PictureRef, 'key' | 'preview'> & {key: string; preview: string}
+  show?: Partial<Record<Part, Partial<Showing>>>
+  // Before each part had its own setting, one applied to the whole profile.
+  shareAll?: boolean
+  chats?: string[]
+}
 
 export function loadProfile(): Profile {
   try {
     const stored = JSON.parse(localStorage.getItem(SETTING) ?? 'null') as Stored | null
     if (stored && typeof stored === 'object') {
+      const {shareAll, chats, show, ...rest} = stored
+      const whole: Showing = {everywhere: shareAll === true, chats: Array.isArray(chats) ? chats : []}
+      const showing = showNowhere()
+      for (const part of PARTS) {
+        const kept = show?.[part]
+        showing[part] = kept ? {everywhere: kept.everywhere === true, chats: Array.isArray(kept.chats) ? kept.chats : []} : {...whole}
+      }
       return {
-        ...stored,
+        ...rest,
         avatar: stored.avatar ? fromHex(stored.avatar) : undefined,
         photo: stored.photo ? {...stored.photo, key: fromHex(stored.photo.key), preview: fromHex(stored.photo.preview)} : undefined,
-        shareAll: stored.shareAll === true,
-        chats: Array.isArray(stored.chats) ? stored.chats : []
+        show: showing
       }
     }
   } catch {
     // No storage, or nothing usable in it: an empty profile.
   }
-  return {shareAll: false, chats: []}
+  return {show: showNowhere()}
 }
 
 export function saveProfile(profile: Profile): void {
@@ -54,34 +79,33 @@ export function saveProfile(profile: Profile): void {
   }
 }
 
-/** The profile as a card, whether or not it is shown anywhere. */
-export function profileCard(profile: Profile): CardContent {
+/** The profile as a card: all of it, or with `chatId` only the parts shown in that chat. */
+export function profileCard(profile: Profile, chatId?: string): CardContent {
+  const shown = (part: Part) => chatId === undefined || showsIn(profile, part, chatId)
   return {
     type: 'card',
     // A tiny photo stands in place of the emoji.
-    ...(profile.avatar ? {avatar: profile.avatar} : profile.icon ? {icon: profile.icon} : {}),
-    ...(profile.photo ? {photo: profile.photo} : {}),
-    ...(profile.contact?.value.trim() ? {contact: {kind: profile.contact.kind, value: profile.contact.value.trim()}} : {}),
-    ...(profile.color ? {color: profile.color} : {})
+    ...(!shown('icon') ? {} : profile.avatar ? {avatar: profile.avatar} : profile.icon ? {icon: profile.icon} : {}),
+    ...(shown('photo') && profile.photo ? {photo: profile.photo} : {}),
+    ...(shown('contact') && profile.contact?.value.trim() ? {contact: {kind: profile.contact.kind, value: profile.contact.value.trim()}} : {}),
+    ...(shown('color') && profile.color ? {color: profile.color} : {})
   }
 }
 
-export const showsIn = (profile: Profile, chatId: string) => profile.shareAll || profile.chats.includes(chatId)
+export const showsIn = (profile: Profile, part: Part, chatId: string) => profile.show[part].everywhere || profile.show[part].chats.includes(chatId)
 
-/** Turns the profile on or off for one chat. */
-export function setShownIn(chatId: string, shown: boolean): Profile {
+/** Turns one part of the profile on or off for one chat. */
+export function setShownIn(chatId: string, part: Part, shown: boolean): Profile {
   const profile = loadProfile()
-  const chats = profile.chats.filter(id => id !== chatId)
-  const next = {...profile, chats: shown ? [...chats, chatId] : chats}
+  const chats = profile.show[part].chats.filter(id => id !== chatId)
+  const next = {...profile, show: {...profile.show, [part]: {...profile.show[part], chats: shown ? [...chats, chatId] : chats}}}
   saveProfile(next)
   return next
 }
 
 /** What to show in a chat: the card and its photo's file, or null if the profile is not shown there. */
 export async function cardFor(chatId: string, store: Store): Promise<CardToShare | null> {
-  const profile = loadProfile()
-  if (!showsIn(profile, chatId)) return null
-  const content = profileCard(profile)
+  const content = profileCard(loadProfile(), chatId)
   const photoFile = content.photo ? await store.getFile(PROFILE_FILES, content.photo.hash).catch(() => undefined) : undefined
   // A photo whose file has gone missing cannot be passed on.
   if (content.photo && !photoFile) delete content.photo
