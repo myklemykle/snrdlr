@@ -1107,3 +1107,202 @@ button:disabled {
 .rename button {
   padding: 0.55rem 0.7rem;
 }
+
+/* Profiles. */
+.greeting .hello {
+  flex: 1;
+  min-width: 0;
+}
+
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  object-fit: cover;
+  font-size: 0.7rem;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.avatar.initial {
+  color: #fff;
+  font-weight: 700;
+}
+
+.avatar.initial::before {
+  content: attr(data-initial);
+}
+
+.avatar.emoji {
+  font-size: 1rem;
+}
+
+.avatar.large {
+  width: 3.5rem;
+  height: 3.5rem;
+  font-size: 1.6rem;
+}
+
+.avatar.emoji.large {
+  font-size: 2.6rem;
+}
+
+.author {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* A person's colour: a wash of it over their messages, and their name in it. */
+.log .tinted {
+  background: color-mix(in srgb, var(--tint) 22%, var(--bubble));
+}
+
+.log .tinted .author {
+  color: color-mix(in srgb, var(--tint) 70%, var(--fg));
+}
+
+.chat header .person {
+  flex: none;
+  display: flex;
+  padding: 0.2rem;
+  border-radius: 50%;
+  border-color: transparent;
+}
+
+.chat header .person .avatar {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 1rem;
+}
+
+.sheet {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.sheet .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sheet .row.end {
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.profile-editor fieldset {
+  margin-top: 1rem;
+}
+
+.profile-editor label > input:not([type]) {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+}
+
+.profile-editor .row input {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.profile-editor .row button,
+.profile-editor select {
+  padding: 0.5rem 0.7rem;
+}
+
+.profile-editor select {
+  font: inherit;
+  font-size: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--bg);
+  color: inherit;
+}
+
+.swatch {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+}
+
+.swatches .swatch {
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 3px solid var(--bg);
+}
+
+.swatches .swatch.chosen {
+  box-shadow: 0 0 0 2px var(--fg);
+}
+
+.photo-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 10rem;
+  margin-bottom: 0.5rem;
+  border-radius: 0.6rem;
+}
+
+.sheet.profile .photo {
+  position: relative;
+  display: block;
+  max-height: 50dvh;
+  margin: -0.25rem auto 1rem;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.sheet.profile .photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sheet.profile .photo .blur {
+  filter: blur(12px);
+  transform: scale(1.15);
+}
+
+.sheet.profile .who {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.sheet.profile .who h2 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sheet.profile .contact {
+  margin: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+
+.sheet.profile .contact .kind {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.sheet.profile .contact a {
+  color: var(--accent);
+}
+
+/* Above a sheet, when the sheet opened it. */
+.over-sheet .picker {
+  z-index: 9;
+}

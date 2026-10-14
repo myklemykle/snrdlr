@@ -10,6 +10,7 @@ import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
 import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
+import {ProfileEditor} from './profile-view'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -348,6 +349,7 @@ function Main(props: {
         setInviteOnOpen(id)
         openChat(id)
       }}
+      onIdentity={onIdentity}
     />
   )
 }
@@ -478,8 +480,9 @@ function Home(props: {
   onStay: (on: boolean) => void
   onOpen: (id: string) => void
   onCreate: (id: string) => void
+  onIdentity: (identity: Identity) => void
 }) {
-  const {store, identity, notice, stay, keep, onStay, onOpen, onCreate} = props
+  const {store, identity, notice, stay, keep, onStay, onOpen, onCreate, onIdentity} = props
   // Offered on computers only: a phone's browser stops the page as soon as it is out of sight.
   const [desktop] = useState(() => matchMedia('(hover: hover) and (pointer: fine)').matches)
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
@@ -487,6 +490,8 @@ function Home(props: {
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  useUpdateHold(profileOpen)
   const update = useUpdateState()
   // The "running for" line is the only thing here that changes by the clock.
   const [now, setNow] = useState(Date.now)
@@ -582,7 +587,13 @@ function Home(props: {
     <main class="home">
       <h1>snrdlr</h1>
       <p class="greeting">
-        Hello, {identity.name}.
+        <span class="hello">Hello, {identity.name}.</span>
+        <button type="button" class="gear" aria-label="Your profile" onClick={() => setProfileOpen(true)}>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21c.6-4.2 3.8-6.5 8-6.5s7.400 2.300 8 6.500" />
+          </svg>
+        </button>
         <button type="button" class="gear" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3.2" />
@@ -591,6 +602,7 @@ function Home(props: {
         </button>
       </p>
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {profileOpen && <ProfileEditor store={store} identity={identity} onIdentity={onIdentity} onClose={() => setProfileOpen(false)} />}
       {notice && <p class="error">{notice}</p>}
 
       {chats && chats.length > 0 && <h2>Your chats</h2>}

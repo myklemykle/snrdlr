@@ -5,6 +5,7 @@ import {chatKeys, newGroupChat} from './chats'
 import {importMsgKey, sealEnvelope, type ImageContent} from './envelope'
 import {sealFile} from './files'
 import {issueCert} from './membership'
+import {latestCards} from './cards'
 import {tallyReactions} from './reactions'
 import {openSession, versionVector, type ConnectionStatus} from './session'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
@@ -708,6 +709,48 @@ describe('session', () => {
     const image: ImageContent = {type: 'image', hash: sealed.hash, key: sealed.key, size: sealed.data.length, width: 4, height: 3, preview: new Uint8Array([9])}
     return {image: caption ? {...image, caption} : image, file: sealed.data}
   }
+
+  it('shows a profile card in a chat, once, with its photo fetched by the others, and takes it back', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
+    await settle()
+    const {image, file} = await picture([1, 2, 3, 4])
+    const {hash, key, size, width, height, preview} = image
+    const content = {type: 'card', icon: '🦊', color: '#2f9e5b', photo: {hash, key, size, width, height, preview}} as const
+    const cardsFrom = (view: MessageRecord[]) => view.filter(m => m.content.type === 'card').map(m => m.content)
+
+    // Nothing shown and nothing to show: nothing is sent.
+    await anne.session.shareCard(null)
+    await anne.session.shareCard({content, photoFile: file})
+    // Asking again for the same card sends nothing more.
+    await anne.session.shareCard({content, photoFile: file})
+    await settle()
+    expect(cardsFrom(bob.view)).toEqual([content])
+    expect(latestCards(bob.view).get(anne.identity.id)).toEqual(content)
+    expect(bob.files.has(hash)).toBe(true)
+
+    // Taking it back is an empty card, after which she shows none.
+    await anne.session.shareCard(null)
+    await settle()
+    expect(cardsFrom(bob.view)).toEqual([content, {type: 'card'}])
+    expect(latestCards(bob.view).has(anne.identity.id)).toBe(false)
+  })
+
+  it('tells the chat again who we are after a change of name', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const store = await openStore(`session-renamed-${counter++}`)
+    const anne = createIdentity('Anne')
+    const first = await join(network, chat, anne, store)
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await settle()
+    await first.session.close()
+    await join(network, chat, {...anne, name: 'Annie'}, store)
+    await settle()
+    const said = bob.view.flatMap(m => (m.author === anne.id && m.content.type === 'profile' ? [m.content.name] : []))
+    expect(said).toEqual(['Anne', 'Annie'])
+  })
 
   it('sends a picture: the message at once, the file fetched by whoever lacks it', async () => {
     const network = makeNetwork()

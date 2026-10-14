@@ -178,6 +178,28 @@ describe('envelope', () => {
     }
   })
 
+  it('round-trips a profile card, full and empty, and refuses one with a part that is not what it should be', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const photo = {hash: 'cd'.repeat(32), key: new Uint8Array(32).fill(5), size: 1000, width: 4, height: 3, preview: new Uint8Array([1])}
+    const full = {type: 'card', avatar: new Uint8Array([1, 2, 3]), photo, contact: {kind: 'email', value: 'anne@example.com'}, color: '#2f9e5b'} as const
+    for (const content of [full, {type: 'card', icon: '🦊'}, {type: 'card'}] as const) {
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, {...hello, seq: 2, content}))).toEqual({...hello, seq: 2, content, author: anne.id})
+    }
+    const bad = [
+      {type: 'card', icon: 'fox'},
+      {type: 'card', color: 'red'},
+      {type: 'card', color: 'url(x)'},
+      {type: 'card', avatar: new Uint8Array(9000)},
+      {type: 'card', contact: {kind: 'email', value: 'x'.repeat(101)}},
+      {type: 'card', contact: {kind: 'fax', value: '1'}},
+      {type: 'card', photo: {...photo, size: 0}}
+    ]
+    for (const content of bad) {
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, {...hello, seq: 2, content: content as never}))).rejects.toThrow(/bad card body|bad picture/)
+    }
+  })
+
   it('round-trips an edit, and refuses one that names no message', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')

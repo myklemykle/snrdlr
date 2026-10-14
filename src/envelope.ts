@@ -42,6 +42,7 @@ export type Content =
   | {type: 'edit'; target: number; text: string}
   /** A new name for a group chat. Any member may give one; the latest is the chat's name. */
   | {type: 'rename'; name: string}
+  | CardContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -62,6 +63,30 @@ export type ImageContent = {
   caption?: string
   replyTo?: MessageRef
 }
+
+/** A file that travels beside the log, as an image message's picture does: what is needed to fetch, check and open it. */
+export type PictureRef = Pick<ImageContent, 'hash' | 'key' | 'size' | 'width' | 'height' | 'preview'>
+
+/**
+ * The extras of the author's profile that they show in this chat; every part is optional. Their latest
+ * replaces any earlier one, and an empty one takes it back.
+ */
+export type CardContent = {
+  type: 'card'
+  /** A single emoji. */
+  icon?: string
+  /** A tiny square JPEG, used in place of the emoji. */
+  avatar?: Uint8Array
+  /** A larger photo, fetched like any picture. */
+  photo?: PictureRef
+  contact?: {kind: 'email' | 'phone' | 'instagram' | 'other'; value: string}
+  /** Tints the author's messages: #rrggbb. */
+  color?: string
+}
+
+export const MAX_AVATAR_BYTES = 8192
+export const MAX_CONTACT_LENGTH = 100
+const CARD_CONTACTS = ['email', 'phone', 'instagram', 'other']
 
 export const IMAGE_MIME = 'image/jpeg'
 export const MAX_PREVIEW_BYTES = 2048
@@ -107,6 +132,25 @@ const boundBytes = (label: string, chatId: string, author: Uint8Array, seq: numb
 
 const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 
+const encodePicture = (picture: PictureRef) => ({
+  h: fromHex(picture.hash),
+  k: picture.key,
+  z: picture.size,
+  w: picture.width,
+  t: picture.height,
+  p: picture.preview
+})
+
+function decodePicture(body: Record<string, unknown>): PictureRef {
+  const {h, k, z, w, t, p} = body
+  const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
+  const isSide = (value: unknown): value is number => isCount(value) && value > 0 && value <= MAX_IMAGE_SIDE
+  if (!isBytes(h, 32) || !isBytes(k, FILE_KEY_BYTES)) throw new Error('bad picture')
+  if (!isCount(z) || z === 0 || z > MAX_FILE_BYTES || !isSide(w) || !isSide(t)) throw new Error('bad picture')
+  if (!(p instanceof Uint8Array) || p.length > MAX_PREVIEW_BYTES) throw new Error('bad picture')
+  return {hash: toHex(h), key: new Uint8Array(k), size: z, width: w, height: t, preview: new Uint8Array(p)}
+}
+
 const encodeRef = (ref: MessageRef) => [fromHex(ref.author), ref.seq]
 
 function decodeRef(value: unknown): MessageRef {
@@ -134,18 +178,24 @@ function encodeContent(content: Content): [string, unknown] {
         'image',
         {
           m: IMAGE_MIME,
-          h: fromHex(content.hash),
-          k: content.key,
-          z: content.size,
-          w: content.width,
-          t: content.height,
-          p: content.preview,
+          ...encodePicture(content),
           ...(content.caption ? {c: content.caption} : {}),
           ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
         }
       ]
     case 'rename':
       return ['rename', content.name]
+    case 'card':
+      return [
+        'card',
+        {
+          ...(content.icon ? {i: content.icon} : {}),
+          ...(content.avatar?.length ? {a: content.avatar} : {}),
+          ...(content.photo ? {p: encodePicture(content.photo)} : {}),
+          ...(content.contact ? {c: [content.contact.kind, content.contact.value]} : {}),
+          ...(content.color ? {o: content.color} : {})
+        }
+      ]
     case 'edit':
       return ['edit', {s: content.target, t: content.text}]
     case 'unknown':
@@ -162,6 +212,33 @@ function decodeContent(type: unknown, body: unknown): Content {
     const {t, r} = (body ?? {}) as Record<string, unknown>
     if (typeof t !== 'string' || t.length === 0 || t.length > MAX_TEXT_LENGTH) throw new Error('bad reply body')
     return {type: 'text', text: t, replyTo: decodeRef(r)}
+  }
+  if (type === 'card') {
+    const {i, a, p, c, o} = (body ?? {}) as Record<string, unknown>
+    const card: CardContent = {type}
+    if (i !== undefined) {
+      if (typeof i !== 'string' || !isSingleEmoji(i)) throw new Error('bad card body')
+      card.icon = i
+    }
+    if (a !== undefined) {
+      if (!(a instanceof Uint8Array) || a.length === 0 || a.length > MAX_AVATAR_BYTES) throw new Error('bad card body')
+      card.avatar = new Uint8Array(a)
+    }
+    if (p !== undefined) {
+      if (typeof p !== 'object' || p === null) throw new Error('bad card body')
+      card.photo = decodePicture(p as Record<string, unknown>)
+    }
+    if (c !== undefined) {
+      const [kind, value] = Array.isArray(c) && c.length === 2 ? (c as unknown[]) : []
+      if (typeof kind !== 'string' || !CARD_CONTACTS.includes(kind)) throw new Error('bad card body')
+      if (typeof value !== 'string' || value.trim() === '' || value.length > MAX_CONTACT_LENGTH) throw new Error('bad card body')
+      card.contact = {kind: kind as NonNullable<CardContent['contact']>['kind'], value}
+    }
+    if (o !== undefined) {
+      if (typeof o !== 'string' || !/^#[0-9a-f]{6}$/.test(o)) throw new Error('bad card body')
+      card.color = o
+    }
+    return card
   }
   if (type === 'rename') {
     if (typeof body !== 'string' || body.trim() === '' || body.length > MAX_NAME_LENGTH) throw new Error('bad rename body')
@@ -207,20 +284,17 @@ function decodeContent(type: unknown, body: unknown): Content {
     const {m, h, k, z, w, t, p, c, r} = (body ?? {}) as Record<string, unknown>
     // A kind of picture a newer version sends: keep the message for when this device can show it.
     if (typeof m === 'string' && m !== IMAGE_MIME && m.length <= 64) return {type: 'unknown', kind: 'image'}
-    const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
-    const isSide = (value: unknown): value is number => isCount(value) && value > 0 && value <= MAX_IMAGE_SIDE
-    if (m !== IMAGE_MIME || !isBytes(h, 32) || !isBytes(k, FILE_KEY_BYTES)) throw new Error('bad image body')
-    if (!isCount(z) || z === 0 || z > MAX_FILE_BYTES || !isSide(w) || !isSide(t)) throw new Error('bad image body')
-    if (!(p instanceof Uint8Array) || p.length > MAX_PREVIEW_BYTES) throw new Error('bad image body')
+    if (m !== IMAGE_MIME) throw new Error('bad image body')
+    let picture: PictureRef
+    try {
+      picture = decodePicture({h, k, z, w, t, p})
+    } catch {
+      throw new Error('bad image body')
+    }
     if (c !== undefined && (typeof c !== 'string' || c.length === 0 || c.length > MAX_TEXT_LENGTH)) throw new Error('bad image body')
     return {
       type,
-      hash: toHex(h),
-      key: new Uint8Array(k),
-      size: z,
-      width: w,
-      height: t,
-      preview: new Uint8Array(p),
+      ...picture,
       ...(c ? {caption: c as string} : {}),
       ...(r !== undefined ? {replyTo: decodeRef(r)} : {})
     }

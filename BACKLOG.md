@@ -32,7 +32,13 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Offer the picker from the message box on desktop too, where there is no emoji keyboard a click away.
   - Reactions will apply to images once those exist.
 - **Inviter approval.** Optionally have the inviter confirm each joiner by name. Left out on purpose for now: while a code is showing, everyone who scans it gets in, and it is the inviter's job not to be photographed.
-- **User profile.** Optional fields beyond the name, kept on the device, with a per-chat choice of whether to share it when joining a new chat. Profiles are already posted per chat, so the choice fits the current design.
+- **User profile.** First pass built: from the front page, a person sets an icon (emoji or tiny photo), a colour that tints their messages, one contact (email, phone, Instagram or other) and a larger photo, and can change their name. All optional but the name. Shown in every chat, or only in chats where it is turned on (from your own profile inside the chat). Others open it from a message's menu or the top of a direct chat. People who show nothing get their initial on a colour of their own, so two people with one name look different. Open:
+  - A change made on the front page reaches each chat when that chat next connects, not at once (a stay-connected tab can take a couple of hours).
+  - Taking a profile back only stops showing it; what was shown stays in other members' history. Say so more plainly, or build real deletion.
+  - No line in the chat when someone changes their name; the "joined" line keeps the old one.
+  - Own messages keep the app's blue rather than the person's own colour.
+  - The tiny photo is cut from the middle of the picture; no cropping tool.
+  - The profile is per device, like everything else.
 - **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.
 
 ### How a biometric lock would work

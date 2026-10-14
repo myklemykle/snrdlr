@@ -7,7 +7,8 @@
 // Authors: a message is only kept if its author is known to be a member. Members show that through the
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
-import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
+import {latestCards, sameCard} from './cards'
+import {importMsgKey, openEnvelope, sealEnvelope, type CardContent, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import type {Identity} from './identity'
 import {chatKeys, policyOf} from './chats'
@@ -67,6 +68,9 @@ export type SessionHandlers = {
   onFiles?: (held: ReadonlySet<string>) => void
 }
 
+/** A card to show in a chat, with the encrypted file of its photo if it has one. */
+export type CardToShare = {content: CardContent; photoFile?: Uint8Array}
+
 export type Session = {
   /** Sends words, optionally as a reply to an earlier message. */
   sendText: (text: string, replyTo?: MessageRef) => Promise<void>
@@ -74,6 +78,8 @@ export type Session = {
   postCert: (cert: Uint8Array) => Promise<void>
   /** In a direct chat: lets the other person into a group we have started. */
   postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
+  /** Shows this card as ours in the chat, or with null takes ours back. Does nothing if that is already so. */
+  shareCard: (card: CardToShare | null) => Promise<void>
   /** Gives a group chat a new name, for every member. */
   rename: (name: string) => Promise<void>
   /** Changes the words of one of our own messages, or a picture's caption. */
@@ -143,6 +149,8 @@ export async function openSession(options: {
   store: Store
   connect: (keys: ChatKeys, handlers: WireHandlers) => Wire | Promise<Wire>
   handlers: SessionHandlers
+  /** The card to show in this chat, or null to show none. Left out, whatever is showing stays. */
+  card?: CardToShare | null
   errorDelayMs?: number
 }): Promise<Session> {
   const {chat, identity, store, handlers} = options
@@ -228,8 +236,10 @@ export async function openSession(options: {
   let serving: Promise<void> = Promise.resolve()
   const publishFiles = () => handlers.onFiles?.(new Set(heldFiles))
   const missingFiles = () => {
-    const missing = new Map<string, ImageContent>()
+    const missing = new Map<string, {size: number}>()
     for (const {content} of messages) if (content.type === 'image' && !heldFiles.has(content.hash)) missing.set(content.hash, content)
+    // Profile photos too, but only the one each person is showing now.
+    for (const {photo} of latestCards(messages).values()) if (photo && !heldFiles.has(photo.hash)) missing.set(photo.hash, photo)
     return missing
   }
   function fetchFiles() {
@@ -323,7 +333,7 @@ export async function openSession(options: {
     // Already stored but not on screen: another session of this chat (a background sync, another tab)
     // stored it after we loaded the history. Without this it would stay hidden until a reload.
     if (!closed && (isNew || !holds(record.author, record.seq))) insert(record)
-    if (record.content.type === 'image') fetchFiles()
+    if (record.content.type === 'image' || record.content.type === 'card') fetchFiles()
   }
 
   /** Takes in a message from the network. Returns its author, or null if it was not a genuine message. */
@@ -442,9 +452,26 @@ export async function openSession(options: {
     ({author, content}) =>
       author === identity.id && content.type === 'profile' && (chat.chain.length === 0 || (content.chain?.length ?? 0) > 0)
   )
-  if (!introduced) {
+  // And again if we have changed our name since: each member's latest is what they are called.
+  const called = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')?.content
+  if (!introduced || (called?.type === 'profile' && identity.name !== '' && called.name !== identity.name)) {
     await post({type: 'profile', name: identity.name, dh: identity.dhPublic, ...(chat.chain.length > 0 ? {chain: chat.chain} : {})})
   }
+
+  /** Makes the card we show in this chat match what is wanted; null means show none. */
+  async function shareCard(wanted: CardToShare | null) {
+    const shown = messages.findLast(({author, content}) => author === identity.id && content.type === 'card')?.content
+    const card: CardContent = wanted?.content ?? {type: 'card'}
+    // Nothing shown and nothing to show; or already showing exactly this.
+    if (shown?.type === 'card' ? sameCard(shown, card) : !wanted) return
+    if (card.photo && wanted?.photoFile) {
+      await store.putFile(chat.id, card.photo.hash, wanted.photoFile)
+      heldFiles.add(card.photo.hash)
+      publishFiles()
+    }
+    await post(card)
+  }
+  if (options.card !== undefined) await shareCard(options.card)
 
   // Catches anything missed in between, for example when not every pair of members is directly connected.
   const resync = setInterval(() => {
@@ -457,6 +484,7 @@ export async function openSession(options: {
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
     rename: name => post({type: 'rename', name}),
+    shareCard,
     edit: (seq, text) => post({type: 'edit', target: seq, text}),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
     async postImage(image, file) {

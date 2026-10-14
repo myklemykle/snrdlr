@@ -1,5 +1,6 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, unclaimChat} from './background'
+import {cardIsEmpty, latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
@@ -11,6 +12,8 @@ import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
+import {cardFor, loadProfile, profileCard, setShownIn, showsIn} from './profile'
+import {Avatar, ProfileCard} from './profile-view'
 import {QrCode} from './qr'
 import {messageKey, QUICK_REACTIONS, tallyReactions} from './reactions'
 import {describeRoutes, type Route} from './route'
@@ -91,6 +94,7 @@ export function ChatScreen(props: {
         chat,
         identity,
         store,
+        card: await cardFor(chat.id, store),
         // Fetched on every (re)connect, so long-open chats never reuse expired TURN credentials.
         connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity)),
         handlers: {
@@ -231,6 +235,15 @@ export function ChatScreen(props: {
   )
   const reactions = useMemo(() => tallyReactions(messages ?? []), [messages])
   const edits = useMemo(() => latestEdits(messages ?? []), [messages])
+  // What each person shows of their profile in this chat, and whose profile is open.
+  const cards = useMemo(() => latestCards(messages ?? []), [messages])
+  const [profileOf, setProfileOf] = useState<string | null>(null)
+  const [ownProfile, setOwnProfile] = useState(loadProfile)
+  const showOwnProfile = async (shown: boolean) => {
+    setOwnProfile(setShownIn(chat.id, shown))
+    await session.current?.shareCard(await cardFor(chat.id, store)).catch(() => setError('Your profile could not be sent.'))
+  }
+  const peerId = chat.peer ? memberId(chat.peer.signPublic) : null
   /** What a message says now: its words or its caption, as last edited. */
   const wordsOf = (message: MessageRecord) => {
     const {content} = message
@@ -543,7 +556,7 @@ export function ChatScreen(props: {
   }
 
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null)
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null || profileOf !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -641,6 +654,11 @@ export function ChatScreen(props: {
         ) : (
         <div class="title">
           <div class="name">
+            {peerId && (
+              <button type="button" class="person" aria-label={`${chatName}'s profile`} onClick={() => setProfileOf(peerId)}>
+                <Avatar card={cards.get(peerId)} name={chatName} id={peerId} />
+              </button>
+            )}
             <h1>{chatName}</h1>
             {!direct && (
               <button type="button" class="pencil" aria-label="Rename chat" disabled={!messages} onClick={() => setRenaming(chatName)}>
@@ -751,6 +769,7 @@ export function ChatScreen(props: {
           const tallies = reactions.get(key)
           const own = ownReaction(message)
           const open = menu === key
+          const card = cards.get(message.author)
           const replied = message.content.replyTo
           const original = replied && byKey.get(messageKey(replied))
           const quote = original && quoteOf(original)
@@ -759,7 +778,8 @@ export function ChatScreen(props: {
             <li
               key={key}
               data-key={key}
-              class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size && !replied ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}${marked === key || (editing && messageKey(editing) === key) ? ' marked' : ''}`}
+              class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size && !replied ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}${marked === key || (editing && messageKey(editing) === key) ? ' marked' : ''}${!mine && card?.color ? ' tinted' : ''}`}
+              style={!mine && card?.color ? {'--tint': card.color} : undefined}
               onPointerDown={event => startPress(event, key)}
               onPointerMove={movePress}
               onPointerUp={cancelPress}
@@ -768,7 +788,12 @@ export function ChatScreen(props: {
               // A long press must open our menu, not the browser's.
               onContextMenu={event => (press.current || open) && event.preventDefault()}
             >
-              {!mine && <span class="author">{nameOf(message.author)}</span>}
+              {!mine && (
+                <span class="author">
+                  <Avatar card={card} name={nameOf(message.author)} id={message.author} />
+                  {nameOf(message.author)}
+                </span>
+              )}
               {replied &&
                 (quote ? (
                   <button
@@ -848,6 +873,16 @@ export function ChatScreen(props: {
                   <button type="button" class="reply" onClick={() => replyTo(message)}>
                     Reply
                   </button>
+                  <button
+                    type="button"
+                    class="reply"
+                    onClick={() => {
+                      setMenu(null)
+                      setProfileOf(message.author)
+                    }}
+                  >
+                    {mine ? 'Your profile' : `${nameOf(message.author)}'s profile`}
+                  </button>
                   {mine && (
                     <button type="button" class="reply" onClick={() => startEditing(message)}>
                       {image ? (text ? 'Edit caption' : 'Add a caption') : 'Edit'}
@@ -870,6 +905,22 @@ export function ChatScreen(props: {
       {picking && <EmojiPicker onPick={emoji => react(picking, emoji, false)} onClose={() => setPicking(null)} />}
 
       {viewing && <ImageViewer url={viewing} onClose={() => setViewing(null)} />}
+      {profileOf && (
+        <ProfileCard
+          name={profileOf === identity.id ? identity.name : profileOf === peerId ? chatName : nameOf(profileOf)}
+          id={profileOf}
+          card={cards.get(profileOf)}
+          store={store}
+          chatId={chat.id}
+          files={files}
+          own={
+            profileOf === identity.id
+              ? {shown: showsIn(ownProfile, chat.id), everywhere: ownProfile.shareAll, empty: cardIsEmpty(profileCard(ownProfile)), onShow: showOwnProfile}
+              : undefined
+          }
+          onClose={() => setProfileOf(null)}
+        />
+      )}
 
       {replyingTo && (
         <p class="replying">

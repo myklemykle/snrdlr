@@ -344,6 +344,23 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await send(bob, 'yes')
   await expect(anne.locator('.theirs', {hasText: 'yes'})).toBeVisible()
 
+  // The other person's profile opens from the top of a direct chat. Bob shows none yet; when he turns
+  // his on here, Anne's view of it fills in.
+  await anne.getByRole('button', {name: "Bob's profile"}).click()
+  const card = anne.getByRole('dialog', {name: "Bob's profile"})
+  await expect(card).toContainText("Bob isn't showing a profile in this chat.")
+  await bob.evaluate(() => localStorage.setItem('snrdlr.profile', JSON.stringify({color: '#8a56d6', contact: {kind: 'instagram', value: '@bob.b'}, shareAll: false, chats: []})))
+  await bob.reload()
+  const own = bob.locator('.mine', {hasText: 'yes'})
+  await own.hover()
+  await own.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'Your profile'}).click()
+  await bob.getByLabel('Show my profile in this chat').check()
+  await bob.getByRole('button', {name: 'Done'}).click()
+  await expect(card.getByRole('link', {name: '@bob.b'})).toHaveAttribute('href', 'https://instagram.com/bob.b')
+  await card.getByRole('button', {name: 'Done'}).click()
+  await expect(anne.locator('.theirs', {hasText: 'yes'})).toHaveClass(/tinted/)
+
   // No invite button here; pairing again reopens the same chat instead of making another.
   await expect(anne.getByRole('button', {name: 'Invite', exact: true})).toHaveCount(0)
   await bob.getByRole('button', {name: 'Back to chats'}).click()
@@ -1390,6 +1407,111 @@ test('the build publishes its own version, which matches the one on screen', asy
   const {build} = await (await page.request.get('/version.json')).json()
   await expect(page.locator('.build')).toContainText(`Version ${build}`)
   await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
+})
+
+test('people have profiles: shown in every chat or only where turned on, with an icon, colour, contact and photo', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+
+  // Anne fills in everything and shows it everywhere.
+  await anne.getByRole('button', {name: 'Your profile'}).click()
+  const editor = anne.getByRole('dialog', {name: 'Your profile'})
+  await editor.getByRole('button', {name: 'Emoji'}).click()
+  const picker = anne.getByRole('dialog', {name: 'Choose an emoji'})
+  await anne.keyboard.type('fox')
+  await picker.getByRole('button', {name: 'fox', exact: true}).click()
+  await expect(editor.locator('.avatar.emoji')).toHaveText('🦊')
+  await editor.getByRole('button', {name: 'Green'}).click()
+  await editor.getByLabel('Kind of contact').selectOption('email')
+  await editor.getByLabel('Contact', {exact: true}).fill('anne@example.com')
+  await editor.getByLabel('Profile photo').setInputFiles(photoFile(await makePhoto(anne, 1200, 900)))
+  await expect(editor.getByRole('img', {name: 'Your profile photo'})).toBeVisible()
+  await editor.getByLabel('Every chat').check()
+  await editor.getByRole('button', {name: 'Save'}).click()
+  await expect(editor).toHaveCount(0)
+
+  await anne.getByLabel('Chat name').fill('Profiles')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  const invite = await copyInvite(anne)
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await send(anne, 'hello from anne')
+  await send(bob, 'hello from bob')
+
+  // Bob sees her icon and colour on her messages, and the rest in her profile.
+  const hers = bob.locator('.theirs', {hasText: 'hello from anne'})
+  await expect(hers).toHaveClass(/tinted/)
+  await expect(hers.locator('.author .avatar')).toHaveText('🦊')
+  await hers.hover()
+  await hers.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: "Anne's profile"}).click()
+  const card = bob.getByRole('dialog', {name: "Anne's profile"})
+  await expect(card.getByRole('heading', {name: 'Anne'})).toBeVisible()
+  await expect(card.getByRole('link', {name: 'anne@example.com'})).toHaveAttribute('href', 'mailto:anne@example.com')
+  const photo = card.getByRole('img', {name: 'Profile photo'})
+  await expect(photo).toBeVisible({timeout: 20_000})
+  expect(await photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800)
+  await card.getByRole('button', {name: 'Done'}).click()
+
+  // Bob shows nothing: Anne sees his initial, no tint, and a profile that says so.
+  const his = anne.locator('.theirs', {hasText: 'hello from bob'})
+  await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
+  await expect(his).not.toHaveClass(/tinted/)
+  await his.hover()
+  await his.getByRole('button', {name: 'React or copy'}).click()
+  await anne.getByRole('button', {name: "Bob's profile"}).click()
+  await expect(anne.getByRole('dialog', {name: "Bob's profile"})).toContainText("Bob isn't showing a profile in this chat.")
+  await anne.keyboard.press('Escape')
+
+  // Bob picks a colour and a tiny photo, kept to chats where he turns it on. This chat still shows nothing.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await bob.getByRole('button', {name: 'Your profile'}).click()
+  const bobEditor = bob.getByRole('dialog', {name: 'Your profile'})
+  await bobEditor.getByRole('button', {name: 'Purple'}).click()
+  await bobEditor.getByLabel('Tiny photo for your icon').setInputFiles(photoFile(await makePhoto(bob, 600, 400)))
+  await expect(bobEditor.locator('img.avatar')).toBeVisible()
+  await expect(bobEditor.getByLabel('Only chats where I turn it on')).toBeChecked()
+  await bobEditor.getByLabel('Name').fill('Bobby')
+  await bobEditor.getByRole('button', {name: 'Save'}).click()
+  await expect(bob.locator('.greeting')).toContainText('Hello, Bobby.')
+  await chatEntry(bob, 'Profiles').click()
+  await expect(anne.locator('.theirs', {hasText: 'hello from bob'}).locator('.author')).toContainText('Bobby')
+  await expect(his).not.toHaveClass(/tinted/)
+
+  // He turns it on here, from his own profile in the chat; then off again.
+  const own = bob.locator('.mine', {hasText: 'hello from bob'})
+  await own.hover()
+  await own.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'Your profile'}).click()
+  const ownCard = bob.getByRole('dialog', {name: 'Your profile'})
+  await ownCard.getByLabel('Show my profile in this chat').check()
+  await expect(his).toHaveClass(/tinted/)
+  await expect(his.locator('.author img.avatar')).toBeVisible()
+  expect(await his.locator('.author img.avatar').evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([96, 96])
+  if (process.env.SHOTS) {
+    await anne.setViewportSize({width: 390, height: 700})
+    await anne.screenshot({path: process.env.SHOTS + '/p-chat.png'})
+    await bob.setViewportSize({width: 390, height: 700})
+    await bob.screenshot({path: process.env.SHOTS + '/p-own.png'})
+  }
+  await ownCard.getByLabel('Show my profile in this chat').uncheck()
+  await expect(his).not.toHaveClass(/tinted/)
+  await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
+  await ownCard.getByRole('button', {name: 'Done'}).click()
+
+  // Anne's profile travels to a direct chat too, and opens from its header.
+  if (process.env.SHOTS) {
+    await bob.locator('.theirs', {hasText: 'hello from anne'}).hover()
+    await bob.locator('.theirs', {hasText: 'hello from anne'}).getByRole('button', {name: 'React or copy'}).click()
+    await bob.getByRole('button', {name: "Anne's profile"}).click()
+    await expect(bob.getByRole('img', {name: 'Profile photo'})).toBeVisible()
+    await bob.screenshot({path: process.env.SHOTS + '/p-card.png'})
+    await bob.keyboard.press('Escape')
+    await anne.getByRole('button', {name: 'Back to chats'}).click()
+    await anne.getByRole('button', {name: 'Your profile'}).click()
+    await anne.screenshot({path: process.env.SHOTS + '/p-edit.png', fullPage: true})
+  }
 })
 
 test('on a small phone, a home screen longer than the screen scrolls all the way to its top and bottom', async ({browser}) => {

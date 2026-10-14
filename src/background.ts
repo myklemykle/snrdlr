@@ -6,6 +6,7 @@
 // Keep: every chat's room stays joined for as long as the page is open. A computer left running this
 // way is always there to take a message from one member and hand it to another who comes online
 // later. It is an ordinary member doing what any member's device does for the chat on screen.
+import {cardFor} from './profile'
 import type {Identity} from './identity'
 import type {ChatKeys} from './keys'
 import {openSession, type Session, type Wire, type WireHandlers} from './session'
@@ -101,6 +102,7 @@ function syncOnce(
       chat,
       identity,
       store,
+      card: await cardFor(chat.id, store),
       connect: connectFor(chat),
       handlers: {
         onMessages: announceNews(chat.id, identity.id, stored, () => (lastActivity = Date.now())),
@@ -188,6 +190,7 @@ function hold(chat: ChatRecord, identity: Identity, store: Store, connectFor: Co
       chat,
       identity,
       store,
+      card: await cardFor(chat.id, store),
       connect: connectFor(chat),
       handlers: {
         onMessages: announceNews(chat.id, identity.id, stored),
