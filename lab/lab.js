@@ -44,9 +44,12 @@ const LAB_TOPIC = 'snrdlr-lab-push-test'
   }
 
   // A notification tap that is meant to go on to Safari passes through here first.
+  // The app then carries on showing its own page; left on an empty one, it looked stuck when you came back.
   if (params.get('forward') === '1') {
+    history.replaceState(null, '', '/lab/?via=' + encodeURIComponent(via + ' (sent on to Safari)'))
     location.href = 'x-safari-' + root + '/lab/?via=' + encodeURIComponent(via + ', forwarded') + '&t=' + sent
-    return
+    via = via + ' (sent on to Safari)'
+    sent = 0
   }
 
   var ms = via && sent ? Date.now() - sent : null
