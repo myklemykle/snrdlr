@@ -1348,6 +1348,28 @@ test('the build publishes its own version, which matches the one on screen', asy
   await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
 })
 
+test('on a small phone, a home screen longer than the screen scrolls all the way to its top and bottom', async ({browser}) => {
+  const context = await browser.newContext({hasTouch: true, isMobile: true, viewport: {width: 375, height: 667}})
+  await context.addInitScript(() => localStorage.setItem('snrdlr.invited', '1'))
+  const phone = await context.newPage()
+  await phone.goto('/')
+  await introduce(phone, 'Phone')
+  for (let count = 1; count <= 8; count++) {
+    await phone.getByLabel('Chat name').fill(`Chat ${count}`)
+    await phone.getByRole('button', {name: 'Start a group'}).click()
+    await phone.getByRole('button', {name: 'Back to chats'}).click()
+  }
+  await expect(phone.locator('.chats .open')).toHaveCount(8)
+  expect(await phone.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(667)
+  await phone.evaluate(() => scrollTo(0, 0))
+  const top = (await phone.getByRole('heading', {name: 'snrdlr', exact: true}).boundingBox())!
+  expect(top.y).toBeGreaterThanOrEqual(0)
+  await expect(phone.getByRole('button', {name: 'Settings'})).toBeInViewport()
+  await expect(phone.getByRole('heading', {name: 'Your chats'})).toBeInViewport()
+  await phone.evaluate(() => scrollTo(0, document.documentElement.scrollHeight))
+  await expect(phone.locator('.build')).toBeInViewport()
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

@@ -79,7 +79,6 @@ export function ChatScreen(props: {
   const heard = useRef<number | null>(null)
   // Which pictures' files are on this device.
   const [files, setFiles] = useState<ReadonlySet<string>>(new Set())
-  const logEnd = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -248,18 +247,40 @@ export function ChatScreen(props: {
   }
   // A new line in the log scrolls to the end. A reaction changes no line, so it only does so if the end
   // was already in view; reacting to an old message must not jump away from it.
+  // Only ever the log itself is scrolled. Asking the browser to bring a line into view can also slide
+  // the whole page, which on an iPhone puts the message box under the keyboard.
+  const toEnd = () => {
+    const element = log.current
+    if (element) element.scrollTop = element.scrollHeight
+  }
   const lineCount = useRef(-1)
   useEffect(() => {
-    if (shown.length !== lineCount.current || atEnd.current) logEnd.current?.scrollIntoView({block: 'end'})
+    if (shown.length !== lineCount.current || atEnd.current) toEnd()
     lineCount.current = shown.length
   }, [messages])
+  // An iPhone's keyboard covers the bottom of the page instead of making the page shorter, and Safari
+  // then slides the page up to show where the typing is. So the chat is made as tall as what is
+  // actually visible and the page is held at the top: the message box sits just above the keyboard,
+  // and the chat's name stays on screen.
+  const screen = useRef<HTMLElement>(null)
   useEffect(() => {
-    const keepEnd = () => atEnd.current && logEnd.current?.scrollIntoView({block: 'end'})
-    window.addEventListener('resize', keepEnd)
-    window.visualViewport?.addEventListener('resize', keepEnd)
+    const viewport = window.visualViewport
+    const fit = () => {
+      // Zoomed in, the visible part is small because of the zoom, and must be free to move about.
+      if (viewport && viewport.scale <= 1.01) {
+        screen.current?.style.setProperty('--visible-height', `${viewport.height}px`)
+        if (window.scrollY !== 0 || viewport.offsetTop !== 0) window.scrollTo(0, 0)
+      }
+      if (atEnd.current) toEnd()
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    viewport?.addEventListener('resize', fit)
+    viewport?.addEventListener('scroll', fit)
     return () => {
-      window.removeEventListener('resize', keepEnd)
-      window.visualViewport?.removeEventListener('resize', keepEnd)
+      window.removeEventListener('resize', fit)
+      viewport?.removeEventListener('resize', fit)
+      viewport?.removeEventListener('scroll', fit)
     }
   }, [])
 
@@ -305,7 +326,7 @@ export function ChatScreen(props: {
   const filePicker = useRef<HTMLInputElement>(null)
   // The strip of pictures waiting to be sent takes room from the log; keep the newest message in view.
   useEffect(() => {
-    if (atEnd.current) logEnd.current?.scrollIntoView({block: 'end'})
+    if (atEnd.current) toEnd()
   }, [attached.length, preparing > 0])
   const attachedCount = useRef(0)
   attachedCount.current = attached.length + preparing
@@ -334,7 +355,7 @@ export function ChatScreen(props: {
   const [replyingTo, setReplyingTo] = useState<MessageRecord | null>(null)
   const messageBox = useRef<HTMLInputElement>(null)
   useEffect(() => {
-    if (atEnd.current) logEnd.current?.scrollIntoView({block: 'end'})
+    if (atEnd.current) toEnd()
   }, [replyingTo])
   // The messages a reply can point at.
   const byKey = useMemo(() => {
@@ -366,9 +387,11 @@ export function ChatScreen(props: {
   const markTimer = useRef(0)
   useEffect(() => () => clearTimeout(markTimer.current), [])
   const showMessage = (key: string) => {
-    const line = [...(log.current?.children ?? [])].find(element => (element as HTMLElement).dataset.key === key)
-    if (!line) return
-    line.scrollIntoView({block: 'center', behavior: 'smooth'})
+    const element = log.current
+    const line = [...(element?.children ?? [])].find(child => (child as HTMLElement).dataset.key === key)
+    if (!element || !line) return
+    const [frame, box] = [element.getBoundingClientRect(), line.getBoundingClientRect()]
+    element.scrollTo({top: element.scrollTop + box.top - frame.top - Math.max(0, (frame.height - box.height) / 2), behavior: 'smooth'})
     setMarked(key)
     clearTimeout(markTimer.current)
     markTimer.current = window.setTimeout(() => setMarked(null), 1600)
@@ -437,6 +460,13 @@ export function ChatScreen(props: {
     menuOpenedAt.current = Date.now()
     setPicking(null)
     setMenu(key)
+  }
+  /** Scrolls the log just far enough that a menu hanging below its message is all in view. */
+  const showMenu = (opened: HTMLElement | null) => {
+    const element = log.current
+    if (!opened || !element) return
+    const below = opened.getBoundingClientRect().bottom + 8 - element.getBoundingClientRect().bottom
+    if (below > 0) element.scrollTop += below
   }
   const closeMenu = () => {
     // The finger that opened the menu by pressing also lifts; that must not count as a tap outside it.
@@ -561,6 +591,7 @@ export function ChatScreen(props: {
 
   return (
     <main
+      ref={screen}
       class="chat"
       // Pictures can be dropped anywhere on the chat.
       onDragOver={event => event.dataTransfer?.types.includes('Files') && event.preventDefault()}
@@ -743,7 +774,7 @@ export function ChatScreen(props: {
                 ☺
               </button>
               {open && (
-                <div class="menu" ref={element => element?.scrollIntoView({block: 'nearest'})}>
+                <div class="menu" ref={showMenu}>
                   <div class="quick">
                     {QUICK_REACTIONS.map(emoji => (
                       <button key={emoji} type="button" class={own === emoji ? 'own' : ''} aria-label={`React ${emoji}`} onClick={() => react(message, emoji)}>
@@ -781,7 +812,6 @@ export function ChatScreen(props: {
             </li>
           ]
         })}
-        <div ref={logEnd} />
       </ol>
 
       {(menu || picking) && <div class="menu-backdrop" onClick={closeMenu} />}
