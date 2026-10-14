@@ -60,19 +60,27 @@ export function unclaimChat(chatId: string): void {
 }
 
 /** Tells listeners when other people's messages arrive in a chat that is not on screen. */
-function announceNews(chatId: string, selfId: string, onNews?: () => void) {
-  let held: number | null = null
-  let heldSaid = 0
-  return (messages: {author: string; content: {type: string}}[]) => {
-    // Only other people's messages count; our own "joined" message is not news.
+type Counted = {author: string; content: {type: string}}
+
+/**
+ * `stored` is what the device held before connecting. News is measured against that, not against the
+ * first report from the session, which can already include something that has just arrived.
+ */
+function announceNews(chatId: string, selfId: string, stored: Counted[], onNews?: () => void) {
+  // Only other people's messages count; our own "joined" message is not news.
+  const count = (messages: Counted[]) => {
     const others = messages.filter(message => message.author !== selfId)
-    const said = others.filter(({content}) => content.type === 'text' || content.type === 'image').length
-    if (held !== null && others.length !== held) {
+    return {held: others.length, said: others.filter(({content}) => content.type === 'text' || content.type === 'image').length}
+  }
+  let {held, said: heldSaid} = count(stored)
+  return (messages: Counted[]) => {
+    const now = count(messages)
+    if (now.held !== held) {
       onNews?.()
-      listeners.forEach(listener => listener(chatId, said > heldSaid))
+      listeners.forEach(listener => listener(chatId, now.said > heldSaid))
     }
-    held = others.length
-    heldSaid = said
+    held = now.held
+    heldSaid = now.said
   }
 }
 
@@ -88,13 +96,14 @@ function syncOnce(
     const startedAt = Date.now()
     let lastActivity = startedAt
     let someoneThere = false
+    const stored = await store.listMessages(chat.id)
     const session = await openSession({
       chat,
       identity,
       store,
       connect: connectFor(chat),
       handlers: {
-        onMessages: announceNews(chat.id, identity.id, () => (lastActivity = Date.now())),
+        onMessages: announceNews(chat.id, identity.id, stored, () => (lastActivity = Date.now())),
         onPeersChange: peerIds => {
           if (peerIds.length > 0) someoneThere = true
         },
@@ -174,13 +183,14 @@ function hold(chat: ChatRecord, identity: Identity, store: Store, connectFor: Co
   let session: Session | null = null
   let peers = 0
   const done = (async () => {
+    const stored = await store.listMessages(chat.id)
     session = await openSession({
       chat,
       identity,
       store,
       connect: connectFor(chat),
       handlers: {
-        onMessages: announceNews(chat.id, identity.id),
+        onMessages: announceNews(chat.id, identity.id, stored),
         onPeersChange: peerIds => {
           peers = peerIds.length
           onChange()
