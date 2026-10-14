@@ -30,6 +30,10 @@ export default defineConfig({
   ],
   // Small files would otherwise be folded into the script itself. The shortest sounds are that small,
   // and would then be downloaded by everyone, whichever sound set they use.
-  build: {assetsInlineLimit: 0},
+  // The lab pages are throwaway experiments on what phones allow; see lab/lab.js.
+  build: {
+    assetsInlineLimit: 0,
+    rollupOptions: {input: {main: 'index.html', lab: 'lab/index.html', labOut: 'lab-out/index.html'}}
+  },
   define: {__BUILD__: JSON.stringify(build)}
 })

@@ -1,6 +1,15 @@
 // A throwaway test page: on an iPhone, what opens where, and how long it takes.
 // Each copy of the page (Safari, the Home Screen app, an in-app browser sheet) has its own storage,
 // so the name kept in localStorage says which copy a page is running in.
+import {relayMailboxes} from '../src/mailbox'
+import {RELAYS} from '../src/relays'
+import {utf8} from '../src/bytes'
+
+// A throwaway key pair made for this test; the private half is only on the developer's computer.
+const VAPID_PUBLIC = 'BInpCTgdhVfpP1fAls7j9n1DnAwp7Ryf_oghPWfG2yy-giNgvKmslkMz3mK5Cxx8ABmJd_snsSxlkcgwGU4OlTw'
+// Where the phone leaves its push address for the developer to pick up.
+const LAB_TOPIC = 'snrdlr-lab-push-test'
+
 ;(function () {
   var params = new URLSearchParams(location.search)
   var via = params.get('via')
@@ -113,28 +122,67 @@
 
   add(el('h2', null, 'Notifications'))
   add(el('p', null, 'These only work in the Home Screen app. After tapping one of the "Show" buttons, go to the Home Screen, pull down Notification Center if no banner appears, and tap the notification.'))
-  var status = add(el('p'))
+  var status = add(el('div', {class: 'where'}))
+  var steps = []
+  function say(line) {
+    steps.push(new Date().toLocaleTimeString() + ' ' + line)
+    showStatus()
+  }
   function showStatus() {
-    status.textContent = 'Permission: ' + (window.Notification ? Notification.permission : 'not available here')
+    status.textContent = ''
+    status.appendChild(el('div', null, 'Permission: ' + (window.Notification ? Notification.permission : 'not available here')))
+    status.appendChild(el('div', null, 'Push: ' + ('PushManager' in window ? 'available' : 'not available here')))
+    steps.slice(-8).forEach(function (line) {
+      status.appendChild(el('div', null, line))
+    })
   }
   showStatus()
-  var registration = 'serviceWorker' in navigator ? navigator.serviceWorker.register('/lab/sw.js', {scope: '/lab/'}) : null
+  var registration = null
+  if ('serviceWorker' in navigator) {
+    registration = navigator.serviceWorker.register('/lab/sw.js', {scope: '/lab/'})
+    registration.then(
+      function (found) {
+        say('Service worker: ' + (found.active ? 'active' : found.installing ? 'installing' : found.waiting ? 'waiting' : 'registered'))
+      },
+      function (error) {
+        say('Service worker failed: ' + error)
+      }
+    )
+  } else say('No service workers here.')
+  // Waits for the service worker, but says so if it never turns up.
+  function ready() {
+    if (!registration) return Promise.reject(new Error('no service worker'))
+    return Promise.race([
+      registration.then(function () {
+        return navigator.serviceWorker.ready
+      }),
+      new Promise(function (_, reject) {
+        setTimeout(function () {
+          reject(new Error('the service worker never became ready'))
+        }, 8000)
+      })
+    ])
+  }
   button('Allow notifications', 'Asks once.', function () {
-    if (!window.Notification) return
-    Notification.requestPermission().then(showStatus)
+    if (!window.Notification) return say('Notifications are not available here.')
+    Notification.requestPermission().then(function (answer) {
+      say('Asked: ' + answer)
+    })
   })
   function notify(mode, body) {
-    if (!registration) return alert('No service worker here.')
-    registration
-      .then(function () {
-        return navigator.serviceWorker.ready
+    say('Showing (' + mode + ')…')
+    ready()
+      .then(function (worker) {
+        return worker.showNotification('snrdlr lab', {body: body, data: {mode: mode}, tag: mode})
       })
-      .then(function (ready) {
-        return ready.showNotification('snrdlr lab', {body: body, data: {mode: mode}, tag: mode})
-      })
-      .catch(function (error) {
-        alert('Could not show it: ' + error)
-      })
+      .then(
+        function () {
+          say('The phone accepted it without complaint.')
+        },
+        function (error) {
+          say('Could not show it: ' + error)
+        }
+      )
   }
   button('7. Show: tap opens the app', 'One hop, for comparison.', function () {
     notify('app', 'Tap me: opens the Home Screen app')
@@ -144,6 +192,29 @@
   })
   button('9. Show: tap opens the app, which forwards to Safari', 'Two hops.', function () {
     notify('forward', 'Tap me: app, then Safari')
+  })
+
+  add(el('h2', null, 'Real push'))
+  add(el('p', null, 'This is how snrdlr would really do it: the phone gets a push address from Apple and leaves it with our relay, and a server sends to it. Tap 10, then tell Claude. Three pushes will come, one of each kind above, a few seconds apart; tap each.'))
+  button('10. Sign up for real pushes', 'Then go back to the Home Screen and wait.', function () {
+    say('Signing up…')
+    ready()
+      .then(function (worker) {
+        return worker.pushManager.getSubscription().then(function (old) {
+          return old || worker.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC})
+        })
+      })
+      .then(function (subscription) {
+        say('Got a push address at ' + new URL(subscription.endpoint).host)
+        var box = relayMailboxes(RELAYS[0])(LAB_TOPIC, undefined, {onEnvelope: function () {}})
+        return box.post(utf8(JSON.stringify(subscription)), Date.now()).then(function (kept) {
+          box.close()
+          say(kept ? 'Left with the relay. Tell Claude it is ready.' : 'The relay did not take it; try again.')
+        })
+      })
+      .catch(function (error) {
+        say('Could not sign up: ' + error)
+      })
   })
 
   add(el('h2', null, 'What has landed in this copy'))

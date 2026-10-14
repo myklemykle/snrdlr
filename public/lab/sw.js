@@ -6,6 +6,17 @@ self.addEventListener('activate', function (event) {
   event.waitUntil(self.clients.claim())
 })
 
+// A real push from a server: shown just like the ones the page asks for.
+self.addEventListener('push', function (event) {
+  var data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch (e) {}
+  event.waitUntil(
+    self.registration.showNotification('snrdlr lab (push)', {body: data.body || 'A push arrived', data: {mode: data.mode}, tag: 'push-' + data.mode})
+  )
+})
+
 self.addEventListener('notificationclick', function (event) {
   event.notification.close()
   var t = Date.now()
