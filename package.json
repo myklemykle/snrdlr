@@ -24,6 +24,7 @@
     "@noble/hashes": "^2.4.0",
     "cbor-x": "^1.6.6",
     "idb": "^8.0.4",
+    "jsqr": "^1.4.0",
     "preact": "^11.0.1",
     "qrcode-generator": "^2.0.4",
     "trystero": "^0.26.0"

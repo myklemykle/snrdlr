@@ -1266,7 +1266,8 @@ test('the app is invite-only: a stranger cannot set up, and gets in by joining t
   await stranger.goto('/')
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
   await expect(stranger.getByLabel('Your name')).toHaveCount(0)
-  await expect(stranger.getByRole('button')).toHaveCount(0)
+  // The only things to press are the two ways of using an invite.
+  await expect(stranger.getByRole('button')).toHaveText(['Scan a code', 'Paste a link'])
   await stranger.reload()
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
 
@@ -1562,6 +1563,111 @@ test('on a small phone, a home screen longer than the screen scrolls all the way
   await expect(phone.getByRole('heading', {name: 'Your chats'})).toBeInViewport()
   await phone.evaluate(() => scrollTo(0, document.documentElement.scrollHeight))
   await expect(phone.locator('.build')).toBeInViewport()
+})
+
+test('someone joins from inside the app, by scanning a code with the camera or pasting a link', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const invite = await startChat(anne, 'Anne', 'Scanned')
+  const code = (await anne.getByRole('img', {name: 'Invite code for this chat'}).screenshot()).toString('base64')
+
+  // A stand-in camera that shows whatever picture the test hands it. The browser's own code reader is
+  // taken away, so this goes the way an iPhone does, through the reader the app carries.
+  const context = await browser.newContext()
+  await context.addInitScript(() => {
+    delete (window as {BarcodeDetector?: unknown}).BarcodeDetector
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 600
+    const shown = new Image()
+    setInterval(() => {
+      const picture = (window as {cameraSees?: string}).cameraSees
+      if (picture && shown.src !== picture) shown.src = picture
+      const pen = canvas.getContext('2d')!
+      pen.fillStyle = '#888'
+      pen.fillRect(0, 0, 600, 600)
+      if (shown.complete && shown.naturalWidth) pen.drawImage(shown, 100, 100, 400, 400)
+    }, 50)
+    Object.defineProperty(navigator, 'mediaDevices', {value: {getUserMedia: async () => canvas.captureStream(15)}})
+  })
+  const phone = await context.newPage()
+  await phone.goto('/')
+  await expect(phone.getByText('snrdlr is invite-only.')).toBeVisible()
+  await phone.getByRole('button', {name: 'Scan a code'}).click()
+  const scanner = phone.getByRole('dialog', {name: 'Scan a code'})
+  await expect(scanner).toContainText('Point the camera at a snrdlr code')
+
+  await phone.evaluate(picture => ((window as {cameraSees?: string}).cameraSees = picture), `data:image/png;base64,${code}`)
+  await introduce(phone, 'Phone')
+  await expect(phone.getByRole('heading', {name: 'Scanned'})).toBeVisible({timeout: 15_000})
+  await expect(scanner).toHaveCount(0)
+  await expect(anne.getByText('Phone joined · invited by you')).toBeVisible()
+
+  // Someone else pastes the link they were sent. Text that is no invite is refused.
+  const paster = await newStranger(browser)
+  await paster.goto('/')
+  await paster.getByRole('button', {name: 'Paste a link'}).click()
+  await paster.getByLabel('Invite link').fill('https://example.com/nothing')
+  await paster.getByRole('button', {name: 'Join'}).click()
+  await expect(paster.getByText("That isn't a snrdlr invite link.")).toBeVisible()
+  await paster.getByLabel('Invite link').fill(invite)
+  await paster.getByRole('button', {name: 'Join'}).click()
+  await introduce(paster, 'Paster')
+  await expect(paster.getByRole('heading', {name: 'Scanned'})).toBeVisible({timeout: 15_000})
+
+  // The same two ways in are on the front page of someone already using the app.
+  await paster.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(paster.getByRole('button', {name: 'Scan a code'})).toBeVisible()
+  await expect(paster.getByRole('button', {name: 'Paste a link'})).toBeVisible()
+})
+
+test('someone moves from the browser into the installed app: same person, same chats, history returns', async ({browser}) => {
+  // Developer mode stands in for an iPhone here: it shows the moving steps in any browser.
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/?dev=1')
+  await introduce(anne, 'Anne')
+  await anne.getByLabel('Chat name').fill('Moving')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  await bob.goto(await copyInvite(anne))
+  await introduce(bob, 'Bob')
+  await send(anne, 'from the browser')
+  await send(bob, 'hello anne')
+  await expect(anne.locator('.theirs', {hasText: 'hello anne'})).toBeVisible()
+
+  // She copies herself out. The browser's copy switches off there and then.
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByRole('button', {name: 'Copy my snrdlr'}).click()
+  await expect(anne.getByText('Your snrdlr has been copied')).toBeVisible()
+  await expect(anne.getByRole('button', {name: 'Start a group'})).toHaveCount(0)
+  const code = await anne.evaluate(() => navigator.clipboard.readText())
+  expect(code).toMatch(/^snrdlr-move1\./)
+  await expect(bob.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+
+  // The installed app starts empty. Something that is not the code is refused; the code moves her in.
+  const app = await newStranger(browser)
+  await app.goto('/?dev=1')
+  await app.getByRole('button', {name: 'Move my chats here'}).click()
+  const box = app.getByLabel('Code copied from snrdlr in the browser')
+  await box.fill('hello')
+  await app.getByRole('button', {name: 'Move in'}).click()
+  await expect(app.getByText("That isn't a code copied from snrdlr.")).toBeVisible()
+  await box.fill(code)
+  await app.getByRole('button', {name: 'Move in'}).click()
+  await expect(app.locator('.greeting')).toContainText('Hello, Anne.')
+
+  // Her chat is there, its history comes back from Bob, and what she says next reaches him as hers.
+  await chatEntry(app, 'Moving').click()
+  await expect(app.locator('.mine', {hasText: 'from the browser'})).toBeVisible({timeout: 30_000})
+  await expect(app.locator('.theirs', {hasText: 'hello anne'})).toBeVisible()
+  await send(app, 'from the installed app')
+  await expect(bob.locator('.theirs', {hasText: 'from the installed app'})).toBeVisible()
+  await expect(bob.locator('.theirs .author')).toHaveText(['Anne', 'Anne'])
+  await expect(bob.locator('.event', {hasText: 'joined'})).toHaveCount(0)
+
+  // The browser's copy stays off across a reload, until she says the move never happened.
+  await anne.reload()
+  await expect(anne.getByText('Your snrdlr has been copied')).toBeVisible()
+  await anne.getByRole('button', {name: 'Use snrdlr here instead'}).click()
+  await anne.getByRole('button', {name: "I haven't pasted it. Use snrdlr here"}).click()
+  await expect(anne.getByRole('button', {name: 'Start a group'})).toBeVisible()
 })
 
 test('the app can be installed, and opens with no network once it has been opened before', async ({browser}) => {

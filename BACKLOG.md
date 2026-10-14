@@ -111,7 +111,25 @@ Two candidate designs:
   - For: notifications open the chat directly; the 7-day wipe no longer applies.
   - Against: the installed app needs its own way to join later chats (the Phase 3 in-app scanner, or pasting an invite link); a one-time transfer step.
 
-To test on a real iPhone before choosing:
+**Built (the Migrate design), 13 October 2026.** The app is installable: a manifest, icons, and a service worker that opens it with no network (the page is always fetched fresh when there is one, so the worker never holds back a new version). Chrome on Android and on computers gets an Install button; there the installed app shares the browser's storage, so nothing moves. On an iPhone the front page lists three steps: Add to Home Screen, "Copy my snrdlr" (a code holding the keys, the list of chats with how far our numbering had got in each, and a few settings), then "Move my chats here" in the installed app and paste. The browser's copy switches itself off at the moment of copying, so the same person is never live twice. History is not in the code; it returns by sync. The installed app joins chats with its own scanner ("Scan a code", using the camera) or "Paste a link", both also on the front page and the invite-only page.
+
+Still to check on a real iPhone, none of which can be tested from a computer:
+
+- Add to Home Screen picks up the name and icon, and the installed app opens full screen.
+- The camera opens inside the installed app and reads a code from another phone's screen.
+- Paste works in the installed app (iOS asks permission the first time).
+- History comes back after the move once the other person is online.
+- Sounds, pictures and the keyboard behave the same installed as in Safari.
+
+Open:
+
+- The move code is the keys in plain text on the clipboard. It could be wrapped with a short passphrase or expire quickly.
+- The profile photo does not move (its file stays behind); it has to be chosen again.
+- If the paste never happens, "Use snrdlr here instead" brings the browser copy back, on the person's word that they did not paste. Nothing enforces that.
+- The app icon is a placeholder drawing (`public/icon.svg`, regenerate sizes with `node scripts/make-icons.mjs`).
+- Old cached files are dropped only by count; revisit if the cache grows.
+
+Questions from before building, still unanswered:
 
 - Can an installed web app open a link in Safari proper, or only in an in-app browser view? The split design depends on it.
 - When a site has a manifest, does Add to Home Screen keep the current address, fragment included? If so, the keys could be carried across without a paste, at the cost of leaving them stored in the icon. Otherwise the transfer is "copy a code in Safari, paste it in the installed app".

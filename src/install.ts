@@ -11,6 +11,9 @@ const changed = () => listeners.forEach(listener => listener())
 export const installed = () =>
   matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & {standalone?: boolean}).standalone === true
 
+/** iPhones and iPads, where the installed app keeps its own storage, apart from the browser's. */
+export const onIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+
 /** Call once at startup: registers the service worker and listens for the browser's offer to install. */
 export function setUpInstall(): void {
   if (import.meta.env.PROD && 'serviceWorker' in navigator) {
