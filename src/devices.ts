@@ -82,7 +82,8 @@ export function chatFromNote(note: ChatHeldContent, identity: Identity, taken: s
     chain: note.chain,
     ...(note.peer ? {peer: note.peer} : {}),
     name: uniqueChatName(note.name, taken),
-    createdAt: now
+    createdAt: now,
+    historyBefore: now
   }
 }
 

@@ -18,6 +18,11 @@ export type ChatRecord = {
   createdAt: number
   /** When this chat was last looked at; messages received after it count as unread. */
   readAt?: number
+  /**
+   * For a chat that came from another of the person's devices: when it did. What was written before
+   * then is history, read or not elsewhere, and does not count as unread here.
+   */
+  historyBefore?: number
   /** Set when rejoining a chat that was left: our earlier messages used sequence numbers up to here. */
   ownSeqFloor?: number
   /** Our own messages up to this number are known to be with the relay that keeps them for members who are offline. */
@@ -179,7 +184,10 @@ function wrap(db: IDBPDatabase<Schema>) {
     async unreadCount(chat: ChatRecord, selfId: string): Promise<number> {
       const since = IDBKeyRange.bound([chat.id, chat.readAt ?? chat.createdAt], [chat.id, Infinity], true)
       const arrived = await db.getAllFromIndex('messages', 'received', since)
-      return arrived.filter(message => message.author !== selfId && (message.content.type === 'text' || message.content.type === 'image')).length
+      const history = chat.historyBefore ?? 0
+      return arrived.filter(
+        message => message.author !== selfId && message.sentAt >= history && (message.content.type === 'text' || message.content.type === 'image')
+      ).length
     },
 
     /** A chat's messages in display order: by logical clock, then author. */

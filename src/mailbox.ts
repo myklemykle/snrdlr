@@ -70,8 +70,11 @@ export function unwrapEnvelope(event: unknown): Uint8Array | null {
 
 type Sub = {id: string; topic: string; collectedAt: number | undefined; handlers: MailboxHandlers; askedAt: number}
 
+/** Mailboxes on one relay, and a way to say something else to it on their connection while it is up. */
+export type RelayMailboxes = OpenMailbox & {say: (message: unknown[]) => boolean}
+
 /** Mailboxes on one relay, sharing a connection that is opened when first needed and kept up while any is open. */
-export function relayMailboxes(url: string, makeSocket: (url: string) => WebSocket = target => new WebSocket(target)): OpenMailbox {
+export function relayMailboxes(url: string, makeSocket: (url: string) => WebSocket = target => new WebSocket(target)): RelayMailboxes {
   const subs = new Map<string, Sub>()
   // Events not yet acknowledged by the relay, by event id, in the order they were posted.
   const waiting = new Map<string, {json: string; done: (kept: boolean) => void; timer?: ReturnType<typeof setTimeout>}>()
@@ -183,7 +186,7 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
     document.addEventListener('visibilitychange', () => !document.hidden && check())
   }
 
-  return (topic, collectedAt, handlers) => {
+  const open: OpenMailbox = (topic, collectedAt, handlers) => {
     const sub: Sub = {id: `m${serial++}`, topic, collectedAt, handlers, askedAt: Date.now()}
     subs.set(sub.id, sub)
     if (socket?.readyState === WebSocket.OPEN) ask(sub)
@@ -215,9 +218,16 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
       }
     }
   }
+  /** Sends at once if the connection is up; false if it is not. Nothing is queued. */
+  const say = (message: unknown[]) => {
+    if (socket?.readyState !== WebSocket.OPEN) return false
+    socket.send(JSON.stringify(message))
+    return true
+  }
+  return Object.assign(open, {say})
 }
 
 // Set for local testing against scripts/local-relay.mjs; unset, messages are left with our own relay.
 const storeUrl = import.meta.env?.VITE_STORE_RELAY?.trim()
 /** The app's mailboxes, on our relay. */
-export const mailboxes: OpenMailbox = relayMailboxes(storeUrl || RELAYS[0])
+export const mailboxes: RelayMailboxes = relayMailboxes(storeUrl || RELAYS[0])

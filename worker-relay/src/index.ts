@@ -45,6 +45,8 @@ function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknow
   sql.exec('CREATE TABLE IF NOT EXISTS push_targets (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, updated_at INTEGER NOT NULL)')
   sql.exec('CREATE TABLE IF NOT EXISTS push_topics (topic TEXT NOT NULL, endpoint TEXT NOT NULL, me TEXT NOT NULL, last_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (topic, endpoint))')
   sql.exec('CREATE INDEX IF NOT EXISTS push_topics_by_endpoint ON push_topics (endpoint)')
+  // Who is using the app right now, by their tag in each chat: their devices are not woken meanwhile.
+  sql.exec('CREATE TABLE IF NOT EXISTS push_awake (topic TEXT NOT NULL, me TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY (topic, me))')
   const vapid = JSON.parse(vapidJson) as JsonWebKey
   const forget = (endpoint: string) => {
     sql.exec('DELETE FROM push_topics WHERE endpoint = ?', endpoint)
@@ -63,18 +65,28 @@ function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknow
       for (const {topic, me} of topics) sql.exec('INSERT OR REPLACE INTO push_topics (topic, endpoint, me) VALUES (?, ?, ?)', topic, target.endpoint, me)
     },
     forget,
+    awake(topics, seconds) {
+      for (const {topic, me} of topics) {
+        if (seconds === 0) sql.exec('DELETE FROM push_awake WHERE topic = ? AND me = ?', topic, me)
+        else sql.exec('INSERT OR REPLACE INTO push_awake (topic, me, until) VALUES (?, ?, ?)', topic, me, Date.now() + seconds * 1000)
+      }
+    },
     async stored(topic, me) {
       const now = Date.now()
       const targets = sql
         .exec(
-          'SELECT t.endpoint, t.p256dh, t.auth FROM push_topics p JOIN push_targets t ON t.endpoint = p.endpoint WHERE p.topic = ? AND p.me != ? AND p.last_at < ?',
+          `SELECT t.endpoint, t.p256dh, t.auth FROM push_topics p JOIN push_targets t ON t.endpoint = p.endpoint
+           WHERE p.topic = ? AND p.me != ? AND p.last_at < ?
+           AND NOT EXISTS (SELECT 1 FROM push_awake a WHERE a.topic = p.topic AND a.me = p.me AND a.until > ?)`,
           topic,
           me,
-          now - PUSH_GAP_MS
+          now - PUSH_GAP_MS,
+          now
         )
         .toArray() as PushTarget[]
       if (targets.length === 0) return
-      sql.exec('UPDATE push_topics SET last_at = ? WHERE topic = ? AND me != ? AND last_at < ?', now, topic, me, now - PUSH_GAP_MS)
+      const placeholders = targets.map(() => '?').join(', ')
+      sql.exec(`UPDATE push_topics SET last_at = ? WHERE topic = ? AND endpoint IN (${placeholders})`, now, topic, ...targets.map(target => target.endpoint))
       // Sent while the relay carries on; the device reads which chat from `t` and asks for the message itself.
       waitUntil(
         Promise.all(
@@ -176,6 +188,7 @@ export class RelayRoom {
       const old = Date.now() - PUSH_FORGET_MS
       this.ctx.storage.sql.exec('DELETE FROM push_topics WHERE endpoint IN (SELECT endpoint FROM push_targets WHERE updated_at < ?)', old)
       this.ctx.storage.sql.exec('DELETE FROM push_targets WHERE updated_at < ?', old)
+      this.ctx.storage.sql.exec('DELETE FROM push_awake WHERE until < ?', Date.now())
     }
     await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
   }

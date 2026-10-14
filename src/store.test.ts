@@ -113,6 +113,17 @@ describe('store', () => {
     expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(0)
   })
 
+  it("does not count a chat's history as unread on a device it has just reached from another of the person's", async () => {
+    const store = await openStore(freshName())
+    const saved = await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 1000, historyBefore: 1000}))
+    // Hundreds of earlier messages arrive after the chat does.
+    for (let seq = 1; seq <= 300; seq++) await store.addMessage(message({author: 'them', seq, sentAt: seq, receivedAt: 2000 + seq}))
+    expect(await store.unreadCount(saved, 'me')).toBe(0)
+    // Something written after it arrived is news.
+    await store.addMessage(message({author: 'them', seq: 301, sentAt: 3000, receivedAt: 3001}))
+    expect(await store.unreadCount(saved, 'me')).toBe(1)
+  })
+
   it('refuses a second message with the same author and sequence number', async () => {
     const store = await openStore(freshName())
     expect(await store.addMessage(message({content: {type: 'text', text: 'original'}}))).toBe(true)

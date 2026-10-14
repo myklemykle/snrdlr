@@ -266,12 +266,14 @@ describe('Relay', () => {
     const book = () => {
       const registered = new Map<string, PushTopic[]>()
       const stored: [string, string][] = []
+      const awake: [PushTopic[], number][] = []
       const pushes: PushBook = {
+        awake: (topics, seconds) => void awake.push([topics, seconds]),
         register: (target, topics) => void registered.set(target.endpoint, topics),
         forget: endpoint => void registered.delete(endpoint),
         stored: async (topic, me) => void stored.push([topic, me])
       }
-      return {pushes, registered, stored}
+      return {pushes, registered, stored, awake}
     }
 
     it('registers a device for its chats, replacing what it asked for before', async () => {
@@ -316,6 +318,24 @@ describe('Relay', () => {
       await bob.say('EVENT', again)
       await bob.say('EVENT', again)
       expect(stored).toHaveLength(2)
+    })
+
+    it('hears that a person is using the app, for a while, and checks what it is told', async () => {
+      const {pushes, awake} = book()
+      const anne = join(new Relay(() => 1_790_000_000_000, memoryStore(), pushes))
+      await anne.say('AWAKE', [[CHAT, ANNE]], 90)
+      await anne.say('AWAKE', [[CHAT, ANNE]], 0)
+      await anne.say('AWAKE', [[CHAT, ANNE]], 3600)
+      await anne.say('AWAKE', [['nope', ANNE]], 90)
+      expect(awake).toEqual([
+        [[{topic: CHAT, me: ANNE}], 90],
+        [[{topic: CHAT, me: ANNE}], 0]
+      ])
+      // Said often, so nothing is sent back unless it was refused.
+      expect(anne.got).toEqual([
+        ['PUSH', false, 'invalid: seconds'],
+        ['PUSH', false, 'invalid: topic']
+      ])
     })
 
     it('without a push book, PUSH is not understood', async () => {

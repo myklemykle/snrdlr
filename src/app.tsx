@@ -1,5 +1,5 @@
 import type {ComponentChildren} from 'preact'
-import {clearNotifications, keepPushRegistered} from './push'
+import {clearNotifications, keepPushRegistered, keepRelayToldWhileUsed} from './push'
 import {NotificationSettings} from './push-view'
 import {useEffect, useRef, useState} from 'preact/hooks'
 import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
@@ -298,7 +298,13 @@ function Main(props: {
   // Keeps the relay told which chats to wake this device for, if notifications are on.
   useEffect(() => {
     if (!named) return
-    return keepPushRegistered(store, identity)
+    const stopRegistering = keepPushRegistered(store, identity)
+    // And, while the person is using the app here, not to wake any of their devices.
+    const stopTelling = keepRelayToldWhileUsed(store, identity, mailboxes)
+    return () => {
+      stopRegistering()
+      stopTelling()
+    }
   }, [named])
 
   // A notification tapped while the app is open: its chat, or the chat list.

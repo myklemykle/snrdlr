@@ -23,6 +23,8 @@
 // is worth a notification, a sealed chat message rather than housekeeping, and that tag is the same
 // value its author's devices registered for that topic, so none of them is woken by their own message.
 // The tag means nothing outside its topic, so it does not link one person's chats to each other.
+// While a person is using the app on any device, that device says so (AWAKE) with the same tags, and
+// none of their devices is woken for those chats until it stops saying so.
 
 export const LIMITS = {
   /** Bytes in one incoming message. A connection offer is a few kilobytes. */
@@ -58,15 +60,29 @@ export type PushBook = {
   /** Replaces whatever this device asked for before. */
   register: (target: PushTarget, topics: PushTopic[]) => void
   forget: (endpoint: string) => void
+  /** The person with each tag is using the app, for `seconds` from now (0: no longer). */
+  awake: (topics: PushTopic[], seconds: number) => void
   /** A message worth a notification was stored under `topic` by someone whose tag there is `me`. */
   stored: (topic: string, me: string) => Promise<void>
 }
 
 /** Push services that browsers use. The relay posts to nowhere else, so it cannot be aimed at other sites. */
 const PUSH_HOSTS = [/\.push\.apple\.com$/, /^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/, /^push\.services\.mozilla\.com$/]
-export const PUSH_LIMITS = {topics: 500}
+export const PUSH_LIMITS = {topics: 500, awakeSeconds: 300}
 const BASE64URL = /^[A-Za-z0-9_-]+$/
 const HEX_32 = /^[0-9a-f]{32}$/
+
+function pushTopics(topics: unknown): PushTopic[] | string {
+  if (!Array.isArray(topics) || topics.length > PUSH_LIMITS.topics) return 'invalid: topics'
+  const wanted: PushTopic[] = []
+  for (const entry of topics) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !HEX_64.test(entry[0]) || typeof entry[1] !== 'string' || !HEX_32.test(entry[1])) {
+      return 'invalid: topic'
+    }
+    wanted.push({topic: entry[0], me: entry[1]})
+  }
+  return wanted
+}
 
 /** The device and topics in a PUSH message, or why they are refused. */
 function pushRequest(target: unknown, topics: unknown): {target: PushTarget; topics: PushTopic[]} | string {
@@ -82,14 +98,8 @@ function pushRequest(target: unknown, topics: unknown): {target: PushTarget; top
   if (url.protocol !== 'https:' || !PUSH_HOSTS.some(host => host.test(url.hostname))) return 'blocked: not a push service'
   if (typeof p256dh !== 'string' || p256dh.length !== 87 || !BASE64URL.test(p256dh)) return 'invalid: p256dh'
   if (typeof auth !== 'string' || auth.length !== 22 || !BASE64URL.test(auth)) return 'invalid: auth'
-  if (!Array.isArray(topics) || topics.length > PUSH_LIMITS.topics) return 'invalid: topics'
-  const wanted: PushTopic[] = []
-  for (const entry of topics) {
-    if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !HEX_64.test(entry[0]) || typeof entry[1] !== 'string' || !HEX_32.test(entry[1])) {
-      return 'invalid: topic'
-    }
-    wanted.push({topic: entry[0], me: entry[1]})
-  }
+  const wanted = pushTopics(topics)
+  if (typeof wanted === 'string') return wanted
   return {target: {endpoint, p256dh, auth}, topics: wanted}
 }
 
@@ -329,6 +339,13 @@ export class Relay {
       if (typeof request === 'string') return reply('PUSH', false, request)
       this.pushes.register(request.target, request.topics)
       reply('PUSH', true, '')
+    } else if (type === 'AWAKE' && this.pushes) {
+      if (!allowed) return reply('PUSH', false, 'rate-limited: slow down')
+      const topics = pushTopics(rest[0])
+      const seconds = rest[1]
+      if (typeof topics === 'string') return reply('PUSH', false, topics)
+      if (!Number.isSafeInteger(seconds) || (seconds as number) < 0 || (seconds as number) > PUSH_LIMITS.awakeSeconds) return reply('PUSH', false, 'invalid: seconds')
+      this.pushes.awake(topics, seconds as number)
     } else if (type === 'UNPUSH' && this.pushes) {
       if (typeof rest[0] === 'string' && rest[0].length <= 1024) this.pushes.forget(rest[0])
       reply('PUSH', true, '')

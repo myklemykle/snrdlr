@@ -6,6 +6,7 @@
 // On an iPhone only the Home Screen app can be woken. Its notifications can open the chat in Safari,
 // where most people keep their chats, because the app can open Safari though a notification cannot.
 import {deriveChatKeys} from './keys'
+import type {RelayMailboxes} from './mailbox'
 import type {Identity} from './identity'
 import {installed, onIos} from './install'
 import {PUSH_PUBLIC_KEY} from './push-key'
@@ -153,6 +154,47 @@ export async function registerPush(store: Store, identity: Identity, force = fal
 export async function clearNotifications(chat: ChatRecord): Promise<void> {
   const reg = await registration()
   for (const shown of (await reg?.getNotifications({tag: topicOf(chat)})) ?? []) shown.close()
+}
+
+/** Someone who has not touched the app for this long is not using it, even if it is on screen. */
+const IDLE_MS = 2 * 60_000
+/** How long the relay holds back notifications after being told; renewed well before it runs out. */
+const AWAKE_SECONDS = 90
+const AWAKE_EVERY_MS = 30_000
+
+/**
+ * While the person is using the app here, has it on screen and has touched it lately, tells the relay
+ * so, and the relay wakes none of their devices for these chats meanwhile. They see and hear what
+ * arrives here. Returns a stop function.
+ */
+export function keepRelayToldWhileUsed(store: Store, identity: Identity, relay: RelayMailboxes): () => void {
+  let lastInput = Date.now()
+  let told = false
+  const entries = async () => (await store.listChats()).map(chat => [topicOf(chat), pushTag(chat, identity)])
+  const tell = async (using: boolean) => {
+    if (!using && !told) return
+    const list = await entries()
+    if (list.length > 0 && relay.say(['AWAKE', list, using ? AWAKE_SECONDS : 0])) told = using
+  }
+  const using = () => document.visibilityState === 'visible' && Date.now() - lastInput < IDLE_MS
+  const check = () => void tell(using()).catch(() => {})
+  const onInput = () => {
+    const wasIdle = Date.now() - lastInput >= IDLE_MS
+    lastInput = Date.now()
+    // Back after a while: say so now rather than at the next check.
+    if (wasIdle || !told) check()
+  }
+  const moments = ['pointerdown', 'keydown', 'touchstart', 'wheel', 'scroll'] as const
+  for (const moment of moments) addEventListener(moment, onInput, {capture: true, passive: true})
+  document.addEventListener('visibilitychange', check)
+  const timer = setInterval(check, AWAKE_EVERY_MS)
+  check()
+  return () => {
+    clearInterval(timer)
+    for (const moment of moments) removeEventListener(moment, onInput, {capture: true})
+    document.removeEventListener('visibilitychange', check)
+    void tell(false).catch(() => {})
+  }
 }
 
 /** Keeps the relay up to date with this device's chats while the app is open. Returns a stop function. */
