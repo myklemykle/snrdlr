@@ -1798,3 +1798,23 @@ test('a malformed or old-format invite link lands on the home screen with an exp
   await introduce(page, 'Cindy')
   await expect(page.getByText(STALE)).toBeVisible()
 })
+
+test('a device link pasted into the app works as well as one opened, and an old one says when it ran out', async ({browser}) => {
+  const {anne} = await anneAndBob(browser)
+  await anne.getByRole('button', {name: 'Add a device'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const link = await anne.evaluate(() => navigator.clipboard.readText())
+  const computer = await newStranger(browser)
+  await computer.goto('/')
+  await computer.getByRole('button', {name: 'Paste a link'}).click()
+  await computer.getByLabel('Invite link').fill(link)
+  await computer.getByRole('button', {name: 'Join'}).click()
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  await expect(anne.locator('.check')).toHaveText((await computer.locator('.check').textContent())!, {timeout: 30_000})
+
+  // The same link with its time already up.
+  const old = link.replace(/\.[0-9a-z]+$/, '.' + Math.floor(Date.now() / 1000 - 3600).toString(36))
+  const late = await newStranger(browser)
+  await late.goto(old)
+  await expect(late.getByText(/This code ran out at .+\. Make a new one/)).toBeVisible()
+})

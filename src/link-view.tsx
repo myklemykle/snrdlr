@@ -153,7 +153,11 @@ export function OpenedDeviceLink(props: {link: DeviceLink; store: Store; identit
   if (hasChats === null) return null
   const isPerson = identity.name !== '' || hasChats
   let body
-  if (link.expires < Date.now()) body = <p>This code has run out. Make a new one on the device showing it.</p>
+  if (link.expires < Date.now()) {
+    // Saying when helps tell an old link, still on the clipboard from some time ago, from the one just made.
+    const when = new Date(link.expires).toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})
+    body = <p>This code ran out at {when}. Make a new one on the device showing it, and copy or scan that one.</p>
+  }
   else if (link.role === 'new' && isPerson) body = <Requests link={link} identity={identity} onAdded={() => {}} />
   else if (link.role === 'existing' && !hasChats) body = <Waiting link={link} store={store} where="The device showing the code" />
   else if (link.role === 'new')
