@@ -56,6 +56,9 @@ export async function claimChat(chatId: string): Promise<void> {
   await current?.done
 }
 
+/** Whether a chat's own screen is showing it. */
+export const isOnScreen = (chatId: string) => foreground.has(chatId)
+
 export function unclaimChat(chatId: string): void {
   foreground.delete(chatId)
   keeperCheck?.()

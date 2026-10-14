@@ -44,6 +44,10 @@ export type Content =
   /** A new name for a group chat. Any member may give one; the latest is the chat's name. */
   | {type: 'rename'; name: string}
   | CardContent
+  /** Only in a person's own hidden chat (see devices.ts): one of their devices holds this chat, with what is needed to open it. */
+  | ChatHeldContent
+  /** Only in a person's own hidden chat: one of their devices has left this chat. */
+  | {type: 'chat-left'; id: string}
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -101,6 +105,17 @@ export type CardContent = {
   contact?: {kind: 'email' | 'phone' | 'instagram' | 'other'; value: string}
   /** Tints the author's messages: #rrggbb. */
   color?: string
+}
+
+/** A chat as one device tells the person's others about it: everything that is the same on every device. */
+export type ChatHeldContent = {
+  type: 'chat-held'
+  kind: 'group' | 'dm'
+  secret: Uint8Array
+  context: Uint8Array
+  chain: Uint8Array[]
+  peer?: {signPublic: Uint8Array; dhPublic: Uint8Array}
+  name: string
 }
 
 export const MAX_AVATAR_BYTES = 8192
@@ -224,6 +239,20 @@ function encodeContent(content: Content): [string, unknown] {
           ...(content.color ? {o: content.color} : {})
         }
       ]
+    case 'chat-held':
+      return [
+        'chat-held',
+        {
+          k: content.kind === 'dm' ? 'd' : 'g',
+          s: content.secret,
+          x: content.context,
+          c: content.chain,
+          n: content.name,
+          ...(content.peer ? {p: [content.peer.signPublic, content.peer.dhPublic]} : {})
+        }
+      ]
+    case 'chat-left':
+      return ['chat-left', fromHex(content.id)]
     case 'edit':
       return ['edit', {s: content.target.seq, t: content.text, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}]
     case 'unknown':
@@ -271,6 +300,28 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'rename') {
     if (typeof body !== 'string' || body.trim() === '' || body.length > MAX_NAME_LENGTH) throw new Error('bad rename body')
     return {type, name: body}
+  }
+  if (type === 'chat-held') {
+    const {k, s, x, c, n, p} = (body ?? {}) as Record<string, unknown>
+    const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
+    if (k !== 'g' && k !== 'd') throw new Error('bad chat body')
+    if (!isBytes(s, 32) || !isBytes(x, k === 'd' ? 64 : 32) || !isChain(c)) throw new Error('bad chat body')
+    if (typeof n !== 'string' || n.length === 0 || n.length > MAX_NAME_LENGTH) throw new Error('bad chat body')
+    const [sign, dh] = Array.isArray(p) && p.length === 2 ? (p as unknown[]) : []
+    if (k === 'd' && (!isBytes(sign, 32) || !isBytes(dh, 32))) throw new Error('bad chat body')
+    return {
+      type,
+      kind: k === 'd' ? 'dm' : 'group',
+      secret: new Uint8Array(s),
+      context: new Uint8Array(x),
+      chain: c.map(cert => new Uint8Array(cert)),
+      name: n,
+      ...(k === 'd' ? {peer: {signPublic: new Uint8Array(sign as Uint8Array), dhPublic: new Uint8Array(dh as Uint8Array)}} : {})
+    }
+  }
+  if (type === 'chat-left') {
+    if (!(body instanceof Uint8Array) || body.length !== 32) throw new Error('bad chat body')
+    return {type, id: toHex(body)}
   }
   if (type === 'edit') {
     const {s, t, d} = (body ?? {}) as Record<string, unknown>

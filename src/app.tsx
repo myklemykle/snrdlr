@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'preact/hooks'
+import {onChatsChanged, startSelfSync} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
@@ -259,6 +260,13 @@ function Main(props: {
       void Promise.resolve(stop?.()).finally(finished)
     }
   }, [named, stay])
+
+  // Keeps this device's chats in step with the person's other devices.
+  useEffect(() => {
+    if (!named) return
+    const stop = startSelfSync({store, identity, connectFor, mailbox: mailboxes})
+    return () => void stop()
+  }, [named])
 
   // A sound for messages arriving in chats that are not on screen.
   useEffect(() => onBackgroundActivity((_chatId, incoming) => incoming && playSound()), [])
@@ -739,7 +747,12 @@ function Home(props: {
   }
   useEffect(() => {
     void refresh()
-    return onBackgroundActivity(() => void refresh())
+    const stopActivity = onBackgroundActivity(() => void refresh())
+    const stopChanges = onChatsChanged(() => void refresh())
+    return () => {
+      stopActivity()
+      stopChanges()
+    }
   }, [])
 
   const leave = async (id: string) => {

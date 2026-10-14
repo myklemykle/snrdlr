@@ -5,7 +5,8 @@ import type {IdentitySecrets} from './identity'
 export type ChatRecord = {
   /** The chat's room ID, derived from its secret and context. */
   id: string
-  kind: 'group' | 'dm'
+  /** 'self' is the person's own hidden chat, between their devices (devices.ts); it is not listed with the others. */
+  kind: 'group' | 'dm' | 'self'
   secret: Uint8Array
   /** What anchors the chat: the founder's signing key for a group, both members' keys for a direct chat. */
   context: Uint8Array
@@ -46,7 +47,7 @@ interface Schema extends DBSchema {
   /** Encrypted files that messages refer to, such as images. */
   files: {key: [chatId: string, hash: string]; value: {chatId: string; hash: string; data: Uint8Array; addedAt: number}}
   /** Chats that were left: just enough to carry on this device's numbering if we are invited back. */
-  left: {key: string; value: {ownSeq: number}}
+  left: {key: string; value: {ownSeq: number; leftAt?: number}}
 }
 
 export type Store = ReturnType<typeof wrap>
@@ -105,7 +106,8 @@ function wrap(db: IDBPDatabase<Schema>) {
     getIdentity: () => db.get('identity', 'self'),
     saveIdentity: (identity: IdentitySecrets) => db.put('identity', identity, 'self').then(() => undefined),
 
-    listChats: async () => (await db.getAll('chats')).sort((a, b) => b.createdAt - a.createdAt),
+    /** The chats to show, newest first. The person's own hidden chat is not among them. */
+    listChats: async () => (await db.getAll('chats')).filter(chat => chat.kind !== 'self').sort((a, b) => b.createdAt - a.createdAt),
     getChat: (id: string) => db.get('chats', id),
     /** Saves a chat unless it is already known; either way returns the stored record. */
     async saveChat(chat: ChatRecord): Promise<ChatRecord> {
@@ -130,12 +132,15 @@ function wrap(db: IDBPDatabase<Schema>) {
         .objectStore('messages')
         .getAllKeys(IDBKeyRange.bound([id, self.id, self.device, 0], [id, self.id, self.device, Infinity]))
       const ownSeq = Math.max(chat?.ownSeqFloor ?? 0, ...ownKeys.map(([, , , seq]) => seq))
-      if (ownSeq > 0) await tx.objectStore('left').put({ownSeq}, id)
+      await tx.objectStore('left').put({ownSeq, leftAt: Date.now()}, id)
       await tx.objectStore('messages').delete(IDBKeyRange.bound([id], [id, []]))
       await tx.objectStore('files').delete(IDBKeyRange.bound([id], [id, []]))
       await tx.objectStore('chats').delete(id)
       await tx.done
     },
+
+    /** When this device left a chat, if it did and has not rejoined since. */
+    leftAt: async (id: string) => (await db.get('left', id))?.leftAt,
 
     async renameChat(id: string, name: string): Promise<void> {
       const tx = db.transaction('chats', 'readwrite')
