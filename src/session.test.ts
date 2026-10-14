@@ -683,19 +683,19 @@ describe('session', () => {
     const anne = await join(makeNetwork(), chat, first.identity, annes, undefined, shelf.open)
     await anne.session.sendText('are you there?')
     await anne.session.sendText('I am going out')
-    await settle()
+    await vi.waitFor(() => expect([...shelf.kept.values()].flat().length).toBeGreaterThanOrEqual(3))
     await anne.session.close()
 
     const bob = await join(makeNetwork(), chat, met.identity, bobs, undefined, shelf.open)
-    await settle()
-    expect(texts(bob.view)).toEqual(['are you there?', 'I am going out'])
+    // Locking and unlocking take a moment each, so these wait rather than assume.
+    await vi.waitFor(() => expect(texts(bob.view)).toEqual(['are you there?', 'I am going out']))
+    const before = [...shelf.kept.values()].flat().length
     await bob.session.sendText('here now')
-    await settle()
+    await vi.waitFor(() => expect([...shelf.kept.values()].flat().length).toBeGreaterThan(before))
     await bob.session.close()
 
     const anneAgain = await join(makeNetwork(), chat, anne.identity, anne.store, undefined, shelf.open)
-    await settle()
-    expect(texts(anneAgain.view)).toEqual(['are you there?', 'I am going out', 'here now'])
+    await vi.waitFor(() => expect(texts(anneAgain.view)).toEqual(['are you there?', 'I am going out', 'here now']))
   })
 
   it('locks what it leaves with the relay to the members, so a copy of the chat secret is not enough to read it', async () => {
@@ -706,24 +706,25 @@ describe('session', () => {
     const bob = await join(network, chat, createIdentity('Bob'), undefined, undefined, shelf.open)
     await settle()
     await anne.session.sendText('for members')
-    await settle()
+    const context = {chatId: chat.id, msgKey: await importMsgKey(chatKeys(chat).msgKey)}
+    // Bob can open what was left, once it is there.
+    await vi.waitFor(async () => {
+      const opened = await Promise.all([...shelf.kept.values()].flat().map(item => openAsMember(chat.id, item, bob.identity)))
+      const read = await Promise.all(opened.filter(item => item !== null).map(item => openEnvelope(context, item!)))
+      expect(read.some(message => message.content.type === 'text' && message.content.text === 'for members')).toBe(true)
+    })
     await anne.session.close()
     await bob.session.close()
 
     // Mallory holds the chat's secret, so she knows where to look and has the key the messages are sealed
     // with. What she finds there is locked to Anne and Bob.
     const mallory = createIdentity('Mallory')
-    const context = {chatId: chat.id, msgKey: await importMsgKey(chatKeys(chat).msgKey)}
     const stored = [...shelf.kept.values()].flat()
     expect(stored.length).toBeGreaterThan(0)
     for (const item of stored) {
       await expect(openEnvelope(context, item)).rejects.toThrow()
       expect(await openAsMember(chat.id, item, mallory)).toBeNull()
     }
-    // Bob can: the one written after Anne had seen his key opens for him.
-    const forBob = (await Promise.all(stored.map(item => openAsMember(chat.id, item, bob.identity)))).filter(item => item !== null)
-    const read = await Promise.all(forBob.map(item => openEnvelope(context, item!)))
-    expect(read.some(message => message.content.type === 'text' && message.content.text === 'for members')).toBe(true)
   })
 
   it('leaves what was written while the relay was unreachable the next time the chat opens, and not twice', async () => {
@@ -742,7 +743,7 @@ describe('session', () => {
 
     shelf.setUp(true)
     const second = await join(makeNetwork(), chat, anne, store, (await store.getChat(held.id))!, shelf.open)
-    await settle()
+    await vi.waitFor(async () => expect((await store.getChat(held.id))!.storedSeq).toBe(2))
     await second.session.close()
     const count = [...shelf.kept.values()][0].length
     // Her "joined" message and the text; and it is remembered that they are there.
