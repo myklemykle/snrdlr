@@ -932,3 +932,98 @@ button:disabled {
   text-align: center;
   color: var(--muted);
 }
+
+/* Replies: the message being answered, quoted above the answer and above the message box. */
+.quote {
+  display: block;
+  width: 100%;
+  margin: 0.1rem 0 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-left: 3px solid currentColor;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-size: 0.85rem;
+  line-height: 1.3;
+  text-align: left;
+  white-space: normal;
+}
+
+.quote .who {
+  display: block;
+  font-weight: 600;
+}
+
+.quote .said {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
+
+.quote.gone {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.log .image .quote {
+  width: auto;
+  margin: 0.3rem 0.2rem 0.4rem;
+}
+
+.log li {
+  transition: box-shadow 0.4s;
+}
+
+.log .marked {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent);
+}
+
+.replying {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.replying .quote {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border-left-color: var(--accent);
+}
+
+.replying .said {
+  -webkit-line-clamp: 1;
+}
+
+.replying button {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.replying + .composer,
+.replying + .attached {
+  border-top: 0;
+}
+
+.menu .reply {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.4rem;
+  text-align: left;
+  border-color: transparent;
+}
+
+.menu .reply + .copy {
+  margin-top: 0;
+}

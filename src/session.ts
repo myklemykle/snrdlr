@@ -7,7 +7,7 @@
 // Authors: a message is only kept if its author is known to be a member. Members show that through the
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
-import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type ImageContent, type Message} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import type {Identity} from './identity'
 import {chatKeys, policyOf} from './chats'
@@ -68,7 +68,8 @@ export type SessionHandlers = {
 }
 
 export type Session = {
-  sendText: (text: string) => Promise<void>
+  /** Sends words, optionally as a reply to an earlier message. */
+  sendText: (text: string, replyTo?: MessageRef) => Promise<void>
   /** Records in the chat's log that we admitted someone. */
   postCert: (cert: Uint8Array) => Promise<void>
   /** In a direct chat: lets the other person into a group we have started. */
@@ -444,7 +445,7 @@ export async function openSession(options: {
   }, RESYNC_INTERVAL_MS)
 
   return {
-    sendText: text => post({type: 'text', text}),
+    sendText: (text, replyTo) => post({type: 'text', text, ...(replyTo ? {replyTo} : {})}),
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),

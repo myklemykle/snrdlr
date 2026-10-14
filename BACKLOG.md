@@ -19,8 +19,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.
-- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions and a copy button in it. Still to add:
-  - Reply. See "How reply would work" below.
+- **Message context menu** (a button beside the message on desktop, press and hold on touch). Built, with emoji reactions, reply and a copy button in it. Still to add:
   - DM this user. The proposal's default is in-person pairing only for v1. Profile messages now carry each member's X25519 key, so starting a direct chat from inside a group is possible without meeting.
   - User info.
 - **Reactions: follow-ups.** One reaction per person per message; six quick ones, or any emoji from the app's own picker (a page cannot open the system's emoji keyboard). Open:
@@ -51,11 +50,14 @@ To settle when building it:
 - There is no recovery: if the passkey is lost, so are the chats. Same as losing the device today.
 - The passkey is tied to the site's address, another reason to settle the final address first.
 
-### How reply would work
+### How replies work (built)
 
-A reply is an ordinary message whose encrypted payload also names the message it answers, by author and sequence number. The app shows a quoted snippet above the reply and jumps to the original on tap. If the original is not on this device (not synced yet, or sent before you joined), it shows "original message not available". Because the reference is inside the signed payload, nobody can re-point a reply at a different message.
+A reply is an ordinary message whose encrypted payload also names the message it answers, by author and sequence number. The app shows a quoted snippet above the reply and goes to the original on tap. If the original is not on this device, it says so. Because the reference is inside the signed payload, nobody can re-point a reply at a different message. A reply in words travels as a kind of its own (`reply`), which an older copy of the app keeps and reads once it has updated; a picture that is a reply just carries one more field.
 
-This changes the message format, so it needs a rule for how older app versions treat message types they do not know.
+Open:
+- Swipe a message sideways to reply, as other chat apps do on phones.
+- A small thumbnail in the quote when the message answered is a picture.
+- Loading a quoted message that is not on this device.
 
 ## Images and audio messages
 

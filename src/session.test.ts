@@ -635,6 +635,22 @@ describe('session', () => {
     expect(texts(bob.view)).toHaveLength(1)
   })
 
+  it('carries what a reply is answering, in words and with a picture', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const [anne, bob] = [await join(network, chat, createIdentity('Anne')), await join(network, chat, createIdentity('Bob'))]
+    await anne.session.sendText('shall we go?')
+    await settle()
+    const replyTo = {author: anne.identity.id, seq: anne.view.find(m => m.content.type === 'text')!.seq}
+    await bob.session.sendText('yes, at six', replyTo)
+    await settle()
+    expect(anne.view.at(-1)!.content).toEqual({type: 'text', text: 'yes, at six', replyTo})
+    // An ordinary message says nothing about replying.
+    await bob.session.sendText('bring a coat')
+    await settle()
+    expect(anne.view.at(-1)!.content).toEqual({type: 'text', text: 'bring a coat'})
+  })
+
   it('shares reactions like any other message, including with someone who was away', async () => {
     const network = makeNetwork()
     const chat = makeChat()

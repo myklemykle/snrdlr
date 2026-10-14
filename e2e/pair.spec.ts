@@ -549,6 +549,77 @@ test('people react to a message with an emoji, change it, and take it away', asy
   await expect(anne.locator('.menu')).toHaveCount(0)
 })
 
+test('people reply to a message: it is quoted above the answer, and tapping the quote goes to it', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Replies')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await send(anne, 'shall we go?')
+  // Enough in between that the first message scrolls out of sight.
+  for (let line = 1; line <= 25; line++) await send(anne, `filler ${line}.`)
+  const question = bob.locator('.theirs', {hasText: 'shall we go?'})
+  await expect(bob.locator('.theirs', {hasText: 'filler 25.'})).toBeVisible()
+  await expect(question).not.toBeInViewport()
+
+  // Bob chooses Reply on the first message. It shows above the message box, which is ready for typing.
+  await question.scrollIntoViewIfNeeded()
+  await question.hover()
+  await question.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'Reply', exact: true}).click()
+  await expect(bob.locator('.menu')).toHaveCount(0)
+  await expect(bob.locator('.replying')).toContainText('Replying to Anne')
+  await expect(bob.locator('.replying')).toContainText('shall we go?')
+  await expect(bob.getByLabel('Message')).toBeFocused()
+  await send(bob, 'yes, at six')
+  await expect(bob.locator('.replying')).toHaveCount(0)
+
+  // Both see the answer with the question quoted in it.
+  const atAnne = anne.locator('.theirs', {hasText: 'yes, at six'})
+  const atBob = bob.locator('.mine', {hasText: 'yes, at six'})
+  await expect(atAnne.getByRole('button', {name: 'In reply to You: shall we go?'})).toBeVisible()
+  await expect(atBob.getByRole('button', {name: 'In reply to Anne: shall we go?'})).toBeVisible()
+
+  // The quote leads back to the message it quotes, and marks it for a moment.
+  const original = anne.locator('.mine', {hasText: 'shall we go?'}).first()
+  await expect(original).not.toBeInViewport()
+  await atAnne.locator('.quote').click()
+  await expect(original).toBeInViewport()
+  await expect(original).toHaveClass(/marked/)
+  await expect(original).not.toHaveClass(/marked/, {timeout: 5000})
+
+  // A reply that is dismissed is an ordinary message, and so is the one after a reply.
+  const lastFiller = bob.locator('.theirs', {hasText: 'filler 25.'})
+  await lastFiller.hover()
+  await lastFiller.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'Reply', exact: true}).click()
+  await bob.getByRole('button', {name: 'Cancel reply'}).click()
+  await expect(bob.locator('.replying')).toHaveCount(0)
+  await send(bob, 'never mind')
+  await expect(anne.locator('.theirs', {hasText: 'never mind'})).toBeVisible()
+  await expect(anne.locator('.theirs', {hasText: 'never mind'}).locator('.quote')).toHaveCount(0)
+
+  // A picture can be a reply too, and a reply can answer a picture.
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  const answer = anne.locator('.theirs', {hasText: 'yes, at six'})
+  await answer.hover()
+  await answer.getByRole('button', {name: 'React or copy'}).click()
+  await anne.getByRole('button', {name: 'Reply', exact: true}).click()
+  await anne.getByLabel('Pictures to add').setInputFiles(photoFile(await makePhoto(anne, 400, 300)))
+  await expect(anne.getByRole('img', {name: 'Picture 1 to send'})).toBeVisible()
+  await anne.getByRole('button', {name: 'Send'}).click()
+  const picture = bob.locator('.theirs.image')
+  await expect(picture.getByRole('button', {name: 'In reply to You: yes, at six'})).toBeVisible()
+  await picture.hover()
+  await picture.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: 'Reply', exact: true}).click()
+  await send(bob, 'lovely')
+  await expect(anne.locator('.theirs', {hasText: 'lovely'}).getByRole('button', {name: 'In reply to You: Picture'})).toBeVisible()
+
+  // Replies are part of the history.
+  await bob.reload()
+  await expect(bob.locator('.mine', {hasText: 'yes, at six'}).getByRole('button', {name: 'In reply to Anne: shall we go?'})).toBeVisible()
+})
+
 test('on a touch screen, a long press on a message opens its reactions', async ({browser}) => {
   const anne = await newPerson(browser)
   const context = await browser.newContext({hasTouch: true, isMobile: true, viewport: {width: 375, height: 667}})

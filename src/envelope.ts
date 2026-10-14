@@ -17,7 +17,8 @@ export const MAX_ENVELOPE_BYTES = 32 * 1024
 const NONCE_BYTES = 12
 
 export type Content =
-  | {type: 'text'; text: string}
+  /** Words. If it answers an earlier message, `replyTo` says which; that message is shown above it. */
+  | {type: 'text'; text: string; replyTo?: MessageRef}
   /** A member's display name and X25519 key, posted when they join, with the certificates that show they belong. */
   | {type: 'profile'; name: string; dh: Uint8Array; chain?: Uint8Array[]}
   /** A membership certificate, posted by the member who admitted someone. */
@@ -37,6 +38,9 @@ export type Content =
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
+/** Points at another message in the same chat, by its author and that author's numbering. */
+export type MessageRef = {author: string; seq: number}
+
 export type ImageContent = {
   type: 'image'
   /** SHA-256 of the encrypted file, in hex. */
@@ -49,6 +53,7 @@ export type ImageContent = {
   /** A very small JPEG of the picture; may be empty. */
   preview: Uint8Array
   caption?: string
+  replyTo?: MessageRef
 }
 
 export const IMAGE_MIME = 'image/jpeg'
@@ -95,10 +100,20 @@ const boundBytes = (label: string, chatId: string, author: Uint8Array, seq: numb
 
 const isCount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 
+const encodeRef = (ref: MessageRef) => [fromHex(ref.author), ref.seq]
+
+function decodeRef(value: unknown): MessageRef {
+  const [a, s] = Array.isArray(value) && value.length === 2 ? (value as unknown[]) : []
+  if (!(a instanceof Uint8Array) || a.length !== 32 || !isCount(s) || s === 0) throw new Error('bad reference to a message')
+  return {author: toHex(a), seq: s}
+}
+
 function encodeContent(content: Content): [string, unknown] {
   switch (content.type) {
     case 'text':
-      return ['text', content.text]
+      // A reply goes out as a kind of its own, so that an older version of the app keeps it for later
+      // instead of refusing it.
+      return content.replyTo ? ['reply', {t: content.text, r: encodeRef(content.replyTo)}] : ['text', content.text]
     case 'profile':
       return ['profile', {name: content.name, dh: content.dh, ...(content.chain?.length ? {c: content.chain} : {})}]
     case 'member-cert':
@@ -118,7 +133,8 @@ function encodeContent(content: Content): [string, unknown] {
           w: content.width,
           t: content.height,
           p: content.preview,
-          ...(content.caption ? {c: content.caption} : {})
+          ...(content.caption ? {c: content.caption} : {}),
+          ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
         }
       ]
     case 'unknown':
@@ -130,6 +146,11 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'text') {
     if (typeof body !== 'string' || body.length === 0 || body.length > MAX_TEXT_LENGTH) throw new Error('bad text body')
     return {type, text: body}
+  }
+  if (type === 'reply') {
+    const {t, r} = (body ?? {}) as Record<string, unknown>
+    if (typeof t !== 'string' || t.length === 0 || t.length > MAX_TEXT_LENGTH) throw new Error('bad reply body')
+    return {type: 'text', text: t, replyTo: decodeRef(r)}
   }
   if (type === 'profile') {
     const {name, dh, c} = (body ?? {}) as {name?: unknown; dh?: unknown; c?: unknown}
@@ -163,7 +184,7 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {type, target: {author: toHex(a), seq: s}, emoji: e}
   }
   if (type === 'image') {
-    const {m, h, k, z, w, t, p, c} = (body ?? {}) as Record<string, unknown>
+    const {m, h, k, z, w, t, p, c, r} = (body ?? {}) as Record<string, unknown>
     // A kind of picture a newer version sends: keep the message for when this device can show it.
     if (typeof m === 'string' && m !== IMAGE_MIME && m.length <= 64) return {type: 'unknown', kind: 'image'}
     const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
@@ -180,7 +201,8 @@ function decodeContent(type: unknown, body: unknown): Content {
       width: w,
       height: t,
       preview: new Uint8Array(p),
-      ...(c ? {caption: c as string} : {})
+      ...(c ? {caption: c as string} : {}),
+      ...(r !== undefined ? {replyTo: decodeRef(r)} : {})
     }
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.

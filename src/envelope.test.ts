@@ -95,7 +95,7 @@ describe('envelope', () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
     const authorBytes = fromHex(anne.id)
-    const payload = new Uint8Array(encode(['reply', {to: 4, text: 'yes'}, 9, 1_760_000_000_000]))
+    const payload = new Uint8Array(encode(['poll', {to: 4, text: 'yes'}, 9, 1_760_000_000_000]))
     const bound = (label: string) => {
       const seq = new Uint8Array(8)
       seq[7] = 5
@@ -112,7 +112,7 @@ describe('envelope', () => {
       seq: 5,
       lamport: 9,
       sentAt: 1_760_000_000_000,
-      content: {type: 'unknown', kind: 'reply'}
+      content: {type: 'unknown', kind: 'poll'}
     })
   })
 
@@ -132,7 +132,7 @@ describe('envelope', () => {
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: 'A', dh: anne.dhPublic, chain: longChain}}))).rejects.toThrow(/profile/)
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'profile', name: 'A', dh: anne.dhPublic, chain: [new Uint8Array(600)]}}))).rejects.toThrow(/profile/)
     await expect(openEnvelope(chat, await seal({...hello, content: {type: 'member-cert', cert: new Uint8Array(600)}}))).rejects.toThrow(/certificate/)
-    await expect(seal({...hello, content: {type: 'unknown', kind: 'reply'}})).rejects.toThrow(/unknown/)
+    await expect(seal({...hello, content: {type: 'unknown', kind: 'poll'}})).rejects.toThrow(/unknown/)
     await expect(openEnvelope(chat, new Uint8Array(encode('junk')))).rejects.toThrow()
     await expect(openEnvelope(chat, new Uint8Array(40_000))).rejects.toThrow(/too large/)
   })
@@ -148,6 +148,22 @@ describe('envelope', () => {
     for (const emoji of ['nice', '👍👍', '👍 ']) {
       const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
       await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).rejects.toThrow('bad reaction body')
+    }
+  })
+
+  it('round-trips a reply in words and one that is a picture, and refuses one that points nowhere', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const replyTo = {author: 'ab'.repeat(32), seq: 7}
+    const words = {...hello, seq: 2, content: {type: 'text', text: 'yes, at six', replyTo}} as const
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, words))).toEqual({...words, author: anne.id})
+    const image = {type: 'image', hash: 'cd'.repeat(32), key: new Uint8Array(32).fill(5), size: 1000, width: 4, height: 3, preview: new Uint8Array(0), replyTo} as const
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, {...hello, seq: 3, content: image}))).toEqual({...hello, seq: 3, content: image, author: anne.id})
+    // An ordinary message still travels exactly as before, so older versions of the app read it.
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, hello))).toEqual({...hello, author: anne.id})
+    for (const bad of [{author: 'ab'.repeat(32), seq: 0}, {author: 'ab'.repeat(8), seq: 1}]) {
+      const reply = {...hello, seq: 2, content: {type: 'text', text: 'hm', replyTo: bad}} as const
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reply))).rejects.toThrow('bad reference to a message')
     }
   })
 
