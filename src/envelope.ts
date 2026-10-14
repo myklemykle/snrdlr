@@ -40,6 +40,8 @@ export type Content =
    * words, or a picture's caption. Their latest edit is the one that counts.
    */
   | {type: 'edit'; target: number; text: string}
+  /** A new name for a group chat. Any member may give one; the latest is the chat's name. */
+  | {type: 'rename'; name: string}
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -142,6 +144,8 @@ function encodeContent(content: Content): [string, unknown] {
           ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
         }
       ]
+    case 'rename':
+      return ['rename', content.name]
     case 'edit':
       return ['edit', {s: content.target, t: content.text}]
     case 'unknown':
@@ -158,6 +162,10 @@ function decodeContent(type: unknown, body: unknown): Content {
     const {t, r} = (body ?? {}) as Record<string, unknown>
     if (typeof t !== 'string' || t.length === 0 || t.length > MAX_TEXT_LENGTH) throw new Error('bad reply body')
     return {type: 'text', text: t, replyTo: decodeRef(r)}
+  }
+  if (type === 'rename') {
+    if (typeof body !== 'string' || body.trim() === '' || body.length > MAX_NAME_LENGTH) throw new Error('bad rename body')
+    return {type, name: body}
   }
   if (type === 'edit') {
     const {s, t} = (body ?? {}) as Record<string, unknown>

@@ -15,7 +15,7 @@ Things noted along the way that are not part of the current phase. The phased pl
 - **Settings.** A window opened from the gear on the home screen, holding only the choice of sounds so far. Candidates to move or add there: changing your name, the stay-connected switch, the version line, storage used.
 - **Names and nicknames.**
   - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
-  - Rename a chat in progress. Needs a new message type (`rename` in the proposal) so every member sees the new name, and a rule for who may rename.
+  - Rename a group: built. Any member can, from the pencil beside the chat's name; everyone gets the new name and a line saying who changed it. Direct chats stay named after the other person. Open: two groups can now end up with the same name on one device.
   - Local nicknames for users and chats, set on your own device and never sent to anyone.
 - **Swipe to delete in the chat list.** On iOS, swiping a list row left to reveal a delete action is the standard convention; use it for leaving a chat, alongside or in place of the Leave button. Android has no single equivalent: swipe-to-dismiss and long-press-to-select are both common there.
 - **Tell other members when someone leaves a chat.** Leaving currently only deletes the chat from your own device.

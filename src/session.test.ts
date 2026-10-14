@@ -37,7 +37,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     statuses: [] as ConnectionStatus[],
     errors: [] as string[],
     files: new Set() as ReadonlySet<string>,
-    delivered: [] as string[]
+    delivered: [] as string[],
+    names: [] as string[]
   }
   const ownStore = store ?? (await openStore(`session-${counter++}`))
   const session = await openSession({
@@ -48,6 +49,7 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     handlers: {
       onMessages: messages => (state.messages = messages),
       onStatus: status => state.statuses.push(status),
+      onChatName: name => state.names.push(name),
       onPeersChange: peers => (state.peers = peers),
       onError: message => state.errors.push(message),
       onFiles: files => (state.files = files),
@@ -70,6 +72,8 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     },
     /** The texts of our messages known to have reached someone, in the order that was learned. */
     delivered: state.delivered,
+    /** Each name the chat has been given since this session opened. */
+    names: state.names,
     statuses: state.statuses,
     errors: state.errors
   }
@@ -633,6 +637,22 @@ describe('session', () => {
 
     expect(texts(bob.view)).toEqual(['did you get this?'])
     expect(texts(bob.view)).toHaveLength(1)
+  })
+
+  it('lets any member rename a group, for everyone, including someone who was away', async () => {
+    const network = makeNetwork()
+    const chat = makeChat()
+    const anne = await join(network, chat, createIdentity('Anne'))
+    const bob = await join(network, chat, createIdentity('Bob'))
+    await bob.session.rename('Picnic')
+    await settle()
+    expect(anne.names).toEqual(['Picnic'])
+    await anne.session.rename('Picnic on Sunday')
+    await settle()
+    expect(bob.names).toEqual(['Picnic', 'Picnic on Sunday'])
+    const carol = await join(network, chat, createIdentity('Carol'))
+    await settle()
+    expect(carol.names.at(-1)).toBe('Picnic on Sunday')
   })
 
   it('carries what a reply is answering, in words and with a picture', async () => {

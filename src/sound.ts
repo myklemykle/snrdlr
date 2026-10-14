@@ -105,7 +105,8 @@ export function unlockSound(): void {
     }
     // Fetches the chosen set ahead of time, so the first sound is not late.
     wanted.forEach(url => void load(context!, url))
-    if (context.state === 'suspended') void context.resume().catch(() => {})
+    // An iPhone also stops the audio ("interrupted") when the page has been in the background.
+    if (context.state !== 'running') void context.resume().catch(() => {})
   } catch {
     // No audio on this device.
   }
@@ -118,7 +119,12 @@ export function unlockSound(): void {
 export function playSound(sample = false): void {
   const now = Date.now()
   const wanted = urls()
-  if (!context || context.state !== 'running' || wanted.length === 0 || (!sample && now - lastPlayedAt < MIN_GAP_MS)) return
+  if (!context || wanted.length === 0 || (!sample && now - lastPlayedAt < MIN_GAP_MS)) return
+  if (context.state !== 'running') {
+    // Trying out a setting happens in a tap, which is when the audio may be switched on; wait for that.
+    if (sample) void context.resume().then(() => context?.state === 'running' && playSound(true), () => {})
+    return
+  }
   lastPlayedAt = now
   // Not the same one twice running, when there is a choice.
   const choices = wanted.length > 1 ? wanted.filter(url => url !== lastUrl) : wanted

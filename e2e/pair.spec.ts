@@ -709,6 +709,50 @@ test('people edit what they said: the new words replace the old for everyone, ma
   await expect(bob.locator('.theirs.image .time')).toContainText('edited')
 })
 
+test('any member renames a group: everyone gets the new name, and the chat says who changed it', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Outing')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(bob.getByRole('heading', {name: 'Outing'})).toBeVisible()
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  // Bob, who did not start the chat, renames it.
+  await bob.getByRole('button', {name: 'Rename chat'}).click()
+  const box = bob.getByLabel('New name for this chat')
+  await expect(box).toHaveValue('Outing')
+  await expect(box).toBeFocused()
+  await box.fill('  Picnic on Sunday  ')
+  await bob.getByRole('button', {name: 'Save'}).click()
+  await expect(bob.getByRole('heading', {name: 'Picnic on Sunday'})).toBeVisible()
+  await expect(anne.getByRole('heading', {name: 'Picnic on Sunday'})).toBeVisible()
+  await expect(bob.locator('.event', {hasText: 'changed the name'})).toHaveText('You changed the name to “Picnic on Sunday”')
+  await expect(anne.locator('.event', {hasText: 'changed the name'})).toHaveText('Bob changed the name to “Picnic on Sunday”')
+  await expect(anne).toHaveTitle('Picnic on Sunday · snrdlr')
+
+  // Backing out, or saving the same name, changes nothing.
+  await anne.getByRole('button', {name: 'Rename chat'}).click()
+  await anne.getByLabel('New name for this chat').fill('Never mind')
+  await anne.getByLabel('New name for this chat').press('Escape')
+  await anne.getByRole('button', {name: 'Rename chat'}).click()
+  await anne.getByLabel('New name for this chat').press('Enter')
+  await expect(anne.getByRole('heading', {name: 'Picnic on Sunday'})).toBeVisible()
+  await send(anne, 'after')
+  await expect(bob.locator('.theirs', {hasText: 'after'})).toBeVisible()
+  await expect(bob.locator('.event', {hasText: 'changed the name'})).toHaveCount(1)
+
+  // The list of chats has the new name too, with nothing marked unread for it.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(chatEntry(bob, 'Picnic on Sunday')).toBeVisible()
+  await expect(chatEntry(bob, 'Outing')).toHaveCount(0)
+
+  // The line saying who renamed it is part of the history.
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await bob.reload()
+  await chatEntry(bob, 'Picnic on Sunday').click()
+  await expect(bob.locator('.event', {hasText: 'changed the name'})).toHaveText('You changed the name to “Picnic on Sunday”')
+})
+
 test('on a touch screen, a long press on a message opens its reactions', async ({browser}) => {
   const anne = await newPerson(browser)
   const context = await browser.newContext({hasTouch: true, isMobile: true, viewport: {width: 375, height: 667}})

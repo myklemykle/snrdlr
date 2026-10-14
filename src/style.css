@@ -1071,3 +1071,39 @@ button:disabled {
 .menu .reply + .reply {
   margin-top: 0;
 }
+
+/* A group's name, and changing it. */
+.chat header .name {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.chat header .name h1 {
+  min-width: 0;
+}
+
+.pencil {
+  flex: none;
+  display: flex;
+  padding: 0.35rem;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.chat header .rename {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.rename input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rename button {
+  padding: 0.55rem 0.7rem;
+}

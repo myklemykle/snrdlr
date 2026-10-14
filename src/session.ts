@@ -56,7 +56,7 @@ export type ConnectionStatus = 'connecting' | 'searching' | 'checking' | 'reconn
 
 export type SessionHandlers = {
   onMessages: (messages: MessageRecord[]) => void
-  /** A direct chat is named after the other person, once they have said what they are called. */
+  /** The chat's name has changed: a direct chat takes the other person's name, and a group can be renamed. */
   onChatName?: (name: string) => void
   onStatus: (status: ConnectionStatus) => void
   onPeersChange: (peerIds: string[]) => void
@@ -74,6 +74,8 @@ export type Session = {
   postCert: (cert: Uint8Array) => Promise<void>
   /** In a direct chat: lets the other person into a group we have started. */
   postGroupInvite: (invite: Extract<Content, {type: 'group-invite'}>) => Promise<void>
+  /** Gives a group chat a new name, for every member. */
+  rename: (name: string) => Promise<void>
   /** Changes the words of one of our own messages, or a picture's caption. */
   edit: (seq: number, text: string) => Promise<void>
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
@@ -190,10 +192,14 @@ export async function openSession(options: {
   let chatName = chat.name
   const publish = () => {
     handlers.onMessages(messages)
-    if (chat.kind !== 'dm') return
-    const theirs = messages.findLast(message => message.author !== identity.id && message.content.type === 'profile')
-    if (theirs?.content.type === 'profile' && theirs.content.name !== chatName) {
-      chatName = theirs.content.name
+    // A direct chat is named after the other person; a group, by whoever last gave it a name.
+    const naming =
+      chat.kind === 'dm'
+        ? messages.findLast(message => message.author !== identity.id && message.content.type === 'profile')
+        : messages.findLast(message => message.content.type === 'rename')
+    const name = naming?.content.type === 'profile' || naming?.content.type === 'rename' ? naming.content.name : null
+    if (name !== null && name !== chatName) {
+      chatName = name
       void store.renameChat(chat.id, chatName)
       handlers.onChatName?.(chatName)
     }
@@ -450,6 +456,7 @@ export async function openSession(options: {
     sendText: (text, replyTo) => post({type: 'text', text, ...(replyTo ? {replyTo} : {})}),
     postCert: cert => post({type: 'member-cert', cert}),
     postGroupInvite: invite => post(invite),
+    rename: name => post({type: 'rename', name}),
     edit: (seq, text) => post({type: 'edit', target: seq, text}),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
     async postImage(image, file) {

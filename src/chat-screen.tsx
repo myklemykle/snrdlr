@@ -5,7 +5,7 @@ import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
 import {EmojiPicker} from './emoji-picker'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type ImageContent, type MessageRef} from './envelope'
-import {memberId, type Identity} from './identity'
+import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {prepareImage, type PreparedImage} from './image'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
@@ -225,7 +225,7 @@ export function ChatScreen(props: {
       (messages ?? []).filter(message => {
         const {type} = message.content
         if (type === 'profile') return message.author !== identity.id && firstProfiles.has(message)
-        return type === 'text' || type === 'image' || type === 'group-invite'
+        return type === 'text' || type === 'image' || type === 'group-invite' || type === 'rename'
       }),
     [messages]
   )
@@ -528,8 +528,22 @@ export function ChatScreen(props: {
   }
   useEffect(() => cancelPress, [])
 
+  // A group's name being changed, in place of the title. Any member can; everyone gets the new name.
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const nameBox = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (renaming !== null) nameBox.current?.select()
+  }, [renaming !== null])
+  const rename = (event: Event) => {
+    event.preventDefault()
+    const name = cleanName(renaming ?? '')
+    if (!name || !session.current) return
+    setRenaming(null)
+    if (name !== chatName) session.current.rename(name).catch(() => setError('The name could not be changed.'))
+  }
+
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null)
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -606,8 +620,37 @@ export function ChatScreen(props: {
         <button type="button" class="back" onClick={onBack} aria-label="Back to chats">
           ‹
         </button>
+        {renaming !== null ? (
+          <form class="rename" onSubmit={rename}>
+            <input
+              ref={nameBox}
+              value={renaming}
+              onInput={event => setRenaming(event.currentTarget.value)}
+              onKeyDown={event => event.key === 'Escape' && setRenaming(null)}
+              maxLength={MAX_NAME_LENGTH}
+              aria-label="New name for this chat"
+              autocomplete="off"
+            />
+            <button type="submit" disabled={!cleanName(renaming)}>
+              Save
+            </button>
+            <button type="button" aria-label="Cancel rename" onClick={() => setRenaming(null)}>
+              ✕
+            </button>
+          </form>
+        ) : (
         <div class="title">
-          <h1>{chatName}</h1>
+          <div class="name">
+            <h1>{chatName}</h1>
+            {!direct && (
+              <button type="button" class="pencil" aria-label="Rename chat" disabled={!messages} onClick={() => setRenaming(chatName)}>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+                  <path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 0l.5.5a2.1 2.1 0 0 1 0 3L8.5 19z" />
+                  <path d="M14.5 6l3.5 3.5" />
+                </svg>
+              </button>
+            )}
+          </div>
           {connected ? (
             <p class="status on">{`Connected to ${peers.length}${routeSummary && ` · ${routeSummary}`}`}</p>
           ) : status === 'idle' ? (
@@ -616,7 +659,8 @@ export function ChatScreen(props: {
             <p class="status busy">{BUSY_LABELS[status]}</p>
           )}
         </div>
-        {direct ? (
+        )}
+        {renaming !== null ? null : direct ? (
           <button type="button" onClick={addSomeone} disabled={!messages}>
             Add someone
           </button>
@@ -671,6 +715,14 @@ export function ChatScreen(props: {
                 {message.author === founderId
                   ? `${message.content.name} started this chat`
                   : `${message.content.name} joined${inviter ? ` · ${invitedLine(inviter)}` : ''}`}
+              </li>
+            ]
+          }
+          if (message.content.type === 'rename') {
+            return [
+              separator,
+              <li key={key} class="event">
+                {mine ? 'You' : nameOf(message.author)} changed the name to “{message.content.name}”
               </li>
             ]
           }

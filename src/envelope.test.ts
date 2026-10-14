@@ -167,6 +167,17 @@ describe('envelope', () => {
     }
   })
 
+  it('round-trips a new name for the chat, and refuses an empty or overlong one', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const rename = {...hello, seq: 2, content: {type: 'rename', name: 'Picnic'}} as const
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, rename))).toEqual({...rename, author: anne.id})
+    for (const name of ['', '   ', 'x'.repeat(65)]) {
+      const bad = {...hello, seq: 2, content: {type: 'rename', name}} as const
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, bad))).rejects.toThrow('bad rename body')
+    }
+  })
+
   it('round-trips an edit, and refuses one that names no message', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
