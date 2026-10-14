@@ -1564,6 +1564,36 @@ test('on a small phone, a home screen longer than the screen scrolls all the way
   await expect(phone.locator('.build')).toBeInViewport()
 })
 
+test('the app can be installed, and opens with no network once it has been opened before', async ({browser}) => {
+  const context = await browser.newContext()
+  await context.addInitScript(() => localStorage.setItem('snrdlr.invited', '1'))
+  const page = await context.newPage()
+  await page.goto('/')
+  await introduce(page, 'Anne')
+  await page.getByLabel('Chat name').fill('Kept')
+  await page.getByRole('button', {name: 'Start a group'}).click()
+  await send(page, 'written before the network went')
+
+  // What a browser needs before it offers to install: a manifest that names the app, its icons, and a
+  // service worker in charge of the page.
+  const manifest = await page.evaluate(async () => (await fetch(document.querySelector<HTMLLinkElement>('link[rel=manifest]')!.href)).json())
+  expect(manifest).toMatchObject({name: 'snrdlr', display: 'standalone', start_url: './'})
+  for (const icon of manifest.icons) expect((await page.request.get(new URL(icon.src, page.url()).href)).ok()).toBe(true)
+  await page.evaluate(() => navigator.serviceWorker.ready)
+  await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true)
+
+  // A visit with the worker in charge is what fills its shelves; after that the network can go.
+  await page.reload()
+  await expect(page.getByRole('heading', {name: 'Kept'})).toBeVisible()
+  await context.setOffline(true)
+  await page.reload()
+  await expect(page.getByRole('heading', {name: 'Kept'})).toBeVisible()
+  await expect(page.locator('.mine', {hasText: 'written before the network went'})).toBeVisible()
+  await page.goto('/')
+  await expect(chatEntry(page, 'Kept')).toBeVisible()
+  await context.setOffline(false)
+})
+
 test('the home screen says which build is running', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/')

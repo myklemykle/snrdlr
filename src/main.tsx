@@ -1,5 +1,6 @@
 import {render} from 'preact'
 import {App} from './app'
+import {setUpInstall} from './install'
 import {unlockSound} from './sound'
 import {readDevSwitch} from './standing-invite'
 import {watchForUpdates} from './update'
@@ -7,6 +8,7 @@ import './style.css'
 
 readDevSwitch()
 watchForUpdates()
+setUpInstall()
 
 // Any tap, click or key lets the browser play message sounds from then on. Which moment counts differs:
 // for a finger it is when it lifts, not when it lands (an iPhone is strict about this), and for a mouse

@@ -10,6 +10,7 @@ import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
 import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
+import {useInstall} from './install'
 import {ProfileEditor} from './profile-view'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
@@ -491,6 +492,7 @@ function Home(props: {
   const [leaving, setLeaving] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const install = useInstall()
   useUpdateHold(profileOpen)
   const update = useUpdateState()
   // The "running for" line is the only thing here that changes by the clock.
@@ -677,6 +679,16 @@ function Home(props: {
         <button type="submit">Start a group</button>
       </form>
       <p class="note">To join someone else's group or chat with them, scan their code with your camera while they have it on screen.</p>
+
+      {install && (
+        <section class="install">
+          <h2>Install</h2>
+          <p class="note">Puts snrdlr on your home screen, where it opens like any other app. Your chats stay as they are.</p>
+          <button type="button" onClick={install}>
+            Install snrdlr
+          </button>
+        </section>
+      )}
 
       {(desktop || stay) && (
         <section class="keep">

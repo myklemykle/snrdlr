@@ -1,0 +1,16 @@
+{
+  "name": "snrdlr",
+  "short_name": "snrdlr",
+  "description": "Chat directly with people you have met, paired by scanning a code.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fafaf7",
+  "theme_color": "#fafaf7",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
