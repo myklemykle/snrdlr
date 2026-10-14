@@ -29,8 +29,11 @@ export type MailboxHandlers = {
 }
 
 export type Mailbox = {
-  /** Leaves an envelope with the relay. True once the relay has it; false if that could not be done for now. */
-  post: (envelope: Uint8Array, sentAt: number) => Promise<boolean>
+  /**
+   * Leaves an envelope with the relay. True once the relay has it; false if that could not be done for
+   * now. `notify`, the author's tag in this chat (push.ts), asks the relay to wake members' devices.
+   */
+  post: (envelope: Uint8Array, sentAt: number, notify?: string) => Promise<boolean>
   close: () => void
 }
 
@@ -40,13 +43,14 @@ export type OpenMailbox = (topic: string, collectedAt: number | undefined, handl
 export type NostrEvent = {id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string}
 
 /** Wraps a sealed envelope as an event for the relay to keep. */
-export function wrapEnvelope(topic: string, envelope: Uint8Array, sentAt: number): NostrEvent {
+export function wrapEnvelope(topic: string, envelope: Uint8Array, sentAt: number, notify?: string): NostrEvent {
   const secretKey = schnorr.utils.randomSecretKey()
   const pubkey = toHex(schnorr.getPublicKey(secretKey))
   const created_at = Math.floor(sentAt / 1000)
   const tags = [
     ['x', topic],
-    ['expiration', String(created_at + KEEP_SECONDS)]
+    ['expiration', String(created_at + KEEP_SECONDS)],
+    ...(notify ? [['n', notify]] : [])
   ]
   const content = toBase64Url(envelope)
   const id = sha256(utf8(JSON.stringify([0, pubkey, created_at, STORED_KIND, tags, content])))
@@ -185,10 +189,10 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
     if (socket?.readyState === WebSocket.OPEN) ask(sub)
     else connect()
     return {
-      post: (envelope, sentAt) =>
+      post: (envelope, sentAt, notify) =>
         new Promise<boolean>(resolve => {
           if (!subs.has(sub.id) || waiting.size >= MAX_WAITING) return resolve(false)
-          const event = wrapEnvelope(topic, envelope, sentAt)
+          const event = wrapEnvelope(topic, envelope, sentAt, notify)
           waiting.set(event.id, {json: JSON.stringify(event), done: resolve})
           if (socket?.readyState === WebSocket.OPEN) send(event.id)
           else {

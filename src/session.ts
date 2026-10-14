@@ -15,6 +15,7 @@ import {openAsMember, sealForMembers, type Recipient} from './store-seal'
 import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
 import {KEEP_SECONDS, type Mailbox, type OpenMailbox} from './mailbox'
+import {pushTag, worthNotifying} from './push-tag'
 import {makeRoster} from './membership'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
@@ -343,8 +344,10 @@ export async function openSession(options: {
     const tracked = fromHere(record)
     if (tracked && shelving.has(record.seq)) return
     if (tracked) shelving.add(record.seq)
+    // A message just written here wakes the other members' devices; anything else waits until they look.
+    const notify = tracked && chat.kind !== 'self' && worthNotifying(record) ? pushTag(chat, identity) : undefined
     void sealForMembers(chat.id, record.envelope, recipients())
-      .then(locked => mailbox.post(locked, record.sentAt))
+      .then(locked => mailbox.post(locked, record.sentAt, notify))
       .catch(() => false)
       .then(kept => {
       if (!tracked) return

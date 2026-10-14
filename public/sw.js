@@ -1,4 +1,4 @@
-// The service worker: lets the app open with no network, and is where notifications will arrive.
+// The service worker: lets the app open with no network, and shows notifications (see src/push.ts).
 //
 // It is deliberately plain and rarely changes. The page is always fetched fresh when there is a
 // network, so a new version of the app is never held back by this file; what is kept here is only
@@ -49,4 +49,69 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') event.respondWith(freshFirst(request, self.registration.scope))
   else if (url.pathname.includes('/assets/')) event.respondWith(keptFirst(request))
   else event.respondWith(freshFirst(request, request))
+})
+
+// A push names only the chat's topic. The app leaves each chat's name here (src/push.ts), so the
+// notification can say which chat; the message itself is fetched by the app when it is opened.
+const LABELS_CACHE = 'snrdlr-push'
+const onIos = /iPhone|iPad|iPod/.test(self.navigator.userAgent)
+
+async function labels() {
+  try {
+    const kept = await (await caches.open(LABELS_CACHE)).match('labels')
+    if (kept) return await kept.json()
+  } catch {
+    // Worded plainly instead.
+  }
+  return {safari: false, chats: {}}
+}
+
+async function notify(topic) {
+  const {chats} = await labels()
+  const chat = chats[topic]
+  // Someone looking at the app already hears and sees what arrives. An iPhone insists on a
+  // notification for every push, so it gets one regardless.
+  const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true})
+  if (!onIos && windows.some(client => client.visibilityState === 'visible' && client.focused)) return
+  const tag = topic || 'snrdlr'
+  const earlier = await self.registration.getNotifications({tag})
+  const count = earlier.reduce((most, shown) => Math.max(most, shown.data?.count ?? 1), 0) + 1
+  await self.registration.showNotification(chat ? chat.name : 'snrdlr', {
+    body: count > 1 ? `${count} new messages` : 'New message',
+    tag,
+    renotify: true,
+    icon: 'icon-192.png',
+    data: {id: chat?.id ?? null, count}
+  })
+}
+
+self.addEventListener('push', event => {
+  let topic = ''
+  try {
+    topic = event.data?.json()?.t ?? ''
+  } catch {
+    // A push with nothing readable still says something arrived.
+  }
+  event.waitUntil(notify(topic))
+})
+
+async function open(id) {
+  const scope = self.registration.scope
+  const chat = id ? `#c=${id}` : ''
+  // In the iPhone's Home Screen app, the app opens Safari, where the chats are kept; a notification
+  // cannot open Safari by itself.
+  if (onIos && (await labels()).safari) return self.clients.openWindow(`${scope}?safari=${encodeURIComponent(chat)}`)
+  const windows = await self.clients.matchAll({type: 'window'})
+  const app = windows.find(client => client.url.startsWith(scope))
+  if (app) {
+    await app.focus()
+    app.postMessage({open: id})
+    return
+  }
+  return self.clients.openWindow(scope + chat)
+}
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close()
+  event.waitUntil(open(event.notification.data?.id ?? null))
 })

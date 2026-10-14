@@ -3,7 +3,8 @@ import {describe, expect, it} from 'vitest'
 // The probe signs events the way the app's connection library does.
 // @ts-expect-error The probe is plain JavaScript, with no type declarations.
 import {makeEvent} from '../../scripts/probe-relays.mjs'
-import {LIMITS, memoryStore, Relay, STORED_KIND, type ConnectionState} from './relay'
+import {sha256} from '@noble/hashes/sha2.js'
+import {LIMITS, memoryStore, Relay, STORED_KIND, type ConnectionState, type PushBook, type PushTarget, type PushTopic} from './relay'
 
 const secretKey = schnorr.utils.randomSecretKey()
 const TOPIC = '1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o'
@@ -246,5 +247,81 @@ describe('Relay', () => {
     for (let i = 0; i < LIMITS.connectionsPerAddress; i++) join(relay, 'address-b')
     expect(relay.refusal('address-b')).toMatch(/Too many connections/)
     expect(relay.refusal('address-c')).toBeNull()
+  })
+
+  describe('push notifications', () => {
+    const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+    const CHAT = 'ab'.repeat(32)
+    const ANNE = 'a1'.repeat(16)
+    const BOB = 'b2'.repeat(16)
+    const device = (name: string): PushTarget => ({endpoint: `https://web.push.apple.com/${name}`, p256dh: 'B'.repeat(87), auth: 'A'.repeat(22)})
+    /** A sealed message, marked as worth a notification when `notify` is given. */
+    const sealed = (notify?: string) => {
+      const pubkey = hex(schnorr.getPublicKey(secretKey))
+      const tags = [['x', CHAT], ...(notify ? [['n', notify]] : [])]
+      const content = `sealed ${serial++}`
+      const id = sha256(new TextEncoder().encode(JSON.stringify([0, pubkey, 1_790_000_000, STORED_KIND, tags, content])))
+      return {kind: STORED_KIND, tags, created_at: 1_790_000_000, content, pubkey, id: hex(id), sig: hex(schnorr.sign(id, secretKey))}
+    }
+    const book = () => {
+      const registered = new Map<string, PushTopic[]>()
+      const stored: [string, string][] = []
+      const pushes: PushBook = {
+        register: (target, topics) => void registered.set(target.endpoint, topics),
+        forget: endpoint => void registered.delete(endpoint),
+        stored: async (topic, me) => void stored.push([topic, me])
+      }
+      return {pushes, registered, stored}
+    }
+
+    it('registers a device for its chats, replacing what it asked for before', async () => {
+      const {pushes, registered} = book()
+      const anne = join(new Relay(() => 1_790_000_000_000, memoryStore(), pushes))
+      await anne.say('PUSH', device('phone'), [[CHAT, ANNE]])
+      await anne.say('PUSH', device('phone'), [[CHAT, ANNE], ['cd'.repeat(32), ANNE]])
+      expect(anne.got).toEqual([['PUSH', true, ''], ['PUSH', true, '']])
+      expect(registered.get(device('phone').endpoint)).toHaveLength(2)
+      await anne.say('UNPUSH', device('phone').endpoint)
+      expect(registered.size).toBe(0)
+    })
+
+    it('pushes only to real push services, and checks what it is given', async () => {
+      const {pushes, registered} = book()
+      const anne = join(new Relay(() => 1_790_000_000_000, memoryStore(), pushes))
+      await anne.say('PUSH', {...device('x'), endpoint: 'https://example.com/hook'}, [[CHAT, ANNE]])
+      await anne.say('PUSH', {...device('x'), endpoint: 'http://web.push.apple.com/x'}, [[CHAT, ANNE]])
+      await anne.say('PUSH', {...device('x'), auth: 'short'}, [[CHAT, ANNE]])
+      await anne.say('PUSH', device('x'), [['not a topic', ANNE]])
+      await anne.say('PUSH', device('x'), Array.from({length: 501}, () => [CHAT, ANNE]))
+      expect(anne.got.map(message => message[1])).toEqual([false, false, false, false, false])
+      expect(anne.got[0][2]).toBe('blocked: not a push service')
+      expect(registered.size).toBe(0)
+      // Google's and Mozilla's are fine too.
+      await anne.say('PUSH', {...device('x'), endpoint: 'https://fcm.googleapis.com/fcm/send/abc'}, [[CHAT, ANNE]])
+      await anne.say('PUSH', {...device('x'), endpoint: 'https://updates.push.services.mozilla.com/wpush/v2/abc'}, [[CHAT, ANNE]])
+      expect(registered.size).toBe(2)
+    })
+
+    it('says a marked message was stored, with its author tag, and stays quiet about the rest', async () => {
+      const {pushes, stored} = book()
+      const bob = join(new Relay(() => 1_790_000_000_000, memoryStore(), pushes))
+      await bob.say('EVENT', sealed(BOB))
+      await bob.say('EVENT', sealed())
+      await bob.say('EVENT', sealed('not hex'))
+      // A short-lived event is never stored, so it wakes nobody whatever it carries.
+      await bob.say('EVENT', {...event(), tags: [['x', CHAT], ['n', BOB]]})
+      expect(stored).toEqual([[CHAT, BOB]])
+      // The same message again is a duplicate, and does not push twice.
+      const again = sealed(BOB)
+      await bob.say('EVENT', again)
+      await bob.say('EVENT', again)
+      expect(stored).toHaveLength(2)
+    })
+
+    it('without a push book, PUSH is not understood', async () => {
+      const anne = join(new Relay(() => 1_790_000_000_000, memoryStore()))
+      await anne.say('PUSH', device('phone'), [[CHAT, ANNE]])
+      expect(anne.got[0][0]).toBe('NOTICE')
+    })
   })
 })

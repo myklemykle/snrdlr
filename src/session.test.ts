@@ -9,6 +9,7 @@ import {latestCards} from './cards'
 import {latestEdits} from './edits'
 import type {OpenMailbox} from './mailbox'
 import {tallyReactions} from './reactions'
+import {pushTag, worthNotifying} from './push-tag'
 import {openSession, versionVector, type ConnectionStatus} from './session'
 import {openAsMember} from './store-seal'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
@@ -684,6 +685,8 @@ describe('session', () => {
   /** A stand-in for the relay that keeps messages: one shelf per topic, shared by whoever is given it. */
   function makeShelf() {
     const kept = new Map<string, Uint8Array[]>()
+    /** For each message left, the tag that asks the relay to notify, if it had one. */
+    const notified: (string | null)[] = []
     const listeners = new Map<string, Set<(envelope: Uint8Array) => void>>()
     let up = true
     const open: OpenMailbox = (topic, _collectedAt, handlers) => {
@@ -694,8 +697,9 @@ describe('session', () => {
         handlers.onCaughtUp?.(Date.now())
       })
       return {
-        post: async envelope => {
+        post: async (envelope, _sentAt, notify) => {
           if (!up) return false
+          notified.push(notify ?? null)
           kept.set(topic, [...(kept.get(topic) ?? []), envelope])
           listeners.get(topic)!.forEach(listener => listener !== handlers.onEnvelope && listener(envelope))
           return true
@@ -703,8 +707,34 @@ describe('session', () => {
         close: () => void listeners.get(topic)!.delete(handlers.onEnvelope)
       }
     }
-    return {open, kept, setUp: (next: boolean) => (up = next)}
+    return {open, kept, notified, setUp: (next: boolean) => (up = next)}
   }
+
+  it("asks the relay to notify the other members of a message just written, and of nothing else", async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    const anne = createIdentity('Anne')
+    const first = await join(makeNetwork(), chat, anne, undefined, undefined, shelf.open)
+    // Opening the chat leaves her profile there, which is housekeeping.
+    await vi.waitFor(() => expect(shelf.notified.length).toBeGreaterThan(0))
+    expect(shelf.notified.every(tag => tag === null)).toBe(true)
+    const before = shelf.notified.length
+    await first.session.sendText('news')
+    await vi.waitFor(() => expect(shelf.notified).toHaveLength(before + 1))
+    // Tagged as hers in this chat, the same on any of her devices, so none of them is woken by it.
+    expect(shelf.notified.at(-1)).toBe(pushTag(chat, anne))
+    expect(pushTag(chat, {...anne, device: '0123456789abcdef'} as Identity)).toBe(pushTag(chat, anne))
+    expect(pushTag(chat, createIdentity('Bob'))).not.toBe(pushTag(chat, anne))
+    expect(pushTag(makeChat(), anne)).not.toBe(pushTag(chat, anne))
+    await first.session.close()
+  })
+
+  it('treats an old message being caught up on as no news', () => {
+    const now = 1_800_000_000_000
+    expect(worthNotifying({content: {type: 'text', text: 'hi'}, sentAt: now - 1000}, now)).toBe(true)
+    expect(worthNotifying({content: {type: 'text', text: 'hi'}, sentAt: now - 3600_000}, now)).toBe(false)
+    expect(worthNotifying({content: {type: 'rename', name: 'x'}, sentAt: now}, now)).toBe(false)
+  })
 
   it('leaves messages with the relay for someone who is never online at the same time', async () => {
     const shelf = makeShelf()

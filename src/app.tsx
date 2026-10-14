@@ -1,4 +1,6 @@
 import type {ComponentChildren} from 'preact'
+import {clearNotifications, keepPushRegistered} from './push'
+import {NotificationSettings} from './push-view'
 import {useEffect, useRef, useState} from 'preact/hooks'
 import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
@@ -293,6 +295,23 @@ function Main(props: {
     return () => void stop()
   }, [named])
 
+  // Keeps the relay told which chats to wake this device for, if notifications are on.
+  useEffect(() => {
+    if (!named) return
+    return keepPushRegistered(store, identity)
+  }, [named])
+
+  // A notification tapped while the app is open: its chat, or the chat list.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const open = (event.data as {open?: unknown} | null)?.open
+      if (typeof open === 'string') openChat(open)
+      else if (open === null) goHome()
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage)
+  }, [])
+
   // A sound for messages arriving in chats that are not on screen.
   useEffect(() => onBackgroundActivity((_chatId, incoming) => incoming && playSound()), [])
 
@@ -321,8 +340,10 @@ function Main(props: {
     let cancelled = false
     void store.getChat(hash.slice(CHAT_PREFIX.length)).then(found => {
       if (cancelled) return
-      if (found) setChat(found)
-      else goHome(true)
+      if (found) {
+        setChat(found)
+        void clearNotifications(found).catch(() => {})
+      } else goHome(true)
     })
     return () => {
       cancelled = true
@@ -677,6 +698,8 @@ function Home(props: {
       </p>
       {settingsOpen && (
         <Settings onClose={() => setSettingsOpen(false)}>
+          <NotificationSettings store={store} identity={identity} />
+
           <section>
             <h3>Join someone</h3>
             <p class="note">To join someone else's group or chat with them, scan their code while they have it on screen.</p>

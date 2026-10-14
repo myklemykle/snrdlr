@@ -5,13 +5,16 @@
 // Every connection is handed to one Durable Object, which holds the WebSockets. Cloudflare lets
 // the object go idle between messages without dropping the sockets, so each socket carries its
 // own subscriptions as an attachment and the object rebuilds its picture from them when it wakes.
-import {LIMITS, Relay, STORED_KIND, type ConnectionState, type MessageStore} from './relay'
+import {LIMITS, Relay, STORED_KIND, type ConnectionState, type MessageStore, type PushBook} from './relay'
+import {sendPush, type PushTarget} from './webpush'
 
 type RateLimiter = {limit: (options: {key: string}) => Promise<{success: boolean}>}
 type ObjectStub = {fetch: (request: Request) => Promise<Response>}
 export type Env = {
   RELAY: {idFromName: (name: string) => unknown; get: (id: unknown) => ObjectStub}
   CONNECT_LIMITER: RateLimiter
+  /** The relay's push signing key, a P-256 JWK as JSON. A secret; without it no pushes are offered. */
+  VAPID_PRIVATE_KEY?: string
 }
 
 /** The parts of Cloudflare's hibernating WebSocket that are used here. */
@@ -23,12 +26,67 @@ type HeldSocket = {
 }
 type Sql = {exec: (query: string, ...values: (string | number)[]) => {toArray: () => Record<string, string | number>[]}; databaseSize: number}
 type ObjectContext = {
+  waitUntil: (work: Promise<unknown>) => void
   acceptWebSocket: (socket: HeldSocket) => void
   getWebSockets: () => HeldSocket[]
   storage: {sql: Sql; getAlarm: () => Promise<number | null>; setAlarm: (at: number) => Promise<void>}
 }
 
 const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000
+/** Who the push services are told is sending, should they need to get in touch. */
+const PUSH_SUBJECT = 'https://alpha.snrdlr.net'
+/** A device that has not renewed its registration for this long is forgotten. Devices renew daily while used. */
+const PUSH_FORGET_MS = 60 * 24 * 3600_000
+/** At most one push per device per chat this often; a burst of messages wakes a phone once. */
+const PUSH_GAP_MS = 5000
+
+/** Push registrations in the object's own SQLite database, and the sending of pushes. */
+function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknown>) => void): PushBook {
+  sql.exec('CREATE TABLE IF NOT EXISTS push_targets (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, updated_at INTEGER NOT NULL)')
+  sql.exec('CREATE TABLE IF NOT EXISTS push_topics (topic TEXT NOT NULL, endpoint TEXT NOT NULL, me TEXT NOT NULL, last_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (topic, endpoint))')
+  sql.exec('CREATE INDEX IF NOT EXISTS push_topics_by_endpoint ON push_topics (endpoint)')
+  const vapid = JSON.parse(vapidJson) as JsonWebKey
+  const forget = (endpoint: string) => {
+    sql.exec('DELETE FROM push_topics WHERE endpoint = ?', endpoint)
+    sql.exec('DELETE FROM push_targets WHERE endpoint = ?', endpoint)
+  }
+  return {
+    register(target, topics) {
+      sql.exec(
+        'INSERT INTO push_targets (endpoint, p256dh, auth, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, updated_at = excluded.updated_at',
+        target.endpoint,
+        target.p256dh,
+        target.auth,
+        Date.now()
+      )
+      sql.exec('DELETE FROM push_topics WHERE endpoint = ?', target.endpoint)
+      for (const {topic, me} of topics) sql.exec('INSERT OR REPLACE INTO push_topics (topic, endpoint, me) VALUES (?, ?, ?)', topic, target.endpoint, me)
+    },
+    forget,
+    async stored(topic, me) {
+      const now = Date.now()
+      const targets = sql
+        .exec(
+          'SELECT t.endpoint, t.p256dh, t.auth FROM push_topics p JOIN push_targets t ON t.endpoint = p.endpoint WHERE p.topic = ? AND p.me != ? AND p.last_at < ?',
+          topic,
+          me,
+          now - PUSH_GAP_MS
+        )
+        .toArray() as PushTarget[]
+      if (targets.length === 0) return
+      sql.exec('UPDATE push_topics SET last_at = ? WHERE topic = ? AND me != ? AND last_at < ?', now, topic, me, now - PUSH_GAP_MS)
+      // Sent while the relay carries on; the device reads which chat from `t` and asks for the message itself.
+      waitUntil(
+        Promise.all(
+          targets.map(async target => {
+            const outcome = await sendPush(target, {t: topic}, {vapid, subject: PUSH_SUBJECT, collapse: topic.slice(0, 32)})
+            if (outcome === 'gone') forget(target.endpoint)
+          })
+        )
+      )
+    }
+  }
+}
 
 /** Stored messages in the object's own SQLite database. */
 function sqlStore(sql: Sql): MessageStore {
@@ -94,8 +152,12 @@ export default {
 export class RelayRoom {
   private relay: Relay
 
-  constructor(private ctx: ObjectContext) {
-    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql))
+  constructor(
+    private ctx: ObjectContext,
+    private env: Env
+  ) {
+    const pushes = env.VAPID_PRIVATE_KEY ? sqlPushes(ctx.storage.sql, env.VAPID_PRIVATE_KEY, work => ctx.waitUntil(work)) : null
+    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql), pushes)
     // Waking after an idle spell: the sockets are still open, and each remembers its own subscriptions.
     for (const socket of ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() as ConnectionState | null
@@ -110,6 +172,11 @@ export class RelayRoom {
   /** Throws away messages that have been held long enough. */
   async alarm(): Promise<void> {
     this.ctx.storage.sql.exec('DELETE FROM events WHERE expires_at <= ?', Math.floor(Date.now() / 1000))
+    if (this.env.VAPID_PRIVATE_KEY) {
+      const old = Date.now() - PUSH_FORGET_MS
+      this.ctx.storage.sql.exec('DELETE FROM push_topics WHERE endpoint IN (SELECT endpoint FROM push_targets WHERE updated_at < ?)', old)
+      this.ctx.storage.sql.exec('DELETE FROM push_targets WHERE updated_at < ?', old)
+    }
     await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
   }
 

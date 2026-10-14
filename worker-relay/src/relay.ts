@@ -17,6 +17,12 @@
 // - Signatures are not checked. Nothing depends on them: devices prove who they are to each other
 //   after connecting, and connection setup is encrypted with the chat's own key.
 // - "since" and "until" are ignored, so a device whose clock is wrong can still be found.
+//
+// Beyond Nostr, a device can ask to be woken by a push notification when a message is stored for one
+// of its chats' topics (PUSH). The device that stores a message marks it with a tag ("n") when it
+// is worth a notification, a sealed chat message rather than housekeeping, and that tag is the same
+// value its author's devices registered for that topic, so none of them is woken by their own message.
+// The tag means nothing outside its topic, so it does not link one person's chats to each other.
 
 export const LIMITS = {
   /** Bytes in one incoming message. A connection offer is a few kilobytes. */
@@ -40,6 +46,51 @@ export const LIMITS = {
   storedPerRequest: 2000,
   /** Beyond this the store takes nothing new until old messages expire. */
   storeBytes: 1024 * 1024 * 1024
+}
+
+/** A device's push address and keys, as its browser gives them. */
+export type PushTarget = {endpoint: string; p256dh: string; auth: string}
+/** A topic a device wants to be woken for, and the tag its own person's messages there carry. */
+export type PushTopic = {topic: string; me: string}
+
+/** Where push registrations are kept and pushes sent from. Absent, the relay does not offer pushes. */
+export type PushBook = {
+  /** Replaces whatever this device asked for before. */
+  register: (target: PushTarget, topics: PushTopic[]) => void
+  forget: (endpoint: string) => void
+  /** A message worth a notification was stored under `topic` by someone whose tag there is `me`. */
+  stored: (topic: string, me: string) => Promise<void>
+}
+
+/** Push services that browsers use. The relay posts to nowhere else, so it cannot be aimed at other sites. */
+const PUSH_HOSTS = [/\.push\.apple\.com$/, /^fcm\.googleapis\.com$/, /^updates\.push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/, /^push\.services\.mozilla\.com$/]
+export const PUSH_LIMITS = {topics: 500}
+const BASE64URL = /^[A-Za-z0-9_-]+$/
+const HEX_32 = /^[0-9a-f]{32}$/
+
+/** The device and topics in a PUSH message, or why they are refused. */
+function pushRequest(target: unknown, topics: unknown): {target: PushTarget; topics: PushTopic[]} | string {
+  if (!isRecord(target)) return 'invalid: push target'
+  const {endpoint, p256dh, auth} = target
+  if (typeof endpoint !== 'string' || endpoint.length > 1024) return 'invalid: endpoint'
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    return 'invalid: endpoint'
+  }
+  if (url.protocol !== 'https:' || !PUSH_HOSTS.some(host => host.test(url.hostname))) return 'blocked: not a push service'
+  if (typeof p256dh !== 'string' || p256dh.length !== 87 || !BASE64URL.test(p256dh)) return 'invalid: p256dh'
+  if (typeof auth !== 'string' || auth.length !== 22 || !BASE64URL.test(auth)) return 'invalid: auth'
+  if (!Array.isArray(topics) || topics.length > PUSH_LIMITS.topics) return 'invalid: topics'
+  const wanted: PushTopic[] = []
+  for (const entry of topics) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !HEX_64.test(entry[0]) || typeof entry[1] !== 'string' || !HEX_32.test(entry[1])) {
+      return 'invalid: topic'
+    }
+    wanted.push({topic: entry[0], me: entry[1]})
+  }
+  return {target: {endpoint, p256dh, auth}, topics: wanted}
 }
 
 /** The one kind of event that is kept: a sealed chat message. */
@@ -171,7 +222,8 @@ export class Relay {
   constructor(
     private now: () => number = Date.now,
     /** Without one, the relay keeps nothing and refuses messages meant to be stored. */
-    private store: MessageStore | null = null
+    private store: MessageStore | null = null,
+    private pushes: PushBook | null = null
   ) {}
 
   get size(): number {
@@ -235,6 +287,8 @@ export class Relay {
       }
       reply('OK', event.id, true, '')
       this.deliver(event, topics)
+      const notify = event.tags.find(tag => tag[0] === 'n')?.[1]
+      if (kept && this.pushes && typeof notify === 'string' && HEX_32.test(notify)) await this.pushes.stored(topics[0], notify).catch(() => {})
     } else if (type === 'REQ') {
       const [subId, ...filters] = rest
       if (typeof subId !== 'string' || subId.length === 0 || subId.length > 64) return reply('NOTICE', 'invalid: subscription id')
@@ -269,6 +323,15 @@ export class Relay {
       const {[subId]: _closed, ...subs} = state.subs
       entry.state = {...state, subs}
       connection.save(entry.state)
+    } else if (type === 'PUSH' && this.pushes) {
+      if (!allowed) return reply('PUSH', false, 'rate-limited: slow down')
+      const request = pushRequest(rest[0], rest[1])
+      if (typeof request === 'string') return reply('PUSH', false, request)
+      this.pushes.register(request.target, request.topics)
+      reply('PUSH', true, '')
+    } else if (type === 'UNPUSH' && this.pushes) {
+      if (typeof rest[0] === 'string' && rest[0].length <= 1024) this.pushes.forget(rest[0])
+      reply('PUSH', true, '')
     } else {
       reply('NOTICE', 'unsupported: this relay understands EVENT, REQ and CLOSE')
     }

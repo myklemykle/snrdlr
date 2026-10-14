@@ -1846,3 +1846,35 @@ test('a device link pasted into the app works as well as one opened, and an old 
   await late.goto(old)
   await expect(late.getByText(/This code ran out at .+\. Make a new one/)).toBeVisible()
 })
+
+test("a notification tapped in the iPhone's Home Screen app goes on to Safari, or can open there instead", async ({browser}) => {
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+    viewport: {width: 375, height: 667}
+  })
+  // The installed app, as an iPhone tells a page so.
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', {value: true})
+    localStorage.setItem('snrdlr.invited', '1')
+  })
+  const page = await context.newPage()
+  await page.goto('/')
+  await introduce(page, 'Anne')
+  await page.getByLabel('Chat name').fill('Ping')
+  await page.getByRole('button', {name: 'Start a group'}).click()
+  await expect(page.getByRole('heading', {name: 'Ping'})).toBeVisible()
+  const chat = new URL(page.url()).hash
+  expect(chat).toMatch(/^#c=/)
+
+  // Safari's address is not one this browser can follow, so the screen stays put long enough to read.
+  await page.goto(`/?safari=${encodeURIComponent(chat)}`)
+  await expect(page.getByText('Opening in Safari…')).toBeVisible()
+  expect(new URL(page.url()).search).toBe('')
+  await page.getByRole('button', {name: 'Open here'}).click()
+  await expect(page.getByRole('heading', {name: 'Ping'})).toBeVisible()
+
+  // In Settings, the iPhone app says where notifications are turned on.
+  await page.getByRole('button', {name: 'Back to chats'}).click()
+  const settings = await openSettings(page)
+  await expect(settings.getByRole('heading', {name: 'Notifications'})).toBeVisible()
+})

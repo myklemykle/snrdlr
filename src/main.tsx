@@ -1,5 +1,7 @@
 import {render} from 'preact'
+import {useState} from 'preact/hooks'
 import {App} from './app'
+import {safariHandoff, SafariHandoff} from './push-view'
 import {setUpInstall} from './install'
 import {unlockSound} from './sound'
 import {readDevSwitch} from './standing-invite'
@@ -17,4 +19,19 @@ for (const moment of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'
   addEventListener(moment, unlockSound, {capture: true, passive: true})
 }
 
-render(<App />, document.getElementById('app')!)
+/** The app, unless a notification tapped in the iPhone's Home Screen app is on its way to Safari. */
+function Root() {
+  const [handoff, setHandoff] = useState(safariHandoff)
+  if (handoff === null) return <App />
+  return (
+    <SafariHandoff
+      chat={handoff}
+      onStay={() => {
+        history.replaceState(null, '', location.pathname + handoff)
+        setHandoff(null)
+      }}
+    />
+  )
+}
+
+render(<Root />, document.getElementById('app')!)
