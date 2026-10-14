@@ -111,28 +111,38 @@ Two candidate designs:
   - For: notifications open the chat directly; the 7-day wipe no longer applies.
   - Against: the installed app needs its own way to join later chats (the Phase 3 in-app scanner, or pasting an invite link); a one-time transfer step.
 
-**Built (the Migrate design), 13 October 2026.** The app is installable: a manifest, icons, and a service worker that opens it with no network (the page is always fetched fresh when there is one, so the worker never holds back a new version). Chrome on Android and on computers gets an Install button; there the installed app shares the browser's storage, so nothing moves. On an iPhone the front page lists three steps: Add to Home Screen, "Copy my snrdlr" (a code holding the keys, the list of chats with how far our numbering had got in each, and a few settings), then "Move my chats here" in the installed app and paste. The browser's copy switches itself off at the moment of copying, so the same person is never live twice. History is not in the code; it returns by sync. The installed app joins chats with its own scanner ("Scan a code", using the camera) or "Paste a link", both also on the front page and the invite-only page.
+**Built (the Migrate design), 13 October 2026; replaced 14 October.** The app is installable: a manifest, icons, and a service worker that opens it with no network (the page is always fetched fresh when there is one, so the worker never holds back a new version). Chrome on Android and on computers gets an Install button; there the installed app shares the browser's storage. The installed app joins chats with its own scanner ("Scan a code") or "Paste a link". The copy-and-paste move into the installed app was taken out again: people would scan codes with the iPhone camera, which always opens Safari, and end up with two separate snrdlrs. It is replaced by one person on several devices, below.
 
-Still to check on a real iPhone, none of which can be tested from a computer:
+**Chosen design, 14 October 2026: the split, made possible by several devices.** Tested on an iPhone with the lab page (`/lab/`): from a Home Screen app, ordinary links and `window.open` stay inside the app, but an `x-safari-https://` link opens Safari itself, from a link or from code. Real Web Push arrives (Apple's push service accepted pushes from a test script). Tapping a notification can open the app, and the app can then send the person on to Safari quickly; a notification cannot open Safari directly (it stays in the app). Plan: Safari holds the chats; the Home Screen app is another device of the same person that receives notifications and forwards taps to Safari ("Open in Safari" when adding it). Android and computers need none of this.
 
-- Add to Home Screen picks up the name and icon, and the installed app opens full screen.
+Still to check on a real iPhone:
+
+- Adding the Home Screen app with "Add this app to my snrdlr", then "Open in Safari", then "Add it" in Safari, then switching back.
 - The camera opens inside the installed app and reads a code from another phone's screen.
-- Paste works in the installed app (iOS asks permission the first time).
-- History comes back after the move once the other person is online.
 - Sounds, pictures and the keyboard behave the same installed as in Safari.
 
 Open:
 
-- The move code is the keys in plain text on the clipboard. It could be wrapped with a short passphrase or expire quickly.
-- The profile photo does not move (its file stays behind); it has to be chosen again.
-- If the paste never happens, "Use snrdlr here instead" brings the browser copy back, on the person's word that they did not paste. Nothing enforces that.
 - The app icon is a placeholder drawing (`public/icon.svg`, regenerate sizes with `node scripts/make-icons.mjs`).
 - Old cached files are dropped only by count; revisit if the cache grows.
+- The lab page (`lab/`, `lab-out/`, `public/lab/`) is a throwaway; remove it once notifications are built.
 
-Questions from before building, still unanswered:
+## One person on several devices (built 14 October 2026)
 
-- Can an installed web app open a link in Safari proper, or only in an in-app browser view? The split design depends on it.
-- When a site has a manifest, does Add to Home Screen keep the current address, fragment included? If so, the keys could be carried across without a paste, at the cost of leaving them stored in the icon. Otherwise the transfer is "copy a code in Safari, paste it in the installed app".
+Every device of a person holds the same keys. Each device numbers its own messages: a message is named by its author, the device that wrote it (an 8-byte tag sealed into the message; a person's first device has none) and that device's number. Sync counts each device separately. Edits, reactions and replies name the device too; "latest" among a person's messages is by the logical clock.
+
+The devices keep in step through the person's own hidden chat (`src/devices.ts`), worked out from their keys: each device says there which chats it holds (with their keys) and which it has left, and takes up what the others say. It syncs like any chat, directly or through the relay's store, and each chat is mentioned again every 20 days so the store keeps the list.
+
+Adding a device (`src/link-device.ts`): either device shows a code (QR or link, 10 minutes, one-time token). The new device leaves a request with a fresh public key at a place on the relay's store worked out from the token; both devices show a six-digit number from the token and that key; on "Add it" the existing device leaves the keys there locked to that key, and picks the new device's tag. The other devices show a notice when a device they did not add appears. A browser that had used the old copy-and-paste move becomes a second device of the person when it next opens.
+
+Open:
+
+- A lost device cannot be removed: it holds the keys. The only remedy is a new identity. Removing a device needs separate device keys signed by a personal key.
+- In the device-showing-the-code direction (`#device1.n.`), someone who sees the code could hand the new device keys of their own; the new device would become them. It cannot steal anything, but is confusing. Could be closed by having the new device check the existing device's signature.
+- A device added later gets each chat's history from the members or the relay store (30 days), not from the person's other devices' stores in bulk.
+- Unread counts, read positions, sounds, profile settings and the profile photo are per device.
+- The whole history of a chat newly taken up from another device counts as unread on the new device.
+- A chat left on one device while it is open on another's screen is let go when that screen is closed.
 
 ## Developer visibility and dashboard
 

@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'preact/hooks'
-import {onChatsChanged, startSelfSync} from './devices'
+import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
@@ -13,7 +13,8 @@ import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHO
 import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
 import {installed, onIos, useInstall} from './install'
 import {mailboxes} from './mailbox'
-import {applyMove, movedOut, packMove, setMovedOut, unpackMove} from './move'
+import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
+import {DeviceCode, OpenedDeviceLink} from './link-view'
 import {JoinByCode} from './scanner'
 import {ProfileEditor} from './profile-view'
 import {openStore, type ChatRecord, type Store} from './store'
@@ -32,6 +33,22 @@ const PAIRING_LINGER_MS = 2000
 // Only one tab per browser keeps the chats connected; the others wait for this lock.
 const KEEP_LOCK = 'snrdlr-stay-connected'
 const KEEP_SETTING = 'snrdlr.stayConnected'
+// Set by an earlier version in a browser whose keys had been copied to the installed app.
+const MOVED = 'snrdlr.moved'
+function wasMovedOut(): boolean {
+  try {
+    return localStorage.getItem(MOVED) === '1'
+  } catch {
+    return false
+  }
+}
+function clearMovedOut(): void {
+  try {
+    localStorage.removeItem(MOVED)
+  } catch {
+    // Nothing was kept, then.
+  }
+}
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
 
 /** Whether this tab is holding every chat connected: off, queued behind another tab, or doing it. */
@@ -72,6 +89,13 @@ export function App() {
           secrets = {name, signSecret, dhSecret}
           await store.saveIdentity(secrets)
         }
+        // A browser whose keys were copied to the installed app, the way that was done before devices
+        // were told apart, carries on as another device of the same person.
+        if (wasMovedOut() && !secrets.device && !installed()) {
+          secrets = {...secrets, device: newDeviceTag()}
+          await store.saveIdentity(secrets)
+          clearMovedOut()
+        }
         // Anyone with a name or a chat was here before the app became invite-only, or has been invited since.
         const established = secrets.name !== '' || (await store.listChats()).length > 0
         setBoot({status: 'ready', store, identity: loadIdentity(secrets), admitted: isAdmitted(established)})
@@ -98,8 +122,6 @@ export function App() {
     )
   }
   const {store, admitted} = boot
-  // This browser's copy has gone to the installed app; it must not carry on here as well.
-  if (movedOut() && !installed()) return <MovedOut store={store} identity={boot.identity} />
   return (
     <Main
       store={store}
@@ -189,6 +211,8 @@ function Main(props: {
   useEffect(() => {
     const onHashChange = () => setHash(location.hash)
     addEventListener('hashchange', onHashChange)
+    // The address may have changed between the first render and now, with nobody listening yet.
+    onHashChange()
     return () => removeEventListener('hashchange', onHashChange)
   }, [])
 
@@ -304,6 +328,12 @@ function Main(props: {
     }
   }, [hash])
 
+  // Adding a device: this one, or another, depending on which of the two showed the code.
+  if (isDeviceFragment(hash)) {
+    const link = linkFromFragment(hash)
+    if (link) return <OpenedDeviceLink key={hash} link={link} store={store} identity={identity} onClose={() => goHome(true)} />
+  }
+
   const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isStandingFragment(hash)
   if (!admitted && !redeeming) {
     return (
@@ -313,7 +343,7 @@ function Main(props: {
         <p>snrdlr is invite-only.</p>
         <p>To join, ask someone who already uses it to show you their code, and scan it while it is on their screen.</p>
         <JoinByCode />
-        <MoveIn store={store} />
+        <AddThisBrowser store={store} identity={identity} />
         <p class="build">Version {__BUILD__}</p>
       </main>
     )
@@ -399,173 +429,22 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
         </button>
       </form>
       <p class="note">Your name and keys stay on this device. There is no account, so they can't be recovered if you clear this site's data.</p>
-      <MoveIn store={store} />
+      <AddThisBrowser store={store} identity={identity} />
     </main>
   )
 }
 
-/** In the installed app, before it is anybody: take over from the copy in the browser by pasting its code. */
-function MoveIn(props: {store: Store}) {
-  const {store} = props
+/** On a device that is nobody yet: become someone who already uses snrdlr elsewhere. */
+function AddThisBrowser(props: {store: Store; identity: Identity}) {
   const [open, setOpen] = useState(false)
-  const [code, setCode] = useState('')
-  const [problem, setProblem] = useState<string | null>(null)
-  // Only the installed app has a browser copy to take over from.
-  if (!installed() && !devMode()) return null
-  const moveIn = async (text: string) => {
-    setProblem(null)
-    try {
-      await applyMove(store, unpackMove(text))
-      // Start again as the person who has just moved in.
-      location.reload()
-    } catch (error) {
-      setProblem(
-        error instanceof Error && error.message === 'already in use'
-          ? 'This copy of snrdlr already has chats of its own, so nothing was moved.'
-          : "That isn't a code copied from snrdlr. Copy it again in the browser and paste it here."
-      )
-    }
-  }
-  const paste = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      setCode(text)
-      await moveIn(text)
-    } catch {
-      setProblem("Couldn't read what you copied. Press and hold in the box and choose Paste.")
-    }
-  }
-  if (!open) {
-    return (
-      <section class="move">
-        <h2>Already using snrdlr in your browser?</h2>
-        <button type="button" onClick={() => setOpen(true)}>
-          Move my chats here
-        </button>
-      </section>
-    )
-  }
+  if (open) return <DeviceCode role="new" store={props.store} identity={props.identity} onClose={() => setOpen(false)} />
   return (
     <section class="move">
-      <h2>Move my chats here</h2>
-      <p class="note">In your browser, open snrdlr and tap "Copy my snrdlr" on its front page. Then come back and paste.</p>
-      <form
-        onSubmit={event => {
-          event.preventDefault()
-          void moveIn(code)
-        }}
-      >
-        <button type="button" onClick={paste}>
-          Paste
-        </button>
-        <textarea value={code} onInput={event => setCode(event.currentTarget.value)} rows={3} aria-label="Code copied from snrdlr in the browser" placeholder="or paste the code here" />
-        <button type="submit" disabled={!code.trim()}>
-          Move in
-        </button>
-      </form>
-      {problem && <p class="error">{problem}</p>}
-    </section>
-  )
-}
-
-/** In the browser, on an iPhone: how to install, and the code that carries everything across. */
-function MoveOut(props: {store: Store; identity: Identity}) {
-  const {store, identity} = props
-  const [problem, setProblem] = useState<string | null>(null)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(await packMove(store, identity))
-      setMovedOut(true)
-      // From here on this copy only shows how to finish the move.
-      location.reload()
-    } catch {
-      setProblem("Couldn't copy. Nothing has changed.")
-    }
-  }
-  return (
-    <section class="move">
-      <h2>Install on this iPhone</h2>
-      <p class="note">An installed snrdlr opens from your Home Screen like any app, and is what will be able to notify you. It starts empty, so there are three steps:</p>
-      <ol class="steps">
-        <li>
-          Tap the Share button, then <b>Add to Home Screen</b>.
-        </li>
-        <li>
-          Come back here and tap <b>Copy my snrdlr</b>. That copies your keys and your list of chats.
-        </li>
-        <li>
-          Open snrdlr from your Home Screen, tap <b>Move my chats here</b>, and paste.
-        </li>
-      </ol>
-      <button type="button" onClick={copy}>
-        Copy my snrdlr
+      <h2>Already use snrdlr on another device?</h2>
+      <button type="button" onClick={() => setOpen(true)}>
+        Add this {installed() ? 'app' : 'browser'} to my snrdlr
       </button>
-      <p class="note">After copying, snrdlr stops working in this browser, so that there are never two of you. What you copy is your keys: paste it only into snrdlr.</p>
-      {problem && <p class="error">{problem}</p>}
     </section>
-  )
-}
-
-/** What the browser's copy shows once its keys have been copied out. */
-function MovedOut(props: {store: Store; identity: Identity}) {
-  const {store, identity} = props
-  const [copied, setCopied] = useState(false)
-  const [undoing, setUndoing] = useState(false)
-  const copyAgain = async () => {
-    try {
-      await navigator.clipboard.writeText(await packMove(store, identity))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // The button can simply be tapped again.
-    }
-  }
-  return (
-    <main class="home">
-      <h1>snrdlr</h1>
-      <p>Your snrdlr has been copied, ready to move to the app on your Home Screen.</p>
-      <ol class="steps">
-        <li>
-          If you have not yet: tap the Share button, then <b>Add to Home Screen</b>.
-        </li>
-        <li>
-          Open snrdlr from your Home Screen, tap <b>Move my chats here</b>, and paste.
-        </li>
-      </ol>
-      <p class="note">Your messages come back there as the people you chat with are online. This browser's copy stays switched off, so there are never two of you.</p>
-      <div class="row">
-        <button type="button" onClick={copyAgain}>
-          {copied ? 'Copied' : 'Copy the code again'}
-        </button>
-        <button type="button" onClick={() => setUndoing(true)}>
-          Use snrdlr here instead
-        </button>
-      </div>
-      {undoing && (
-        <section class="confirm">
-          <p>
-            Only do this if you have <b>not</b> pasted the code into the installed app. Using snrdlr in both places makes other people lose some of your
-            messages.
-          </p>
-          <div class="row">
-            <button
-              type="button"
-              class="danger"
-              onClick={() => {
-                setMovedOut(false)
-                location.reload()
-              }}
-            >
-              I haven't pasted it. Use snrdlr here
-            </button>
-            <button type="button" onClick={() => setUndoing(false)}>
-              Cancel
-            </button>
-          </div>
-        </section>
-      )}
-      <p class="build">Version {__BUILD__}</p>
-    </main>
   )
 }
 
@@ -682,6 +561,9 @@ function Home(props: {
     const timer = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(timer)
   }, [])
+  const [addingDevice, setAddingDevice] = useState(false)
+  const [deviceNews, setDeviceNews] = useState<NewDevice[]>([])
+  useEffect(() => onNewDevices(setDeviceNews), [])
   const [pairing, setPairing] = useState<Invite | null>(null)
   // A code on screen must not be wiped away by the tab reloading to update.
   useUpdateHold(pairing !== null)
@@ -792,6 +674,22 @@ function Home(props: {
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {profileOpen && <ProfileEditor store={store} identity={identity} onIdentity={onIdentity} onClose={() => setProfileOpen(false)} />}
       {notice && <p class="error">{notice}</p>}
+      {deviceNews.map(device => (
+        <p class="device-news" role="status" key={device.stream}>
+          Another device was added to your snrdlr, {new Date(device.at).toLocaleString()}. If you didn't add it, someone else has your keys
+          and can read your chats.{' '}
+          <button
+            type="button"
+            class="inline"
+            onClick={() => {
+              acknowledgeDevice(device.stream)
+              setDeviceNews(news => news.filter(entry => entry !== device))
+            }}
+          >
+            OK
+          </button>
+        </p>
+      ))}
 
       {chats && chats.length > 0 && <h2>Your chats</h2>}
       {chats && chats.length > 0 && (
@@ -868,7 +766,27 @@ function Home(props: {
       <p class="note">To join someone else's group or chat with them, scan their code while they have it on screen.</p>
       <JoinByCode />
 
-      {!installed() && (onIos() || devMode()) && <MoveOut store={store} identity={identity} />}
+      {!installed() && onIos() && (
+        <section class="move">
+          <h2>Install on this iPhone</h2>
+          <p class="note">
+            The installed app is what will be able to notify you. Tap the Share button, then <b>Add to Home Screen</b>. Open it from your Home
+            Screen and tap <b>Add this app to my snrdlr</b>, then <b>Open in Safari</b>.
+          </p>
+        </section>
+      )}
+
+      <h2>Your devices</h2>
+      {addingDevice ? (
+        <DeviceCode role="existing" store={store} identity={identity} onClose={() => setAddingDevice(false)} />
+      ) : (
+        <>
+          <p class="note">Use snrdlr as yourself on another phone or computer too, with the same chats.</p>
+          <button type="button" onClick={() => setAddingDevice(true)}>
+            Add a device
+          </button>
+        </>
+      )}
 
       {install && (
         <section class="install">

@@ -1413,3 +1413,35 @@ button:disabled {
   flex-direction: column;
   gap: 0.6rem;
 }
+
+/* Adding a device: the number both devices show, so the person can check they match. */
+.check {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.device-code .device-check p,
+.device-code .device-request p {
+  color: var(--fg);
+}
+
+.device-code .device-check p.note,
+.device-code .device-request p.note {
+  color: var(--muted);
+}
+
+.device-request {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+.device-news {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+}

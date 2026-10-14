@@ -1301,8 +1301,8 @@ test('the app is invite-only: a stranger cannot set up, and gets in by joining t
   await stranger.goto('/')
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
   await expect(stranger.getByLabel('Your name')).toHaveCount(0)
-  // The only things to press are the two ways of using an invite.
-  await expect(stranger.getByRole('button')).toHaveText(['Scan a code', 'Paste a link'])
+  // The only things to press are the two ways of using an invite, and becoming someone who already uses it.
+  await expect(stranger.getByRole('button')).toHaveText(['Scan a code', 'Paste a link', 'Add this browser to my snrdlr'])
   await stranger.reload()
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
 
@@ -1654,55 +1654,105 @@ test('someone joins from inside the app, by scanning a code with the camera or p
   await expect(paster.getByRole('button', {name: 'Paste a link'})).toBeVisible()
 })
 
-test('someone moves from the browser into the installed app: same person, same chats, history returns', async ({browser}) => {
-  // Developer mode stands in for an iPhone here: it shows the moving steps in any browser.
+/** Anne, with a group that Bob is in and a little history. */
+async function anneAndBob(browser: Browser) {
   const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
-  await anne.goto('/?dev=1')
+  await anne.goto('/')
   await introduce(anne, 'Anne')
-  await anne.getByLabel('Chat name').fill('Moving')
+  await anne.getByLabel('Chat name').fill('Picnic')
   await anne.getByRole('button', {name: 'Start a group'}).click()
   await bob.goto(await copyInvite(anne))
   await introduce(bob, 'Bob')
-  await send(anne, 'from the browser')
-  await send(bob, 'hello anne')
-  await expect(anne.locator('.theirs', {hasText: 'hello anne'})).toBeVisible()
-
-  // She copies herself out. The browser's copy switches off there and then.
+  await send(anne, 'from the phone')
+  await expect(bob.locator('.theirs', {hasText: 'from the phone'})).toBeVisible()
   await anne.getByRole('button', {name: 'Back to chats'}).click()
-  await anne.getByRole('button', {name: 'Copy my snrdlr'}).click()
-  await expect(anne.getByText('Your snrdlr has been copied')).toBeVisible()
-  await expect(anne.getByRole('button', {name: 'Start a group'})).toHaveCount(0)
-  const code = await anne.evaluate(() => navigator.clipboard.readText())
-  expect(code).toMatch(/^snrdlr-move1\./)
-  await expect(bob.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+  return {anne, bob}
+}
 
-  // The installed app starts empty. Something that is not the code is refused; the code moves her in.
-  const app = await newStranger(browser)
-  await app.goto('/?dev=1')
-  await app.getByRole('button', {name: 'Move my chats here'}).click()
-  const box = app.getByLabel('Code copied from snrdlr in the browser')
-  await box.fill('hello')
-  await app.getByRole('button', {name: 'Move in'}).click()
-  await expect(app.getByText("That isn't a code copied from snrdlr.")).toBeVisible()
-  await box.fill(code)
-  await app.getByRole('button', {name: 'Move in'}).click()
-  await expect(app.locator('.greeting')).toContainText('Hello, Anne.')
-
-  // Her chat is there, its history comes back from Bob, and what she says next reaches him as hers.
-  await chatEntry(app, 'Moving').click()
-  await expect(app.locator('.mine', {hasText: 'from the browser'})).toBeVisible({timeout: 30_000})
-  await expect(app.locator('.theirs', {hasText: 'hello anne'})).toBeVisible()
-  await send(app, 'from the installed app')
-  await expect(bob.locator('.theirs', {hasText: 'from the installed app'})).toBeVisible()
+/** After being added: the new device is Anne, with her chat and its history, and writes as her. */
+async function isAnne(device: Page, anne: Page, bob: Page) {
+  await expect(device.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+  await chatEntry(device, 'Picnic').click({timeout: 30_000})
+  await expect(device.locator('.mine', {hasText: 'from the phone'})).toBeVisible({timeout: 30_000})
+  await send(device, 'from the computer')
+  await expect(bob.locator('.theirs', {hasText: 'from the computer'})).toBeVisible({timeout: 30_000})
   await expect(bob.locator('.theirs .author')).toHaveText(['Anne', 'Anne'])
   await expect(bob.locator('.event', {hasText: 'joined'})).toHaveCount(0)
+  // On her phone it is one of her own.
+  await chatEntry(anne, 'Picnic').click()
+  await expect(anne.locator('.mine', {hasText: 'from the computer'})).toBeVisible({timeout: 30_000})
+}
 
-  // The browser's copy stays off across a reload, until she says the move never happened.
+test('a computer with no camera shows its code, and the phone adds it: same person, same chats', async ({browser}) => {
+  const {anne, bob} = await anneAndBob(browser)
+  // A browser that has never been anyone shows a code; the phone opens it (standing in for scanning it).
+  const computer = await newStranger(browser)
+  await computer.goto('/')
+  await computer.getByRole('button', {name: 'Add this browser to my snrdlr'}).click()
+  await expect(computer.getByRole('img', {name: 'Code to add this browser'})).toBeVisible()
+  await computer.getByRole('button', {name: 'Copy link'}).click()
+  const link = await computer.evaluate(() => navigator.clipboard.readText())
+  expect(link).toContain('#device1.n.')
+  await anne.goto(link)
+  // Both show the same number, and nothing happens until the person says so.
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  const check = (await computer.locator('.check').textContent())!
+  await expect(anne.locator('.check')).toHaveText(check, {timeout: 30_000})
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await expect(anne.getByText('Added.')).toBeVisible()
+  await anne.getByRole('button', {name: 'Close'}).click()
+  await isAnne(computer, anne, bob)
+
+  // A chat started on the computer shows up on the phone too.
+  await computer.getByRole('button', {name: 'Back to chats'}).click()
+  await computer.getByLabel('Chat name').fill('Dinner')
+  await computer.getByRole('button', {name: 'Start a group'}).click()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(chatEntry(anne, 'Dinner')).toBeVisible({timeout: 30_000})
+})
+
+test('the phone shows its code, and a new device that opens it is added once the numbers match', async ({browser}) => {
+  const {anne, bob} = await anneAndBob(browser)
+  await anne.getByRole('button', {name: 'Add a device'}).click()
+  await expect(anne.getByRole('img', {name: 'Code to add a device'})).toBeVisible()
+  await expect(anne.getByText('Waiting for the other device')).toBeVisible()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const link = await anne.evaluate(() => navigator.clipboard.readText())
+  expect(link).toContain('#device1.e.')
+
+  const computer = await newStranger(browser)
+  await computer.goto(link)
+  await expect(computer.getByText('will show a number')).toBeVisible()
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  const check = (await computer.locator('.check').textContent())!
+  await expect(anne.locator('.check')).toHaveText(check, {timeout: 30_000})
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await anne.getByRole('button', {name: 'Done'}).click()
+  await isAnne(computer, anne, bob)
+
+  // The phone let it in, so the phone has nothing to warn about. A device the phone did not let in, it
+  // tells her about: here a tablet that the computer adds.
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.device-news')).toHaveCount(0)
+  await computer.getByRole('button', {name: 'Back to chats'}).click()
+  await computer.getByRole('button', {name: 'Add a device'}).click()
+  await computer.getByRole('button', {name: 'Copy link'}).click()
+  const tablet = await newStranger(browser)
+  await tablet.goto(await computer.evaluate(() => navigator.clipboard.readText()))
+  await expect(tablet.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  await computer.getByRole('button', {name: 'Add it'}).click()
+  await expect(tablet.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+  await expect(anne.locator('.device-news')).toContainText('Another device was added to your snrdlr', {timeout: 30_000})
+  await expect(computer.locator('.device-news')).toHaveCount(0)
+  await anne.locator('.device-news').getByRole('button', {name: 'OK'}).click()
+  await expect(anne.locator('.device-news')).toHaveCount(0)
   await anne.reload()
-  await expect(anne.getByText('Your snrdlr has been copied')).toBeVisible()
-  await anne.getByRole('button', {name: 'Use snrdlr here instead'}).click()
-  await anne.getByRole('button', {name: "I haven't pasted it. Use snrdlr here"}).click()
-  await expect(anne.getByRole('button', {name: 'Start a group'})).toBeVisible()
+  await expect(anne.locator('.greeting')).toBeVisible()
+  await expect(anne.locator('.device-news')).toHaveCount(0)
+
+  // Opened somewhere that already has chats of its own, the code changes nothing there.
+  await anne.goto(link)
+  await expect(anne.getByText('This browser already has chats of its own')).toBeVisible()
 })
 
 test('the app can be installed, and opens with no network once it has been opened before', async ({browser}) => {

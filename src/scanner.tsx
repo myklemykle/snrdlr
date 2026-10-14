@@ -3,6 +3,7 @@
 // app, so the installed app has to be able to read codes itself.
 import {useEffect, useRef, useState} from 'preact/hooks'
 import {isInviteFragment} from './invite'
+import {isDeviceFragment} from './link-device'
 import {isStandingFragment} from './standing-invite'
 
 const SCAN_EVERY_MS = 200
@@ -11,7 +12,7 @@ const SCAN_EVERY_MS = 200
 export function inviteIn(text: string): string | null {
   const at = text.indexOf('#')
   const fragment = at < 0 ? '' : text.slice(at).trim()
-  return isInviteFragment(fragment) || isStandingFragment(fragment) ? fragment : null
+  return isInviteFragment(fragment) || isStandingFragment(fragment) || isDeviceFragment(fragment) ? fragment : null
 }
 
 type Reader = (frame: HTMLVideoElement) => Promise<string | null>

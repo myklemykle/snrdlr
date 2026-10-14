@@ -9,7 +9,7 @@ import {sha256} from '@noble/hashes/sha2.js'
 import {claimChat, isOnScreen, unclaimChat, type ConnectFor} from './background'
 import {bytesEqual, concatBytes, utf8} from './bytes'
 import {dmContext} from './chats'
-import {writtenAfter, type ChatHeldContent} from './envelope'
+import {streamOf, writtenAfter, type ChatHeldContent} from './envelope'
 import type {Identity} from './identity'
 import {deriveChatKeys} from './keys'
 import type {OpenMailbox} from './mailbox'
@@ -128,6 +128,76 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
   return changed
 }
 
+// Which of the person's devices this one has already told them about, so that a device added by someone
+// else does not go unnoticed. Kept per device, in the browser.
+const KNOWN_DEVICES = 'snrdlr.devices'
+
+type Known = {since: number; streams: string[]}
+
+function readKnown(): Known | null {
+  try {
+    const known = JSON.parse(localStorage.getItem(KNOWN_DEVICES) ?? 'null') as Known | null
+    return known && Number.isFinite(known.since) && Array.isArray(known.streams) ? known : null
+  } catch {
+    return null
+  }
+}
+function writeKnown(known: Known) {
+  try {
+    localStorage.setItem(KNOWN_DEVICES, JSON.stringify(known))
+  } catch {
+    // Then the person may be told again.
+  }
+}
+
+/** Called when this device lets another in: the person knows about that one already. */
+export const noteAddedHere = (stream: string) => acknowledgeDevice(stream)
+
+/** A device of the person's that this one has not told them about: when it first spoke. */
+export type NewDevice = {stream: string; at: number}
+
+/**
+ * The person's devices that first appeared after this device began keeping count, and that the person
+ * has not been told about. A device let in from this one does not count.
+ */
+export function newDevices(messages: MessageRecord[], identity: Identity, now = Date.now()): NewDevice[] {
+  const first = new Map<string, number>()
+  for (const message of messages) {
+    if (message.author !== identity.id) continue
+    const stream = streamOf(message)
+    first.set(stream, Math.min(first.get(stream) ?? Infinity, message.sentAt))
+  }
+  first.delete(streamOf({author: identity.id, device: identity.device}))
+  let known = readKnown()
+  if (!known) writeKnown((known = {since: now, streams: [...first.keys()]}))
+  return [...first]
+    .filter(([stream, at]) => !known.streams.includes(stream) && at >= known.since)
+    .map(([stream, at]) => ({stream, at}))
+}
+
+/** The person has seen the notice about a device. */
+export function acknowledgeDevice(stream: string) {
+  // Counting starts now if it has not already: a device that was there before is not news.
+  const known = readKnown() ?? {since: Date.now(), streams: []}
+  if (!known.streams.includes(stream)) writeKnown({...known, streams: [...known.streams, stream]})
+}
+
+const deviceListeners = new Set<(news: NewDevice[]) => void>()
+let latestNews: NewDevice[] = []
+
+/** Calls back with the devices the person should be told about, now and whenever that changes. */
+export function onNewDevices(listener: (news: NewDevice[]) => void): () => void {
+  deviceListeners.add(listener)
+  listener(latestNews)
+  return () => deviceListeners.delete(listener)
+}
+
+function tellNews(news: NewDevice[]) {
+  if (news.map(entry => entry.stream).join() === latestNews.map(entry => entry.stream).join()) return
+  latestNews = news
+  deviceListeners.forEach(listener => listener(news))
+}
+
 const listeners = new Set<() => void>()
 
 /** Calls back whenever chats were added or removed here because of something another device said. */
@@ -182,6 +252,7 @@ export function startSelfSync(options: {store: Store; identity: Identity; connec
       handlers: {
         onMessages: next => {
           messages = next
+          tellNews(newDevices(next, identity))
           void tend()
         },
         onStatus: () => {},
