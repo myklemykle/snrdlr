@@ -2,12 +2,14 @@ import 'fake-indexeddb/auto'
 import {describe, expect, it, vi} from 'vitest'
 import {createIdentity, type Identity} from './identity'
 import {chatKeys, newGroupChat} from './chats'
-import {importMsgKey, sealEnvelope, type ImageContent} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, type ImageContent} from './envelope'
 import {sealFile} from './files'
 import {issueCert} from './membership'
 import {latestCards} from './cards'
+import type {OpenMailbox} from './mailbox'
 import {tallyReactions} from './reactions'
 import {openSession, versionVector, type ConnectionStatus} from './session'
+import {openAsMember} from './store-seal'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 import {makeNetwork} from './test-network'
 
@@ -30,7 +32,7 @@ const admitted = (chat: ChatRecord, identity: Identity): ChatRecord => ({
   chain: [issueCert(chat.id, founders.get(chat.id)!, identity, 0)]
 })
 
-async function join(network: Network, shared: ChatRecord, identity: Identity, store?: Store, asHeld?: ChatRecord) {
+async function join(network: Network, shared: ChatRecord, identity: Identity, store?: Store, asHeld?: ChatRecord, mailbox?: OpenMailbox) {
   const chat = asHeld ?? admitted(shared, identity)
   const state = {
     messages: [] as MessageRecord[],
@@ -47,6 +49,7 @@ async function join(network: Network, shared: ChatRecord, identity: Identity, st
     identity,
     store: ownStore,
     connect: network.connect(identity.id),
+    mailbox,
     handlers: {
       onMessages: messages => (state.messages = messages),
       onStatus: status => state.statuses.push(status),
@@ -640,6 +643,117 @@ describe('session', () => {
     expect(texts(bob.view)).toHaveLength(1)
   })
 
+  /** A stand-in for the relay that keeps messages: one shelf per topic, shared by whoever is given it. */
+  function makeShelf() {
+    const kept = new Map<string, Uint8Array[]>()
+    const listeners = new Map<string, Set<(envelope: Uint8Array) => void>>()
+    let up = true
+    const open: OpenMailbox = (topic, _collectedAt, handlers) => {
+      if (!listeners.has(topic)) listeners.set(topic, new Set())
+      listeners.get(topic)!.add(handlers.onEnvelope)
+      queueMicrotask(() => {
+        for (const envelope of kept.get(topic) ?? []) handlers.onEnvelope(envelope)
+        handlers.onCaughtUp?.(Date.now())
+      })
+      return {
+        post: async envelope => {
+          if (!up) return false
+          kept.set(topic, [...(kept.get(topic) ?? []), envelope])
+          listeners.get(topic)!.forEach(listener => listener !== handlers.onEnvelope && listener(envelope))
+          return true
+        },
+        close: () => void listeners.get(topic)!.delete(handlers.onEnvelope)
+      }
+    }
+    return {open, kept, setUp: (next: boolean) => (up = next)}
+  }
+
+  it('leaves messages with the relay for someone who is never online at the same time', async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    // They meet once, as people do when one invites the other, which is how each learns the other's key.
+    const meeting = makeNetwork()
+    const [annes, bobs] = [await openStore(`session-shelf-${counter++}`), await openStore(`session-shelf-${counter++}`)]
+    const [first, met] = [await join(meeting, chat, createIdentity('Anne'), annes), await join(meeting, chat, createIdentity('Bob'), bobs)]
+    await settle()
+    await first.session.close()
+    await met.session.close()
+
+    // From here on each is alone on their own network: they never connect to each other again.
+    const anne = await join(makeNetwork(), chat, first.identity, annes, undefined, shelf.open)
+    await anne.session.sendText('are you there?')
+    await anne.session.sendText('I am going out')
+    await settle()
+    await anne.session.close()
+
+    const bob = await join(makeNetwork(), chat, met.identity, bobs, undefined, shelf.open)
+    await settle()
+    expect(texts(bob.view)).toEqual(['are you there?', 'I am going out'])
+    await bob.session.sendText('here now')
+    await settle()
+    await bob.session.close()
+
+    const anneAgain = await join(makeNetwork(), chat, anne.identity, anne.store, undefined, shelf.open)
+    await settle()
+    expect(texts(anneAgain.view)).toEqual(['are you there?', 'I am going out', 'here now'])
+  })
+
+  it('locks what it leaves with the relay to the members, so a copy of the chat secret is not enough to read it', async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    const network = makeNetwork()
+    const anne = await join(network, chat, createIdentity('Anne'), undefined, undefined, shelf.open)
+    const bob = await join(network, chat, createIdentity('Bob'), undefined, undefined, shelf.open)
+    await settle()
+    await anne.session.sendText('for members')
+    await settle()
+    await anne.session.close()
+    await bob.session.close()
+
+    // Mallory holds the chat's secret, so she knows where to look and has the key the messages are sealed
+    // with. What she finds there is locked to Anne and Bob.
+    const mallory = createIdentity('Mallory')
+    const context = {chatId: chat.id, msgKey: await importMsgKey(chatKeys(chat).msgKey)}
+    const stored = [...shelf.kept.values()].flat()
+    expect(stored.length).toBeGreaterThan(0)
+    for (const item of stored) {
+      await expect(openEnvelope(context, item)).rejects.toThrow()
+      expect(await openAsMember(chat.id, item, mallory)).toBeNull()
+    }
+    // Bob can: the one written after Anne had seen his key opens for him.
+    const forBob = (await Promise.all(stored.map(item => openAsMember(chat.id, item, bob.identity)))).filter(item => item !== null)
+    const read = await Promise.all(forBob.map(item => openEnvelope(context, item!)))
+    expect(read.some(message => message.content.type === 'text' && message.content.text === 'for members')).toBe(true)
+  })
+
+  it('leaves what was written while the relay was unreachable the next time the chat opens, and not twice', async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    const store = await openStore(`session-shelf-${counter++}`)
+    const anne = createIdentity('Anne')
+    const held = admitted(chat, anne)
+    await store.saveChat(held)
+    shelf.setUp(false)
+    const first = await join(makeNetwork(), chat, anne, store, held, shelf.open)
+    await first.session.sendText('written with no network')
+    await settle()
+    await first.session.close()
+    expect(shelf.kept.size).toBe(0)
+
+    shelf.setUp(true)
+    const second = await join(makeNetwork(), chat, anne, store, (await store.getChat(held.id))!, shelf.open)
+    await settle()
+    await second.session.close()
+    const count = [...shelf.kept.values()][0].length
+    // Her "joined" message and the text; and it is remembered that they are there.
+    expect(count).toBe(2)
+    expect((await store.getChat(held.id))!.storedSeq).toBe(2)
+    const third = await join(makeNetwork(), chat, anne, store, (await store.getChat(held.id))!, shelf.open)
+    await settle()
+    await third.session.close()
+    expect([...shelf.kept.values()][0].length).toBe(count)
+  })
+
   it('lets any member rename a group, for everyone, including someone who was away', async () => {
     const network = makeNetwork()
     const chat = makeChat()
@@ -687,6 +801,8 @@ describe('session', () => {
 
     // Bob changes his mind, then Anne agrees with him.
     await bob.session.react(target, '🎉')
+    // One after the other; in the same instant, which comes first would be a toss-up.
+    await settle()
     await anne.session.react(target, '🎉')
     await settle()
     for (const person of [anne, bob]) {

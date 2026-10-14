@@ -92,16 +92,38 @@ const load = (audio: AudioContext, url: string) => {
   return loaded.get(url)!
 }
 
+// An iPhone stops a page's audio when the browser goes out of sight or another app plays something,
+// and the stopped audio does not always start again when asked: it can even claim to be running and
+// stay silent. So after any such spell the audio is thrown away and made afresh at the next tap.
+let stale = false
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && context) stale = true
+  })
+}
+
 /** Call from a tap or click. Until one has happened, the browser will not let anything play. */
 export function unlockSound(): void {
   const wanted = urls()
   if (wanted.length === 0) return
   try {
+    if (context && (stale || (context.state as string) === 'interrupted' || context.state === 'closed')) {
+      void context.close().catch(() => {})
+      context = null
+      // Sounds are decoded by the audio they will play through.
+      loaded.clear()
+    }
+    stale = false
     if (!context) {
       // Tells an iPhone these are interface sounds: quiet when the silent switch is on, and no interruption to music.
       const session = (navigator as Navigator & {audioSession?: {type: string}}).audioSession
       if (session) session.type = 'ambient'
       context = new AudioContext()
+      const made = context
+      // If the phone stops it later, start over rather than trust it to resume.
+      made.onstatechange = () => {
+        if (context === made && (made.state as string) === 'interrupted') stale = true
+      }
     }
     // Fetches the chosen set ahead of time, so the first sound is not late.
     wanted.forEach(url => void load(context!, url))

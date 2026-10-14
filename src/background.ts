@@ -6,6 +6,7 @@
 // Keep: every chat's room stays joined for as long as the page is open. A computer left running this
 // way is always there to take a message from one member and hand it to another who comes online
 // later. It is an ordinary member doing what any member's device does for the chat on screen.
+import type {OpenMailbox} from './mailbox'
 import {cardFor} from './profile'
 import type {Identity} from './identity'
 import type {ChatKeys} from './keys'
@@ -90,7 +91,8 @@ function syncOnce(
   identity: Identity,
   store: Store,
   connectFor: ConnectFor,
-  timing: SweepTiming
+  timing: SweepTiming,
+  mailbox?: OpenMailbox
 ): Running {
   let cancelled = false
   const done = (async () => {
@@ -103,6 +105,7 @@ function syncOnce(
       identity,
       store,
       card: await cardFor(chat.id, store),
+      mailbox,
       connect: connectFor(chat),
       handlers: {
         onMessages: announceNews(chat.id, identity.id, stored, () => (lastActivity = Date.now())),
@@ -135,6 +138,8 @@ export async function sweepChats(options: {
   store: Store
   identity: Identity
   connectFor: ConnectFor
+  /** Where sealed messages wait for members who are offline; see mailbox.ts. */
+  mailbox?: OpenMailbox
   timing?: Partial<SweepTiming>
 }): Promise<void> {
   if (sweeping) return
@@ -145,7 +150,7 @@ export async function sweepChats(options: {
     const worker = async () => {
       for (let chat = queue.shift(); chat; chat = queue.shift()) {
         if (foreground.has(chat.id) || running.has(chat.id)) continue
-        const task = syncOnce(chat, options.identity, options.store, options.connectFor, timing)
+        const task = syncOnce(chat, options.identity, options.store, options.connectFor, timing, options.mailbox)
         running.set(chat.id, task)
         await task.done
       }
@@ -179,7 +184,7 @@ export type KeepStatus = {
 
 type Held = Running & {openedAt: number; peers: () => number; resume: (awayMs: number) => void}
 
-function hold(chat: ChatRecord, identity: Identity, store: Store, connectFor: ConnectFor, onChange: () => void): Held {
+function hold(chat: ChatRecord, identity: Identity, store: Store, connectFor: ConnectFor, onChange: () => void, mailbox?: OpenMailbox): Held {
   let release!: () => void
   const released = new Promise<void>(resolve => (release = resolve))
   let session: Session | null = null
@@ -191,6 +196,7 @@ function hold(chat: ChatRecord, identity: Identity, store: Store, connectFor: Co
       identity,
       store,
       card: await cardFor(chat.id, store),
+      mailbox,
       connect: connectFor(chat),
       handlers: {
         onMessages: announceNews(chat.id, identity.id, stored),
@@ -216,6 +222,8 @@ export function keepChats(options: {
   store: Store
   identity: Identity
   connectFor: ConnectFor
+  /** Where sealed messages wait for members who are offline; see mailbox.ts. */
+  mailbox?: OpenMailbox
   onStatus?: (status: KeepStatus) => void
   timing?: Partial<KeepTiming>
 }): () => Promise<void> {
@@ -258,7 +266,7 @@ export function keepChats(options: {
         }
         // The chat's own screen has it, or a sweep does until it finishes.
         if (stopped || foreground.has(chat.id) || running.has(chat.id)) continue
-        const task = hold(chat, identity, store, connectFor, report)
+        const task = hold(chat, identity, store, connectFor, report, options.mailbox)
         running.set(chat.id, task)
         held.set(chat.id, task)
         void task.done.finally(() => {

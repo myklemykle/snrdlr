@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_TURN_URL?: string
   /** Comma-separated Nostr relay URLs, for local testing; the public defaults are used when unset. */
   readonly VITE_NOSTR_RELAYS?: string
+  /** The relay that keeps sealed messages; for local testing. */
+  readonly VITE_STORE_RELAY?: string
   /** How long a joiner waits for an invite to answer, in milliseconds; shortened in tests. */
   readonly VITE_JOIN_TIMEOUT_MS?: string
   /** How often an open tab looks for a newer build, and how long it must be idle before reloading; shortened in tests. */

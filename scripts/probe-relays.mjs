@@ -41,9 +41,9 @@ const AT_ONCE = 6
 const limitedPattern = /rate.?limit|too many|slow down|too fast|blocked|banned|throttl/i
 
 /** A signed short-lived event, shaped like the ones Trystero posts (kind 20000 to 29999, one "x" tag). */
-export const makeEvent = (secretKey, {kind, topic, content, createdAt}) => {
+export const makeEvent = (secretKey, {kind, topic, content, createdAt, expiration}) => {
   const pubkey = bytesToHex(schnorr.getPublicKey(secretKey))
-  const tags = [['x', topic]]
+  const tags = expiration ? [['x', topic], ['expiration', String(expiration)]] : [['x', topic]]
   const id = sha256(new TextEncoder().encode(JSON.stringify([0, pubkey, createdAt, kind, tags, content])))
   return {kind, tags, created_at: createdAt, content, pubkey, id: bytesToHex(id), sig: bytesToHex(schnorr.sign(id, secretKey))}
 }

@@ -313,6 +313,41 @@ test('chats that are not open catch up at launch and show how much is unread', a
   await expect(bob.locator('.unread')).toHaveCount(0)
 })
 
+test('a message reaches someone who is never online at the same time as its sender, through the relay that keeps it', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Left with the relay')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await send(bob, 'here for a moment')
+  await expect(anne.locator('.theirs', {hasText: 'here for a moment'})).toBeVisible()
+
+  // Bob goes. Anne writes, then goes too, before he is back.
+  await bob.goto('about:blank')
+  await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+  await send(anne, 'you just missed me')
+  await send(anne, 'back tomorrow')
+  await expect(anne.locator('.mine', {hasText: 'back tomorrow'})).toBeVisible()
+  // Long enough for the relay to have them.
+  await anne.waitForTimeout(500)
+  await anne.goto('about:blank')
+
+  // Bob returns to an empty room and still gets both, in order; and nothing twice.
+  await bob.goto('/')
+  await chatEntry(bob, 'Left with the relay').click()
+  await expect(bob.locator('.theirs', {hasText: 'back tomorrow'})).toBeVisible({timeout: 15_000})
+  await expect(bob.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
+  await expect(bob.locator('.log li:not(.event)')).toHaveText([/here for a moment/, /you just missed me/, /back tomorrow/])
+  await send(bob, 'got them')
+  await bob.waitForTimeout(500)
+  await bob.goto('about:blank')
+
+  // And the same the other way, with the unread count on the front page before the chat is opened.
+  await anne.goto('/')
+  await expect(chatEntry(anne, 'Left with the relay')).toContainText('1', {timeout: 30_000})
+  await chatEntry(anne, 'Left with the relay').click()
+  await expect(anne.locator('.theirs', {hasText: 'got them'})).toBeVisible()
+})
+
 test('two people start a direct chat from a "chat with me" code, and it cannot be invited into', async ({browser}) => {
   const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
   await anne.goto('/')

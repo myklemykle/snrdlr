@@ -11,6 +11,7 @@ import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
 import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
 import {installed, onIos, useInstall} from './install'
+import {mailboxes} from './mailbox'
 import {applyMove, movedOut, packMove, setMovedOut, unpackMove} from './move'
 import {JoinByCode} from './scanner'
 import {ProfileEditor} from './profile-view'
@@ -225,7 +226,7 @@ function Main(props: {
     const sweep = () => {
       if (document.hidden || Date.now() - lastSweep < SWEEP_INTERVAL_MS) return
       lastSweep = Date.now()
-      void sweepChats({store, identity, connectFor})
+      void sweepChats({store, identity, connectFor, mailbox: mailboxes})
     }
     sweep()
     document.addEventListener('visibilitychange', sweep)
@@ -243,7 +244,7 @@ function Main(props: {
       clearTimeout(queued)
       if (cancelled) return
       setKeep({chats: 0, connections: 0})
-      stop = keepChats({store, identity, connectFor, onStatus: status => !cancelled && setKeep(status)})
+      stop = keepChats({store, identity, connectFor, mailbox: mailboxes, onStatus: status => !cancelled && setKeep(status)})
       return untilFinished
     }
     // The lock normally arrives at once; only say another tab has it if it does not.

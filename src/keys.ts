@@ -11,6 +11,8 @@ export type ChatKeys = {
   sdpPassword: string
   /** AES-256-GCM key bytes for message envelopes. Never leaves the members' devices. */
   msgKey: Uint8Array
+  /** What the chat's sealed messages are filed under on our relay, for members who are offline. */
+  storeTopic: string
 }
 
 export function generateGroupSecret(): Uint8Array {
@@ -40,6 +42,7 @@ export function deriveChatKeys(secret: Uint8Array, context: Uint8Array): ChatKey
   return {
     roomId: toHex(derive(secret, 'room', context)),
     sdpPassword: toBase64Url(derive(secret, 'sdp', context)),
-    msgKey: derive(secret, 'msg', context)
+    msgKey: derive(secret, 'msg', context),
+    storeTopic: toHex(derive(secret, 'store', context))
   }
 }

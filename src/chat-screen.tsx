@@ -10,6 +10,7 @@ import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {prepareImage, type PreparedImage} from './image'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
+import {mailboxes} from './mailbox'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
 import {cardFor, hasPart, loadProfile, PARTS, setShownIn, showsIn, type Part} from './profile'
@@ -95,6 +96,7 @@ export function ChatScreen(props: {
         identity,
         store,
         card: await cardFor(chat.id, store),
+        mailbox: mailboxes,
         // Fetched on every (re)connect, so long-open chats never reuse expired TURN credentials.
         connect: async (keys, handlers) => joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity)),
         handlers: {

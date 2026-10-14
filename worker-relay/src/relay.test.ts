@@ -3,14 +3,14 @@ import {describe, expect, it} from 'vitest'
 // The probe signs events the way the app's connection library does.
 // @ts-expect-error The probe is plain JavaScript, with no type declarations.
 import {makeEvent} from '../../scripts/probe-relays.mjs'
-import {LIMITS, Relay, type ConnectionState} from './relay'
+import {LIMITS, memoryStore, Relay, STORED_KIND, type ConnectionState} from './relay'
 
 const secretKey = schnorr.utils.randomSecretKey()
 const TOPIC = '1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o'
 const OTHER_TOPIC = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'
 let serial = 0
 
-const event = (overrides: {kind?: number; topic?: string; content?: string} = {}) =>
+const event = (overrides: {kind?: number; topic?: string; content?: string; createdAt?: number} = {}) =>
   makeEvent(secretKey, {kind: 21000, topic: TOPIC, content: `hello ${serial++}`, createdAt: 1_790_000_000, ...overrides})
 
 /** A connected client, recording what the relay sends it and what it asks to be remembered. */
@@ -62,6 +62,77 @@ describe('Relay', () => {
       expect(bob.got.at(-1)).toEqual(['OK', note.id, false, expect.stringMatching(/^blocked: /)])
     }
     expect(anne.events('a')).toEqual([])
+  })
+
+  it('keeps a sealed message for someone who connects later, and passes it at once to someone connected now', async () => {
+    let clock = 1_790_000_000_000
+    const relay = new Relay(() => clock, memoryStore())
+    const [anne, bob] = [join(relay), join(relay)]
+    await bob.say('REQ', 'live', {'#x': [TOPIC], kinds: [STORED_KIND]})
+    expect(bob.got).toEqual([['EOSE', 'live']])
+    const [first, second] = [event({kind: STORED_KIND, createdAt: 1_790_000_000}), event({kind: STORED_KIND, createdAt: 1_790_000_005})]
+    await anne.say('EVENT', first)
+    await anne.say('EVENT', second)
+    expect(anne.got).toEqual([['OK', first.id, true, ''], ['OK', second.id, true, '']])
+    expect(bob.events('live')).toEqual([first, second])
+
+    // Cindy was not there. She gets both, oldest first, then the end-of-stored marker; and only for her own topics.
+    const cindy = join(relay)
+    await cindy.say('REQ', 'mine', {'#x': [TOPIC], kinds: [STORED_KIND]})
+    expect(cindy.got).toEqual([['EVENT', 'mine', first], ['EVENT', 'mine', second], ['EOSE', 'mine']])
+    await cindy.say('REQ', 'other', {'#x': [OTHER_TOPIC], kinds: [STORED_KIND]})
+    expect(cindy.events('other')).toEqual([])
+    // "since" narrows it; a request that does not ask for this kind gets nothing stored.
+    await cindy.say('REQ', 'recent', {'#x': [TOPIC], kinds: [STORED_KIND], since: 1_790_000_003})
+    expect(cindy.events('recent')).toEqual([second])
+    await cindy.say('REQ', 'finding', {'#x': [TOPIC], kinds: [21000]})
+    expect(cindy.events('finding')).toEqual([])
+
+    // Sent twice, it is kept once and not passed on again.
+    await anne.say('EVENT', first)
+    expect(anne.got.at(-1)).toEqual(['OK', first.id, true, expect.stringMatching(/^duplicate: /)])
+    expect(bob.events('live')).toEqual([first, second])
+
+    // After thirty days it is gone.
+    clock += (LIMITS.keepSeconds + 1) * 1000
+    const dave = join(relay)
+    await dave.say('REQ', 'late', {'#x': [TOPIC], kinds: [STORED_KIND]})
+    expect(dave.got).toEqual([['EOSE', 'late']])
+  })
+
+  it('keeps a limited amount per chat, dropping the oldest, and honours a shorter life if one is asked for', async () => {
+    let clock = 1_790_000_000_000
+    const store = memoryStore()
+    const relay = new Relay(() => clock, store)
+    const anne = join(relay)
+    const sent = []
+    for (let count = 0; count < 12; count++) {
+      const note = event({kind: STORED_KIND, createdAt: 1_790_000_000 + count})
+      sent.push(note)
+      relay['allowances'].clear()
+      await anne.say('EVENT', note)
+      store.trim(TOPIC, 10, Infinity)
+    }
+    const bob = join(relay)
+    await bob.say('REQ', 'all', {'#x': [TOPIC], kinds: [STORED_KIND]})
+    expect(bob.events('all')).toEqual(sent.slice(2))
+    await bob.say('REQ', 'few', {'#x': [TOPIC], kinds: [STORED_KIND], limit: 3})
+    expect(bob.events('few')).toEqual(sent.slice(-3))
+
+    const withExpiry = makeEvent(secretKey, {kind: STORED_KIND, topic: OTHER_TOPIC, content: 'brief', createdAt: 1_790_000_000, expiration: 1_790_000_060})
+    await anne.say('EVENT', withExpiry)
+    expect(anne.got.at(-1)).toEqual(['OK', withExpiry.id, true, ''])
+    clock += 61_000
+    await bob.say('REQ', 'gone', {'#x': [OTHER_TOPIC], kinds: [STORED_KIND]})
+    expect(bob.events('gone')).toEqual([])
+  })
+
+  it('without a store, refuses sealed messages like anything else that would have to be kept', async () => {
+    const relay = new Relay()
+    const anne = join(relay)
+    const note = event({kind: STORED_KIND})
+    await anne.say('EVENT', note)
+    expect(anne.got.at(-1)).toEqual(['OK', note.id, false, expect.stringMatching(/^blocked: /)])
   })
 
   it('refuses a subscription that does not name its topics, so nobody can listen to everything', async () => {

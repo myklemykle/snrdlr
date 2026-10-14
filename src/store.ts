@@ -19,6 +19,10 @@ export type ChatRecord = {
   readAt?: number
   /** Set when rejoining a chat that was left: our earlier messages used sequence numbers up to here. */
   ownSeqFloor?: number
+  /** Our own messages up to this number are known to be with the relay that keeps them for members who are offline. */
+  storedSeq?: number
+  /** When we last collected everything that relay held for this chat. */
+  collectedAt?: number
 }
 
 export type MessageRecord = Message & {
@@ -121,6 +125,17 @@ function wrap(db: IDBPDatabase<Schema>) {
       const tx = db.transaction('chats', 'readwrite')
       const chat = await tx.store.get(id)
       if (chat && chat.name !== name) await tx.store.put({...chat, name})
+      await tx.done
+    },
+    /** Records how far this chat's dealings with the message-keeping relay have got. Only ever moves forward. */
+    async noteMailbox(id: string, progress: {storedSeq?: number; collectedAt?: number}): Promise<void> {
+      const tx = db.transaction('chats', 'readwrite')
+      const chat = await tx.store.get(id)
+      if (chat) {
+        const storedSeq = Math.max(chat.storedSeq ?? 0, progress.storedSeq ?? 0)
+        const collectedAt = Math.max(chat.collectedAt ?? 0, progress.collectedAt ?? 0)
+        await tx.store.put({...chat, ...(storedSeq ? {storedSeq} : {}), ...(collectedAt ? {collectedAt} : {})})
+      }
       await tx.done
     },
     /** Replaces a stored message's decoded content, once a newer app version can read it. */

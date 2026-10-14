@@ -1,10 +1,17 @@
 // The relay's rules, kept apart from Cloudflare's plumbing so they can be tested on their own.
 //
-// It is a Nostr relay cut down to the one job the app needs: passing short-lived events between
-// devices that are connected at the same moment, so they can find each other. Nothing is stored.
+// It is a Nostr relay cut down to the two jobs the app needs.
 //
-// - Only short-lived events (kinds 20000 to 29999) are accepted. Posts, profiles and private
-//   messages are refused, so it is of no use as a general Nostr relay.
+// The first is passing short-lived events (kinds 20000 to 29999) between devices that are connected
+// at the same moment, so they can find each other. None of those is stored.
+//
+// The second is holding sealed chat messages (one kind, STORED_KIND) for members who are not online
+// when they are sent. The relay cannot read them: each is encrypted with a key only the chat's
+// members hold, and filed under a topic derived from the chat's secret. They are kept for a
+// limited time and in limited quantity per topic, then deleted.
+//
+// - Every other kind is refused: posts, profiles and private messages. It is of no use as a general
+//   Nostr relay.
 // - A subscription must name the topics it wants (an "#x" filter). Nobody can listen to everything,
 //   so watching a room means already knowing its topic, which is derived from the chat's secret.
 // - Signatures are not checked. Nothing depends on them: devices prove who they are to each other
@@ -23,7 +30,61 @@ export const LIMITS = {
   connectionsPerAddress: 30,
   /** Messages a connection may send in a burst, and how fast the allowance refills. */
   burst: 300,
-  perSecond: 5
+  perSecond: 5,
+  /** Stored messages: how long each is kept, and how much one topic (one chat) may hold. */
+  keepSeconds: 30 * 24 * 60 * 60,
+  storedPerTopic: 2000,
+  storedBytesPerTopic: 8 * 1024 * 1024,
+  /** Topics one request may ask stored messages for, and the most it gets back. */
+  storedTopicsPerFilter: 20,
+  storedPerRequest: 2000,
+  /** Beyond this the store takes nothing new until old messages expire. */
+  storeBytes: 1024 * 1024 * 1024
+}
+
+/** The one kind of event that is kept: a sealed chat message. */
+export const STORED_KIND = 7467
+
+/** Where stored messages live. Cloudflare's storage in the real relay; memory in tests. */
+export type MessageStore = {
+  /** Keeps an event under its topic. False if it was already held. */
+  put: (event: {id: string; topic: string; createdAt: number; expiresAt: number; json: string}) => boolean
+  /** A topic's events from `since` on (by their own timestamps), newest first, that have not expired. */
+  query: (topic: string, since: number, now: number, limit: number) => string[]
+  /** Drops a topic's oldest events until it is within the limits. */
+  trim: (topic: string, maxCount: number, maxBytes: number) => void
+  /** Bytes in use, roughly. */
+  size: () => number
+}
+
+/** A store in memory, for tests and for running the relay locally. */
+export function memoryStore(): MessageStore {
+  const held = new Map<string, {id: string; topic: string; createdAt: number; expiresAt: number; json: string; order: number}>()
+  let order = 0
+  const inTopic = (topic: string) => [...held.values()].filter(event => event.topic === topic)
+  return {
+    put(event) {
+      if (held.has(event.id)) return false
+      held.set(event.id, {...event, order: order++})
+      return true
+    },
+    query: (topic, since, now, limit) =>
+      inTopic(topic)
+        .filter(event => event.createdAt >= since && event.expiresAt > now)
+        .sort((a, b) => b.createdAt - a.createdAt || b.order - a.order)
+        .slice(0, limit)
+        .map(event => event.json),
+    trim(topic, maxCount, maxBytes) {
+      const events = inTopic(topic).sort((a, b) => a.order - b.order)
+      let bytes = events.reduce((sum, event) => sum + event.json.length, 0)
+      while (events.length > maxCount || bytes > maxBytes) {
+        const oldest = events.shift()!
+        bytes -= oldest.json.length
+        held.delete(oldest.id)
+      }
+    },
+    size: () => [...held.values()].reduce((sum, event) => sum + event.json.length, 0)
+  }
 }
 
 const FIRST_KIND = 20000
@@ -70,6 +131,19 @@ async function eventId(event: NostrEvent): Promise<string> {
   return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
+/** For each filter that asks for stored messages: which topics, and from when. */
+function storedWanted(filters: unknown[]): {topics: string[]; since: number; limit: number}[] {
+  const wanted = []
+  for (const filter of filters) {
+    if (!isRecord(filter) || !Array.isArray(filter.kinds) || !filter.kinds.includes(STORED_KIND)) continue
+    const topics = (filter['#x'] as string[]).slice(0, LIMITS.storedTopicsPerFilter)
+    const since = Number.isSafeInteger(filter.since) ? (filter.since as number) : 0
+    const limit = Number.isSafeInteger(filter.limit) && (filter.limit as number) >= 0 ? (filter.limit as number) : LIMITS.storedPerRequest
+    wanted.push({topics, since, limit: Math.min(limit, LIMITS.storedPerRequest)})
+  }
+  return wanted
+}
+
 /** The topic keys a subscription asks for, or why it is refused. */
 function wantedTopics(filters: unknown[]): string[] | string {
   if (filters.length === 0 || filters.length > LIMITS.filtersPerSubscription) return 'unsupported: one to four filters'
@@ -94,7 +168,11 @@ export class Relay {
   private index = new Map<string, Map<string, Set<string>>>()
   private allowances = new Map<string, {left: number; at: number}>()
 
-  constructor(private now: () => number = Date.now) {}
+  constructor(
+    private now: () => number = Date.now,
+    /** Without one, the relay keeps nothing and refuses messages meant to be stored. */
+    private store: MessageStore | null = null
+  ) {}
 
   get size(): number {
     return this.connections.size
@@ -144,12 +222,17 @@ export class Relay {
       const event = parseEvent(rest[0])
       if (!event) return reply('NOTICE', 'invalid: malformed event')
       if (!allowed) return reply('OK', event.id, false, 'rate-limited: slow down')
-      if (event.kind < FIRST_KIND || event.kind > LAST_KIND) {
-        return reply('OK', event.id, false, 'blocked: this relay only passes short-lived events (kinds 20000 to 29999) and stores nothing')
+      const kept = event.kind === STORED_KIND && this.store !== null
+      if (!kept && (event.kind < FIRST_KIND || event.kind > LAST_KIND)) {
+        return reply('OK', event.id, false, `blocked: this relay only passes short-lived events (kinds 20000 to 29999) and keeps sealed messages of kind ${STORED_KIND}`)
       }
       const topics = event.tags.filter(tag => tag[0] === 'x' && typeof tag[1] === 'string').map(tag => tag[1])
       if (topics.length === 0) return reply('OK', event.id, false, 'invalid: needs an x tag')
       if ((await eventId(event)) !== event.id) return reply('OK', event.id, false, 'invalid: event id does not match its contents')
+      if (kept) {
+        const refusal = this.keep(event, topics)
+        if (refusal !== null) return reply('OK', event.id, refusal.startsWith('duplicate'), refusal)
+      }
       reply('OK', event.id, true, '')
       this.deliver(event, topics)
     } else if (type === 'REQ') {
@@ -166,7 +249,18 @@ export class Relay {
       this.indexSub(id, subId, wanted)
       entry.state = next
       connection.save(next)
-      // Nothing is stored, so there is never anything older to send first.
+      // What is held for these topics comes first, oldest to newest; then whatever arrives from now on.
+      if (this.store) {
+        const now = Math.floor(this.now() / 1000)
+        for (const {topics, since, limit} of storedWanted(filters)) {
+          let left = limit
+          for (const topic of topics) {
+            const found = this.store.query(topic, since, now, left)
+            left -= found.length
+            for (const json of found.reverse()) connection.send(`["EVENT",${JSON.stringify(subId)},${json}]`)
+          }
+        }
+      }
       reply('EOSE', subId)
     } else if (type === 'CLOSE') {
       const [subId] = rest
@@ -178,6 +272,22 @@ export class Relay {
     } else {
       reply('NOTICE', 'unsupported: this relay understands EVENT, REQ and CLOSE')
     }
+  }
+
+  /** Stores a sealed message. Returns why not, if it was not newly stored. */
+  private keep(event: NostrEvent, topics: string[]): string | null {
+    const store = this.store!
+    if (topics.length !== 1 || topics[0].length > 128) return 'invalid: a stored message has exactly one x tag'
+    const now = Math.floor(this.now() / 1000)
+    // Kept for as long as it asks (NIP-40), up to the relay's own limit.
+    const asked = Number(event.tags.find(tag => tag[0] === 'expiration')?.[1])
+    const expiresAt = Math.min(Number.isSafeInteger(asked) ? asked : Infinity, now + LIMITS.keepSeconds)
+    if (expiresAt <= now) return 'invalid: already expired'
+    if (store.size() > LIMITS.storeBytes) return 'error: the store is full'
+    const [topic] = topics
+    if (!store.put({id: event.id, topic, createdAt: event.created_at, expiresAt, json: JSON.stringify(event)})) return 'duplicate: already have this event'
+    store.trim(topic, LIMITS.storedPerTopic, LIMITS.storedBytesPerTopic)
+    return null
   }
 
   private deliver(event: NostrEvent, topics: string[]): void {

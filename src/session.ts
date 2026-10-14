@@ -10,9 +10,11 @@
 import {latestCards, sameCard} from './cards'
 import {importMsgKey, openEnvelope, sealEnvelope, type CardContent, type ChatContext, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
-import type {Identity} from './identity'
+import {memberId, type Identity} from './identity'
+import {openAsMember, sealForMembers, type Recipient} from './store-seal'
 import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
+import {KEEP_SECONDS, type Mailbox, type OpenMailbox} from './mailbox'
 import {makeRoster} from './membership'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
@@ -151,6 +153,8 @@ export async function openSession(options: {
   handlers: SessionHandlers
   /** The card to show in this chat, or null to show none. Left out, whatever is showing stays. */
   card?: CardToShare | null
+  /** Where sealed messages are left for members who are offline, and collected from. Left out, there is none. */
+  mailbox?: OpenMailbox
   errorDelayMs?: number
 }): Promise<Session> {
   const {chat, identity, store, handlers} = options
@@ -307,6 +311,61 @@ export async function openSession(options: {
     acks.set(peerId, {timer, authors})
   }
 
+  // The mailbox: our own messages are left with the relay as they are written, and whatever it holds
+  // from others is taken in exactly as if a peer had sent it. Which of ours are known to be there is
+  // remembered, so that anything written with no network is left there the next time the chat opens.
+  let box: Mailbox | null = null
+  let storedSeq = chat.storedSeq ?? 0
+  const shelving = new Set<number>()
+  const onShelf = new Set<number>()
+  const ownHeld = () => messages.filter(message => message.author === identity.id).sort((a, b) => a.seq - b.seq)
+  // The relay would already have thrown away anything older than this, so it is not worth leaving there.
+  const freshFrom = Date.now() - KEEP_SECONDS * 1000
+  /** The members a stored message is locked to: ourselves, and everyone whose invitation and key we have seen. */
+  const recipients = (): Recipient[] => {
+    const found = new Map<string, Uint8Array>([[identity.id, identity.dhPublic]])
+    if (chat.peer) found.set(memberId(chat.peer.signPublic), chat.peer.dhPublic)
+    for (const {author, content} of messages) if (content.type === 'profile' && roster.has(author)) found.set(author, content.dh)
+    return [...found].map(([id, dhPublic]) => ({id, dhPublic}))
+  }
+  function shelve(record: MessageRecord) {
+    const mailbox = box
+    if (!mailbox || shelving.has(record.seq)) return
+    shelving.add(record.seq)
+    void sealForMembers(chat.id, record.envelope, recipients())
+      .then(locked => mailbox.post(locked, record.sentAt))
+      .catch(() => false)
+      .then(kept => {
+      shelving.delete(record.seq)
+      if (!kept || closed) return
+      onShelf.add(record.seq)
+      // Remember how far our messages are all there, without a gap.
+      let upTo = storedSeq
+      for (const message of ownHeld()) {
+        if (message.seq <= upTo) continue
+        if (!onShelf.has(message.seq) && message.sentAt > freshFrom) break
+        upTo = message.seq
+      }
+      if (upTo > storedSeq) {
+        storedSeq = upTo
+        void store.noteMailbox(chat.id, {storedSeq}).catch(() => {})
+      }
+    })
+  }
+  function openMailbox() {
+    if (!options.mailbox || closed) return
+    box = options.mailbox(keys.storeTopic, chat.collectedAt, {
+      // Only what was locked to us opens; then it is checked like anything a peer sends.
+      onEnvelope: stored =>
+        void openAsMember(chat.id, stored, identity).then(envelope => {
+          if (envelope && !closed) void receive(envelope)
+        }),
+      onCaughtUp: asOf => void store.noteMailbox(chat.id, {collectedAt: asOf}).catch(() => {})
+    })
+    // Ours that the relay may not have, oldest first.
+    for (const record of ownHeld()) if (record.seq > storedSeq && record.sentAt > freshFrom) shelve(record)
+  }
+
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
   async function post(content: Content): Promise<void> {
     for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
@@ -317,6 +376,7 @@ export async function openSession(options: {
       if (await store.addMessage(record)) {
         insert(record)
         undelivered.set(record.seq, record)
+        shelve(record)
         await wire?.send(envelope).catch(() => {})
         return
       }
@@ -333,6 +393,12 @@ export async function openSession(options: {
     // Already stored but not on screen: another session of this chat (a background sync, another tab)
     // stored it after we loaded the history. Without this it would stay hidden until a reload.
     if (!closed && (isNew || !holds(record.author, record.seq))) insert(record)
+    // Someone whose key we had not seen: leave our own introduction with the relay again, now locked to
+    // them as well, so that they can learn our key from it even if we are never online together.
+    if (isNew && !closed && record.content.type === 'profile' && record.author !== identity.id) {
+      const own = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')
+      if (own) shelve(own)
+    }
     if (record.content.type === 'image' || record.content.type === 'card') fetchFiles()
   }
 
@@ -472,6 +538,7 @@ export async function openSession(options: {
     await post(card)
   }
   if (options.card !== undefined) await shareCard(options.card)
+  openMailbox()
 
   // Catches anything missed in between, for example when not every pair of members is directly connected.
   const resync = setInterval(() => {
@@ -515,6 +582,7 @@ export async function openSession(options: {
       acks.forEach(({timer}) => clearTimeout(timer))
       clearTimeout(searchTimer)
       clearTimeout(errorTimer)
+      box?.close()
       await wire?.leave().catch(() => {})
     }
   }

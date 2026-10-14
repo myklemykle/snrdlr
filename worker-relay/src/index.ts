@@ -1,10 +1,11 @@
 // snrdlr's own Nostr relay: a permanent place for devices to find each other, beside the public
-// relays. The rules are in relay.ts; this file connects them to Cloudflare.
+// relays, and where sealed messages wait for members who are offline. The rules are in relay.ts;
+// this file connects them to Cloudflare.
 //
 // Every connection is handed to one Durable Object, which holds the WebSockets. Cloudflare lets
 // the object go idle between messages without dropping the sockets, so each socket carries its
 // own subscriptions as an attachment and the object rebuilds its picture from them when it wakes.
-import {LIMITS, Relay, type ConnectionState} from './relay'
+import {LIMITS, Relay, STORED_KIND, type ConnectionState, type MessageStore} from './relay'
 
 type RateLimiter = {limit: (options: {key: string}) => Promise<{success: boolean}>}
 type ObjectStub = {fetch: (request: Request) => Promise<Response>}
@@ -20,15 +21,47 @@ type HeldSocket = {
   serializeAttachment: (value: unknown) => void
   deserializeAttachment: () => unknown
 }
-type ObjectContext = {acceptWebSocket: (socket: HeldSocket) => void; getWebSockets: () => HeldSocket[]}
+type Sql = {exec: (query: string, ...values: (string | number)[]) => {toArray: () => Record<string, string | number>[]}; databaseSize: number}
+type ObjectContext = {
+  acceptWebSocket: (socket: HeldSocket) => void
+  getWebSockets: () => HeldSocket[]
+  storage: {sql: Sql; getAlarm: () => Promise<number | null>; setAlarm: (at: number) => Promise<void>}
+}
+
+const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000
+
+/** Stored messages in the object's own SQLite database. */
+function sqlStore(sql: Sql): MessageStore {
+  sql.exec('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, topic TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, bytes INTEGER NOT NULL, json TEXT NOT NULL)')
+  sql.exec('CREATE INDEX IF NOT EXISTS events_by_topic ON events (topic, created_at)')
+  sql.exec('CREATE INDEX IF NOT EXISTS events_by_expiry ON events (expires_at)')
+  return {
+    put({id, topic, createdAt, expiresAt, json}) {
+      const added = sql.exec('INSERT OR IGNORE INTO events (id, topic, created_at, expires_at, bytes, json) VALUES (?, ?, ?, ?, ?, ?) RETURNING id', id, topic, createdAt, expiresAt, json.length, json)
+      return added.toArray().length > 0
+    },
+    query: (topic, since, now, limit) =>
+      sql
+        .exec('SELECT json FROM events WHERE topic = ? AND created_at >= ? AND expires_at > ? ORDER BY created_at DESC, rowid DESC LIMIT ?', topic, since, now, limit)
+        .toArray()
+        .map(row => row.json as string),
+    trim(topic, maxCount, maxBytes) {
+      const [{count, bytes}] = sql.exec('SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes FROM events WHERE topic = ?', topic).toArray() as {count: number; bytes: number}[]
+      if (count <= maxCount && bytes <= maxBytes) return
+      // Oldest first, a tenth at a time, so a full topic is not trimmed on every message.
+      sql.exec('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE topic = ? ORDER BY rowid LIMIT ?)', topic, Math.max(1, Math.ceil(count / 10)))
+    },
+    size: () => sql.databaseSize
+  }
+}
 declare const WebSocketPair: new () => {0: unknown; 1: HeldSocket}
 
 const INFO = {
   name: 'snrdlr relay',
   description:
-    'Passes short-lived events (kinds 20000 to 29999) between devices connected at the same moment, so they can find each other. Stores nothing. Subscriptions must name their topics with an #x filter.',
+    `Passes short-lived events (kinds 20000 to 29999) between devices connected at the same moment, so they can find each other, and keeps sealed messages of kind ${STORED_KIND} for up to ${LIMITS.keepSeconds / 86400} days. Nothing else is accepted. Subscriptions must name their topics with an #x filter.`,
   software: 'https://github.com/myklemykle/snrdlr',
-  supported_nips: [1, 11],
+  supported_nips: [1, 11, 40],
   limitation: {
     max_message_length: LIMITS.messageBytes,
     max_subscriptions: LIMITS.subscriptionsPerConnection,
@@ -59,9 +92,10 @@ export default {
 }
 
 export class RelayRoom {
-  private relay = new Relay()
+  private relay: Relay
 
   constructor(private ctx: ObjectContext) {
+    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql))
     // Waking after an idle spell: the sockets are still open, and each remembers its own subscriptions.
     for (const socket of ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() as ConnectionState | null
@@ -73,7 +107,14 @@ export class RelayRoom {
     return {send: (text: string) => socket.send(text), save: (state: ConnectionState) => socket.serializeAttachment(state)}
   }
 
+  /** Throws away messages that have been held long enough. */
+  async alarm(): Promise<void> {
+    this.ctx.storage.sql.exec('DELETE FROM events WHERE expires_at <= ?', Math.floor(Date.now() / 1000))
+    await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
+  }
+
   async fetch(request: Request): Promise<Response> {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
     const from = await shortHash(request.headers.get('CF-Connecting-IP') ?? 'unknown')
     const refusal = this.relay.refusal(from)
     if (refusal) return new Response(refusal, {status: 503})
