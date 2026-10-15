@@ -1,6 +1,12 @@
 import {openDB, type DBSchema, type IDBPDatabase} from 'idb'
-import type {Message} from './envelope'
+import {streamOf, type Message, type ReadMarks} from './envelope'
 import type {IdentitySecrets} from './identity'
+
+/** Both marks together, each writer at the further of the two; `held` itself if `more` adds nothing. */
+export function mergeMarks(held: ReadMarks, more: ReadMarks): ReadMarks {
+  const ahead = Object.entries(more).filter(([stream, seq]) => seq > (held[stream] ?? 0))
+  return ahead.length === 0 ? held : {...held, ...Object.fromEntries(ahead)}
+}
 
 export type ChatRecord = {
   /** The chat's room ID, derived from its secret and context. */
@@ -23,6 +29,11 @@ export type ChatRecord = {
    * then is history, read or not elsewhere, and does not count as unread here.
    */
   historyBefore?: number
+  /**
+   * How far the chat's messages have been shown, on this device or another of the person's (who say so in
+   * their hidden chat, devices.ts). What has been shown anywhere does not count as unread.
+   */
+  readMarks?: ReadMarks
   /** Set when rejoining a chat that was left: our earlier messages used sequence numbers up to here. */
   ownSeqFloor?: number
   /** Our own messages up to this number are known to be with the relay that keeps them for members who are offline. */
@@ -168,11 +179,36 @@ function wrap(db: IDBPDatabase<Schema>) {
     async updateContent(message: MessageRecord): Promise<void> {
       await db.put('messages', message)
     },
-    /** Records that the chat has been looked at up to `at`. */
-    async markRead(id: string, at: number): Promise<void> {
+    /**
+     * Records that the chat has been looked at up to `at`, and so each message that had arrived by then.
+     * Returns how far the chat has been read.
+     */
+    async markRead(id: string, at: number): Promise<ReadMarks | undefined> {
+      const chat = await db.get('chats', id)
+      if (!chat) return undefined
+      // Only what arrived since the last look is new, unless this chat's reading was never marked this way.
+      const from = chat.readMarks === undefined ? -Infinity : (chat.readAt ?? -Infinity)
+      const shown = from < at ? await db.getAllFromIndex('messages', 'received', IDBKeyRange.bound([id, from], [id, at], true)) : []
+      const marks: ReadMarks = {}
+      for (const message of shown) marks[streamOf(message)] = Math.max(marks[streamOf(message)] ?? 0, message.seq)
+      const tx = db.transaction('chats', 'readwrite')
+      const now = await tx.store.get(id)
+      if (!now) return undefined
+      const readMarks = mergeMarks(now.readMarks ?? {}, marks)
+      if ((now.readAt ?? -Infinity) < at || readMarks !== now.readMarks) {
+        await tx.store.put({...now, readAt: Math.max(now.readAt ?? -Infinity, at), readMarks})
+      }
+      await tx.done
+      return readMarks
+    },
+    /** Records how far another of the person's devices has shown the chat's messages. */
+    async markReadElsewhere(id: string, seen: ReadMarks): Promise<void> {
       const tx = db.transaction('chats', 'readwrite')
       const chat = await tx.store.get(id)
-      if (chat && (chat.readAt ?? 0) < at) await tx.store.put({...chat, readAt: at})
+      if (chat) {
+        const readMarks = mergeMarks(chat.readMarks ?? {}, seen)
+        if (readMarks !== chat.readMarks) await tx.store.put({...chat, readMarks})
+      }
       await tx.done
     },
     /** Which of a chat's files are held, by hash. */
@@ -185,8 +221,13 @@ function wrap(db: IDBPDatabase<Schema>) {
       const since = IDBKeyRange.bound([chat.id, chat.readAt ?? chat.createdAt], [chat.id, Infinity], true)
       const arrived = await db.getAllFromIndex('messages', 'received', since)
       const history = chat.historyBefore ?? 0
+      const marks = chat.readMarks ?? {}
       return arrived.filter(
-        message => message.author !== selfId && message.sentAt >= history && (message.content.type === 'text' || message.content.type === 'image')
+        message =>
+          message.author !== selfId &&
+          message.sentAt >= history &&
+          message.seq > (marks[streamOf(message)] ?? 0) &&
+          (message.content.type === 'text' || message.content.type === 'image')
       ).length
     },
 

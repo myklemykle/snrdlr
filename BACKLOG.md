@@ -140,8 +140,8 @@ Open:
 - A lost device cannot be removed: it holds the keys. The only remedy is a new identity. Removing a device needs separate device keys signed by a personal key.
 - In the device-showing-the-code direction (`#device1.n.`), someone who sees the code could hand the new device keys of their own; the new device would become them. It cannot steal anything, but is confusing. Could be closed by having the new device check the existing device's signature.
 - A device added later gets each chat's history from the members or the relay store (30 days), not from the person's other devices' stores in bulk.
-- Unread counts, read positions, sounds, profile settings and the profile photo are per device.
-- The whole history of a chat newly taken up from another device counts as unread on the new device.
+- Sounds, profile settings and the profile photo are per device. (Unread counts are shared since 14 October 2026: each device says in the hidden chat, per writer's device, the latest message it has shown, and the others stop counting those. A chat newly taken up from another device no longer counts its history as unread.)
+- Where a chat was scrolled to is still per device.
 - A chat left on one device while it is open on another's screen is let go when that screen is closed.
 
 ## Developer visibility and dashboard

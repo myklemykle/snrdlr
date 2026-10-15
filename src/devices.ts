@@ -3,26 +3,27 @@
 // only members are those devices: each one says there which chats it holds and which it has left, and
 // each takes up what the others say. It is an ordinary chat in every other way, synced directly between
 // the devices when they are online together and left with the relay's store when they are not, so it
-// also keeps a copy of the chat list that a device can come back to.
+// also keeps a copy of the chat list that a device can come back to. Each device also says there how far
+// it has read each chat, so that what was read on one is not unread on the others.
 import {hkdf} from '@noble/hashes/hkdf.js'
 import {sha256} from '@noble/hashes/sha2.js'
 import {claimChat, isOnScreen, unclaimChat, type ConnectFor} from './background'
 import {bytesEqual, concatBytes, utf8} from './bytes'
 import {dmContext} from './chats'
-import {streamOf, writtenAfter, type ChatHeldContent} from './envelope'
+import {streamOf, writtenAfter, type ChatHeldContent, type ChatReadContent, type ReadMarks} from './envelope'
 import type {Identity} from './identity'
 import {deriveChatKeys} from './keys'
 import type {OpenMailbox} from './mailbox'
 import {verifyChain} from './membership'
 import {uniqueChatName} from './names'
 import {openSession, type Session} from './session'
-import type {ChatRecord, MessageRecord, Store} from './store'
+import {mergeMarks, type ChatRecord, type MessageRecord, type Store} from './store'
 
 /** A chat is announced again after this long, so that the relay, which forgets after 30 days, still has it. */
 const REFRESH_MS = 20 * 24 * 3600_000
 const POLL_MS = 4000
 
-type Note = ChatHeldContent | {type: 'chat-left'; id: string}
+type Note = ChatHeldContent | ChatReadContent | {type: 'chat-left'; id: string}
 
 /** The person's own hidden chat. Every device of theirs works out the same one from the keys they share. */
 export function selfChat(identity: Identity): ChatRecord {
@@ -48,8 +49,8 @@ export function noteFor(chat: ChatRecord): ChatHeldContent {
 }
 
 /** For each chat mentioned in the hidden chat, the latest that any of the person's devices said about it. */
-export function latestNotes(messages: MessageRecord[], selfId: string): Map<string, {message: MessageRecord; note: Note}> {
-  const latest = new Map<string, {message: MessageRecord; note: Note}>()
+export function latestNotes(messages: MessageRecord[], selfId: string): Map<string, {message: MessageRecord; note: ChatHeldContent | {type: 'chat-left'; id: string}}> {
+  const latest = new Map<string, {message: MessageRecord; note: ChatHeldContent | {type: 'chat-left'; id: string}}>()
   for (const message of messages) {
     const {content} = message
     if (message.author !== selfId || (content.type !== 'chat-held' && content.type !== 'chat-left')) continue
@@ -58,6 +59,15 @@ export function latestNotes(messages: MessageRecord[], selfId: string): Map<stri
     if (!earlier || writtenAfter(message, earlier.message)) latest.set(id, {message, note: content})
   }
   return latest
+}
+
+/** For each chat, how far the person's devices together have said they have read it. */
+export function latestReads(messages: MessageRecord[], selfId: string): Map<string, ReadMarks> {
+  const reads = new Map<string, ReadMarks>()
+  for (const {author, content} of messages) {
+    if (author === selfId && content.type === 'chat-read') reads.set(content.id, mergeMarks(reads.get(content.id) ?? {}, content.seen))
+  }
+  return reads
 }
 
 /** The chat a note describes, as this device will hold it; null unless it really is a chat this person is in. */
@@ -125,6 +135,18 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
   for (const chat of local.values()) {
     const said = latest.get(chat.id)
     if (!said || said.note.type === 'chat-left' || now - said.message.sentAt > REFRESH_MS) await say(noteFor(chat))
+  }
+  // How far each chat has been read, here and on the others.
+  const reads = latestReads(messages, identity.id)
+  for (const chat of local.values()) {
+    // Read here before reading was marked this way: worked out once from when it was read.
+    const here = chat.readMarks ?? (chat.readAt === undefined ? {} : ((await store.markRead(chat.id, chat.readAt)) ?? {}))
+    const there = reads.get(chat.id) ?? {}
+    if (mergeMarks(here, there) !== here) {
+      await store.markReadElsewhere(chat.id, there)
+      changed = true
+    }
+    if (mergeMarks(there, here) !== there) await say({type: 'chat-read', id: chat.id, seen: mergeMarks(there, here)})
   }
   return changed
 }

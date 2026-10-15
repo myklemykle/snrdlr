@@ -48,6 +48,8 @@ export type Content =
   | ChatHeldContent
   /** Only in a person's own hidden chat: one of their devices has left this chat. */
   | {type: 'chat-left'; id: string}
+  /** Only in a person's own hidden chat: how far one of their devices has shown this chat's messages. */
+  | ChatReadContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -117,6 +119,12 @@ export type ChatHeldContent = {
   peer?: {signPublic: Uint8Array; dhPublic: Uint8Array}
   name: string
 }
+
+/** For each writer's device in a chat (as streamOf names it), the number of the latest of its messages shown. */
+export type ReadMarks = Record<string, number>
+export type ChatReadContent = {type: 'chat-read'; id: string; seen: ReadMarks}
+const MAX_READ_MARKS = 1024
+const isStream = (value: string) => /^[0-9a-f]{1,128}(\.[0-9a-f]{16})?$/.test(value)
 
 export const MAX_AVATAR_BYTES = 8192
 export const MAX_CONTACT_LENGTH = 100
@@ -253,6 +261,8 @@ function encodeContent(content: Content): [string, unknown] {
       ]
     case 'chat-left':
       return ['chat-left', fromHex(content.id)]
+    case 'chat-read':
+      return ['chat-read', {i: fromHex(content.id), s: content.seen}]
     case 'edit':
       return ['edit', {s: content.target.seq, t: content.text, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}]
     case 'unknown':
@@ -322,6 +332,13 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'chat-left') {
     if (!(body instanceof Uint8Array) || body.length !== 32) throw new Error('bad chat body')
     return {type, id: toHex(body)}
+  }
+  if (type === 'chat-read') {
+    const {i, s} = (body ?? {}) as Record<string, unknown>
+    if (!(i instanceof Uint8Array) || i.length !== 32 || typeof s !== 'object' || s === null || Array.isArray(s)) throw new Error('bad chat body')
+    const marks = Object.entries(s as Record<string, unknown>)
+    if (marks.length > MAX_READ_MARKS || !marks.every(([stream, seq]) => isStream(stream) && isCount(seq))) throw new Error('bad chat body')
+    return {type, id: toHex(i), seen: Object.fromEntries(marks) as ReadMarks}
   }
   if (type === 'edit') {
     const {s, t, d} = (body ?? {}) as Record<string, unknown>

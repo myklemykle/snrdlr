@@ -179,6 +179,19 @@ describe('envelope', () => {
     }
   })
 
+  it("round-trips how far one of a person's devices has read a chat, and refuses marks that name no writer", async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const id = 'ab'.repeat(32)
+    const seen = {[anne.id]: 4, [`${anne.id}.0123456789abcdef`]: 12}
+    const read = {...hello, seq: 2, content: {type: 'chat-read', id, seen}} as const
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, read))).toEqual({...read, author: anne.id})
+    for (const bad of [{__proto__x: 1}, {[anne.id]: -1}, {[anne.id]: 1.5}, {[`${anne.id}.12`]: 1}]) {
+      const wrong = {...hello, seq: 2, content: {type: 'chat-read', id, seen: bad}} as const
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, wrong))).rejects.toThrow('bad chat body')
+    }
+  })
+
   it('round-trips a profile card, full and empty, and refuses one with a part that is not what it should be', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')

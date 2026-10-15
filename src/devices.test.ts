@@ -65,6 +65,29 @@ describe('one person on several devices', () => {
     await Promise.all([again(), computer.stop()])
   })
 
+  it('shares how far each chat has been read, so what was read on one device is not unread on the others', async () => {
+    const network = makeNetwork()
+    const anne = createIdentity('Anne')
+    const bob = createIdentity('Bob')
+    const phone = await device(network, anne)
+    const picnic = await phone.store.saveChat(newGroupChat(anne, 'Picnic', [], Date.now()))
+    const computer = await device(network, {...anne, device: '0123456789abcdef'})
+    await vi.waitFor(() => expect(computer.names()).resolves.toEqual(['Picnic']))
+    const unread = async (where: typeof phone) => where.store.unreadCount((await where.store.getChat(picnic.id))!, anne.id)
+    // Bob's messages reach both.
+    for (const where of [phone, computer]) {
+      for (let seq = 1; seq <= 3; seq++) {
+        const content = {type: 'text', text: `hi ${seq}`} as const
+        await where.store.addMessage({chatId: picnic.id, author: bob.id, device: '', seq, lamport: seq, sentAt: Date.now(), receivedAt: Date.now(), content, envelope: new Uint8Array()})
+      }
+    }
+    expect(await unread(computer)).toBe(3)
+    // Read on the phone.
+    await phone.store.markRead(picnic.id, Date.now())
+    await vi.waitFor(async () => expect(await unread(computer)).toBe(0))
+    await Promise.all([phone.stop(), computer.stop()])
+  })
+
   it("takes up only chats this person is really in", () => {
     const anne = createIdentity('Anne')
     const cindy = createIdentity('Cindy')

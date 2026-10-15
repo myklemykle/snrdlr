@@ -1878,3 +1878,33 @@ test("a notification tapped in the iPhone's Home Screen app goes on to Safari, o
   const settings = await openSettings(page)
   await expect(settings.getByRole('heading', {name: 'Notifications'})).toBeVisible()
 })
+
+test("what is read on one of a person's devices is no longer unread on the others", async ({browser}) => {
+  const {anne, bob} = await anneAndBob(browser)
+  await openSettings(anne)
+  await anne.getByRole('button', {name: 'Add a device'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const computer = await newStranger(browser)
+  await computer.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await anne.locator('.device-code').getByRole('button', {name: 'Done'}).click()
+  await closeSettings(anne)
+  await expect(computer.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+  await expect(chatEntry(computer, 'Picnic')).toBeVisible({timeout: 30_000})
+
+  // Bob writes while both of Anne's devices are on her chat list.
+  await send(bob, 'one')
+  await send(bob, 'two')
+  await computer.reload()
+  await expect(chatEntry(computer, 'Picnic').getByLabel('2 unread')).toBeVisible({timeout: 30_000})
+
+  // She reads them on her phone, and the computer stops counting them.
+  await chatEntry(anne, 'Picnic').click()
+  await expect(anne.locator('.theirs', {hasText: 'two'})).toBeVisible({timeout: 30_000})
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(computer.locator('.unread')).toHaveCount(0, {timeout: 30_000})
+  await computer.reload()
+  await expect(chatEntry(computer, 'Picnic')).toBeVisible()
+  await expect(computer.locator('.unread')).toHaveCount(0)
+})

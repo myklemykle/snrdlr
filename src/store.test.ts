@@ -124,6 +124,30 @@ describe('store', () => {
     expect(await store.unreadCount(saved, 'me')).toBe(1)
   })
 
+  it("does not count what was read on another of the person's devices, but does count what came after", async () => {
+    const store = await openStore(freshName())
+    await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 0}))
+    for (let seq = 1; seq <= 5; seq++) await store.addMessage(message({author: 'them', seq, sentAt: seq, receivedAt: 10 + seq}))
+    expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(5)
+    // Another device has shown the first three; one written earlier but delivered late still counts.
+    await store.markReadElsewhere('chat-a', {them: 3})
+    expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(2)
+    await store.markReadElsewhere('chat-a', {them: 2})
+    expect((await store.getChat('chat-a'))!.readMarks).toEqual({them: 3})
+  })
+
+  it('marks how far each writer has been read when the chat is looked at', async () => {
+    const store = await openStore(freshName())
+    await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 0}))
+    await store.addMessage(message({author: 'them', seq: 1, receivedAt: 10}))
+    await store.addMessage(message({author: 'them', device: '0123456789abcdef', seq: 7, receivedAt: 11}))
+    expect(await store.markRead('chat-a', 20)).toEqual({them: 1, 'them.0123456789abcdef': 7})
+    // Arriving after the look is not marked.
+    await store.addMessage(message({author: 'them', seq: 2, receivedAt: 30}))
+    expect(await store.markRead('chat-a', 25)).toEqual({them: 1, 'them.0123456789abcdef': 7})
+    expect(await store.markRead('chat-a', 40)).toEqual({them: 2, 'them.0123456789abcdef': 7})
+  })
+
   it('refuses a second message with the same author and sequence number', async () => {
     const store = await openStore(freshName())
     expect(await store.addMessage(message({content: {type: 'text', text: 'original'}}))).toBe(true)
