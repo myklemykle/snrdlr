@@ -365,7 +365,17 @@ export function ChatScreen(props: {
 
   // The message being answered, shown above the message box until the answer is sent or it is dismissed.
   const [replyingTo, setReplyingTo] = useState<MessageRecord | null>(null)
-  const messageBox = useRef<HTMLInputElement>(null)
+  const messageBox = useRef<HTMLTextAreaElement>(null)
+  // On a computer Enter sends and Shift+Enter starts a new line; on a phone Enter starts a new line and
+  // the Send button sends, as in other chat apps.
+  const enterSends = useMemo(() => matchMedia('(hover: hover) and (pointer: fine)').matches, [])
+  // The box grows with what is typed, up to a few lines, then scrolls.
+  useLayoutEffect(() => {
+    const box = messageBox.current
+    if (!box) return
+    box.style.height = 'auto'
+    box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`
+  }, [draft])
   useEffect(() => {
     if (atEnd.current) toEnd()
   }, [replyingTo])
@@ -982,12 +992,16 @@ export function ChatScreen(props: {
             <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
           </svg>
         </button>
-        <input
+        <textarea
           ref={messageBox}
+          rows={1}
           value={draft}
           onInput={event => setDraft(event.currentTarget.value)}
           onKeyDown={event => {
-            if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)
+            if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.isComposing) {
+              event.preventDefault()
+              event.currentTarget.form?.requestSubmit()
+            } else if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)
             // As in other chat apps: the up arrow in an empty box rewords the last thing we said.
             else if (event.key === 'ArrowUp' && !editing && draft === '' && attached.length === 0 && editLast()) event.preventDefault()
           }}

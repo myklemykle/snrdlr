@@ -1929,3 +1929,38 @@ test("what is read on one of a person's devices is no longer unread on the other
   await expect(chatEntry(computer, 'Picnic')).toBeVisible()
   await expect(computer.locator('.unread')).toHaveCount(0)
 })
+
+test('a message can have several lines: Shift+Enter on a computer, Enter on a phone', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const invite = await startChat(anne, 'Anne', 'Lines')
+  const context = await browser.newContext({hasTouch: true, isMobile: true, viewport: {width: 375, height: 667}})
+  await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
+  const phone = await context.newPage()
+  await phone.goto(invite)
+  await introduce(phone, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  // On a computer, Shift+Enter starts a new line and Enter sends; the box grows, then shrinks back.
+  const box = anne.getByLabel('Message')
+  const oneLine = (await box.boundingBox())!.height
+  await box.pressSequentially('first line')
+  await box.press('Shift+Enter')
+  await box.pressSequentially('second line')
+  expect((await box.boundingBox())!.height).toBeGreaterThan(oneLine)
+  await box.press('Enter')
+  const arrived = phone.locator('.theirs', {hasText: 'second line'})
+  await expect(arrived).toBeVisible()
+  expect(await arrived.evaluate(element => element.textContent)).toContain('first line\nsecond line')
+  await expect(box).toHaveValue('')
+  expect((await box.boundingBox())!.height).toBe(oneLine)
+
+  // On a phone, Enter starts a new line and the Send button sends.
+  const phoneBox = phone.getByLabel('Message')
+  await phoneBox.pressSequentially('one')
+  await phoneBox.press('Enter')
+  await phoneBox.pressSequentially('two')
+  await expect(phoneBox).toHaveValue('one\ntwo')
+  await phone.getByRole('button', {name: 'Send'}).click()
+  await expect(anne.locator('.theirs', {hasText: 'two'})).toBeVisible()
+  expect(await anne.locator('.theirs', {hasText: 'two'}).evaluate(element => element.textContent)).toContain('one\ntwo')
+})

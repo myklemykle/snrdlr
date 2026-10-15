@@ -52,6 +52,7 @@ h1 {
 }
 
 input,
+textarea,
 button {
   font: inherit;
   /* 16px minimum stops iOS Safari zooming the page on focus. */
@@ -208,9 +209,18 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
-.composer input {
+.composer textarea {
   flex: 1;
   min-width: 0;
+  /* Grows with what is typed (chat-screen.tsx), up to about six lines. */
+  max-height: 9.5rem;
+  resize: none;
+  line-height: 1.35;
+}
+
+/* The buttons beside the box stay at the bottom as it grows. */
+.composer {
+  align-items: flex-end;
 }
 
 .note {
