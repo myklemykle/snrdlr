@@ -166,6 +166,10 @@ What it could draw on:
 
 Where it lives: a page served by the Worker behind a login (Cloudflare Access is free for a few users), not part of the public app.
 
+**Decided 15 October 2026:** the dashboard is its own Worker in a private repository, at its workers.dev address behind Cloudflare Access (Google sign-in), with the Worker also refusing anything without a valid Access sign-in; optionally `dash.mykle.com` redirects there from Namecheap (mykle.com's DNS is not on Cloudflare). It shows Cloudflare's usage and cost figures for both Workers and TURN, daily totals the relay keeps (messages stored, notifications sent, connections), and, as the first estimate of users, the number of devices with notifications turned on. A daily anonymous check-in is a possible later step.
+
+- **A plain-language FAQ for users** (requested 15 October 2026), including exactly what snrdlr promises about privacy: what the relay, Cloudflare, Apple and Google can and cannot see, what the developers can see (only the counts above), and how long anything is kept.
+
 ## Services snrdlr depends on, and who pays
 
 Everything outside the users' own devices. To be kept complete: add a row whenever a new outside service is introduced.
