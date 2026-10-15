@@ -91,9 +91,15 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
   const send = (id: string) => {
     const entry = waiting.get(id)
     if (!entry || socket?.readyState !== WebSocket.OPEN) return
-    socket.send(`["EVENT",${entry.json}]`)
+    const sentOn = socket
+    sentOn.send(`["EVENT",${entry.json}]`)
     clearTimeout(entry.timer)
-    entry.timer = setTimeout(() => settle(id, false), ANSWER_TIMEOUT_MS)
+    entry.timer = setTimeout(() => {
+      settle(id, false)
+      // No answer on a connection that still looks open: it has died without saying so, as one can
+      // after a long while open on a computer. Start over, rather than send more into it.
+      if (socket === sentOn && sentOn.readyState === WebSocket.OPEN) sentOn.close()
+    }, ANSWER_TIMEOUT_MS)
   }
   const settle = (id: string, kept: boolean) => {
     const entry = waiting.get(id)

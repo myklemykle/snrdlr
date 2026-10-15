@@ -100,6 +100,8 @@ export type Session = {
   close: () => Promise<void>
 }
 
+/** How long to wait before leaving one of our messages with the relay again, after it was not taken. */
+const SHELF_RETRY_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000]
 const MAX_SEQ_RETRIES = 5
 const MAX_VECTOR_AUTHORS = 1024
 const RESYNC_INTERVAL_MS = 30_000
@@ -327,6 +329,8 @@ export async function openSession(options: {
   let storedSeq = chat.storedSeq ?? 0
   const shelving = new Set<number>()
   const onShelf = new Set<number>()
+  // One of ours the relay did not take is tried again, less and less often, while the chat stays open.
+  const retries = new Map<number, {count: number; timer: ReturnType<typeof setTimeout>}>()
   const ownHeld = () => messages.filter(fromHere).sort((a, b) => a.seq - b.seq)
   // The relay would already have thrown away anything older than this, so it is not worth leaving there.
   const freshFrom = Date.now() - KEEP_SECONDS * 1000
@@ -352,7 +356,14 @@ export async function openSession(options: {
       .then(kept => {
       if (!tracked) return
       shelving.delete(record.seq)
-      if (!kept || closed) return
+      if (closed) return
+      if (!kept) {
+        const count = (retries.get(record.seq)?.count ?? 0) + 1
+        const delay = SHELF_RETRY_MS[Math.min(count - 1, SHELF_RETRY_MS.length - 1)]
+        retries.set(record.seq, {count, timer: setTimeout(() => !closed && record.sentAt > freshFrom && shelve(record), delay)})
+        return
+      }
+      retries.delete(record.seq)
       onShelf.add(record.seq)
       // Remember how far our messages are all there, without a gap.
       let upTo = storedSeq
@@ -598,6 +609,7 @@ export async function openSession(options: {
       acks.forEach(({timer}) => clearTimeout(timer))
       clearTimeout(searchTimer)
       clearTimeout(errorTimer)
+      retries.forEach(({timer}) => clearTimeout(timer))
       box?.close()
       await wire?.leave().catch(() => {})
     }

@@ -37,7 +37,9 @@ function makeRelay() {
     })
     return socket as unknown as WebSocket
   }
-  return {makeSocket, sockets, relay, setUp: (next: boolean) => (up = next)}
+  // A connection that still looks open but no longer reaches the relay.
+  const silence = (socket: {send: (text: string) => void}) => (socket.send = () => {})
+  return {makeSocket, sockets, relay, setUp: (next: boolean) => (up = next), silence}
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
@@ -97,6 +99,29 @@ describe('mailbox', () => {
       await vi.advanceTimersByTimeAsync(100)
       expect(await again).toBe(true)
       expect(sockets.length).toBeGreaterThan(1)
+      box.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('starts over when a connection that looks open stops answering, and leaves the next message', async () => {
+    vi.useFakeTimers()
+    try {
+      const {makeSocket, sockets, silence} = makeRelay()
+      const open = relayMailboxes('wss://relay', makeSocket)
+      const box = open(TOPIC, undefined, {onEnvelope: () => {}})
+      expect(await box.post(new Uint8Array([1]), Date.now())).toBe(true)
+      silence(sockets[0] as unknown as {send: (text: string) => void})
+      const lost = box.post(new Uint8Array([2]), Date.now())
+      await vi.advanceTimersByTimeAsync(11_000)
+      expect(await lost).toBe(false)
+      // The dead connection was closed and a new one made, which works.
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(sockets.length).toBe(2)
+      const kept = box.post(new Uint8Array([2]), Date.now())
+      await vi.advanceTimersByTimeAsync(100)
+      expect(await kept).toBe(true)
       box.close()
     } finally {
       vi.useRealTimers()

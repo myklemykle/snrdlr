@@ -823,6 +823,24 @@ describe('session', () => {
     expect([...shelf.kept.values()][0].length).toBe(count)
   })
 
+  it('tries again by itself to leave what the relay did not take, while the chat stays open', async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    const store = await openStore(`session-shelf-${counter++}`)
+    const anne = createIdentity('Anne')
+    const held = admitted(chat, anne)
+    await store.saveChat(held)
+    shelf.setUp(false)
+    const open = await join(makeNetwork(), chat, anne, store, held, shelf.open)
+    await open.session.sendText('the relay was not answering')
+    await settle()
+    expect(shelf.kept.size).toBe(0)
+    // The relay comes back; nobody reopens the chat.
+    shelf.setUp(true)
+    await vi.waitFor(async () => expect((await store.getChat(held.id))!.storedSeq).toBe(2), {timeout: 10_000, interval: 200})
+    await open.session.close()
+  }, 15_000)
+
   it('lets any member rename a group, for everyone, including someone who was away', async () => {
     const network = makeNetwork()
     const chat = makeChat()
