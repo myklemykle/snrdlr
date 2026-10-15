@@ -73,15 +73,14 @@ async function notify(topic) {
   // notification for every push, so it gets one regardless.
   const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true})
   if (!onIos && windows.some(client => client.visibilityState === 'visible' && client.focused)) return
-  const tag = topic || 'snrdlr'
-  const earlier = await self.registration.getNotifications({tag})
-  const count = earlier.reduce((most, shown) => Math.max(most, shown.data?.count ?? 1), 0) + 1
+  // One notification per chat, replaced by the next. It does not count messages: what was read, here
+  // or on another device (on an iPhone, in Safari), is never known here, so a count only ever grew.
   await self.registration.showNotification(chat ? chat.name : 'snrdlr', {
-    body: count > 1 ? `${count} new messages` : 'New message',
-    tag,
+    body: 'New message',
+    tag: topic || 'snrdlr',
     renotify: true,
     icon: 'bird-192.png',
-    data: {id: chat?.id ?? null, count}
+    data: {id: chat?.id ?? null}
   })
 }
 
