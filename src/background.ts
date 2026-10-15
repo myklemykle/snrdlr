@@ -41,7 +41,8 @@ let keeperCheck: (() => void) | null = null
 
 /**
  * Calls back whenever a chat that is not on screen receives something. `incoming` is true when that
- * includes a message or picture someone sent, as opposed to a reaction or someone joining.
+ * includes a message or picture someone has just sent, as opposed to a reaction, someone joining, or
+ * history being caught up on.
  */
 export function onBackgroundActivity(listener: (chatId: string, incoming: boolean) => void): () => void {
   listeners.add(listener)
@@ -64,28 +65,48 @@ export function unclaimChat(chatId: string): void {
   keeperCheck?.()
 }
 
-/** Tells listeners when other people's messages arrive in a chat that is not on screen. */
-type Counted = {author: string; content: {type: string}}
+type Counted = {author: string; device: string; seq: number; sentAt: number; content: {type: string}}
+
+/** Only what someone wrote this recently is heard as it arrives; anything older is history being caught up on. */
+const FRESH_MS = 2 * 60_000
 
 /**
- * `stored` is what the device held before connecting. News is measured against that, not against the
- * first report from the session, which can already include something that has just arrived.
+ * Given each report of a chat's messages, says whether it brought something worth a sound: words or a
+ * picture from someone else, just written. `held` is what was there already.
+ */
+export function heardNews(selfId: string, held: Counted[]): (messages: Counted[]) => boolean {
+  const seen = new Set(held.map(message => `${message.author}.${message.device}.${message.seq}`))
+  return messages => {
+    let news = false
+    for (const message of messages) {
+      const key = `${message.author}.${message.device}.${message.seq}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const {author, sentAt, content} = message
+      if (author !== selfId && (content.type === 'text' || content.type === 'image') && Date.now() - sentAt < FRESH_MS) news = true
+    }
+    return news
+  }
+}
+
+/**
+ * Tells listeners when other people's messages arrive in a chat that is not on screen. `stored` is what
+ * the device held before connecting. News is measured against that, not against the first report from
+ * the session, which can already include something that has just arrived.
  */
 function announceNews(chatId: string, selfId: string, stored: Counted[], onNews?: () => void) {
   // Only other people's messages count; our own "joined" message is not news.
-  const count = (messages: Counted[]) => {
-    const others = messages.filter(message => message.author !== selfId)
-    return {held: others.length, said: others.filter(({content}) => content.type === 'text' || content.type === 'image').length}
-  }
-  let {held, said: heldSaid} = count(stored)
+  const othersIn = (messages: Counted[]) => messages.filter(message => message.author !== selfId).length
+  const heard = heardNews(selfId, stored)
+  let held = othersIn(stored)
   return (messages: Counted[]) => {
-    const now = count(messages)
-    if (now.held !== held) {
+    const now = othersIn(messages)
+    const fresh = heard(messages)
+    if (now !== held) {
       onNews?.()
-      listeners.forEach(listener => listener(chatId, now.said > heldSaid))
+      listeners.forEach(listener => listener(chatId, fresh))
     }
-    held = now.held
-    heldSaid = now.said
+    held = now
   }
 }
 

@@ -1,5 +1,5 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
-import {claimChat, unclaimChat} from './background'
+import {claimChat, heardNews, unclaimChat} from './background'
 import {latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {latestEdits} from './edits'
@@ -80,13 +80,14 @@ export function ChatScreen(props: {
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState('')
   const session = useRef<Session | null>(null)
-  const heard = useRef<number | null>(null)
+  const heard = useRef<((messages: MessageRecord[]) => boolean) | null>(null)
   // Which pictures' files are on this device.
   const [files, setFiles] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
     let opened: Session | null = null
+    heard.current = null
     void (async () => {
       // Take the chat over from any background sync before joining its room ourselves.
       await claimChat(chat.id)
@@ -102,10 +103,10 @@ export function ChatScreen(props: {
         handlers: {
           onMessages: next => {
             if (cancelled) return
-            // A sound for what other people say, but not for the history that loads when the chat opens.
-            const said = next.filter(({author, content}) => author !== identity.id && (content.type === 'text' || content.type === 'image')).length
-            if (heard.current !== null && said > heard.current) playSound()
-            heard.current = said
+            // A sound for what other people say as they say it, but not for the history that loads when
+            // the chat opens or is caught up on.
+            if (heard.current === null) heard.current = heardNews(identity.id, next)
+            else if (heard.current(next)) playSound()
             setMessages(next)
           },
           onChatName: next => !cancelled && setChatName(next),
@@ -116,11 +117,7 @@ export function ChatScreen(props: {
             if (peerIds.length > 0) setError(null)
           },
           onError: message => !cancelled && setError(message),
-          onFiles: held => !cancelled && setFiles(held),
-          // The sound for sending waits until the message has reached at least one other person's device.
-          onDelivered: arrived => {
-            if (!cancelled && arrived.some(({content}) => content.type === 'text' || content.type === 'image')) playSound()
-          }
+          onFiles: held => !cancelled && setFiles(held)
         }
       })
       if (cancelled) void opened.close()
@@ -450,6 +447,8 @@ export function ChatScreen(props: {
     const replyTo: MessageRef | undefined = replyingTo ? {author: replyingTo.author, device: replyingTo.device, seq: replyingTo.seq} : undefined
     setDraft('')
     setReplyingTo(null)
+    // The sound for sending comes as it is sent, so that it is clearly the send.
+    playSound()
     if (attached.length === 0) return session.current.sendText(text, replyTo).catch(() => setError('Message could not be sent.'))
     const sending = attached
     setAttached([])

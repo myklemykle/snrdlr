@@ -1130,7 +1130,7 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   // Joining and catching up on history is silent.
   expect(await played(bob)).toBe(0)
 
-  // One for receiving, and one for sending once it has arrived.
+  // One for sending, as it is sent, and one for receiving.
   await send(anne, 'hello')
   await expect(bob.locator('.theirs', {hasText: 'hello'})).toBeVisible()
   await expect.poll(() => played(anne)).toBe(1)
@@ -1208,16 +1208,16 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   await bob.keyboard.press('Escape')
   await expect(settings).toHaveCount(0)
 
-  // Sending to nobody is silent. The sound comes when the message reaches someone.
+  // Sending to nobody sounds the same, at once, and nothing more is heard when it reaches someone later.
   await expect.poll(() => played(anne)).toBe(3)
   await bob.goto('about:blank')
   await expect(anne.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
   await send(anne, 'left for later')
-  await anne.waitForTimeout(800)
-  expect(await played(anne)).toBe(3)
+  await expect.poll(() => played(anne)).toBe(4)
   await bob.goto('/')
   await expect(chatEntry(bob, 'Sounds').locator('.unread')).toBeVisible({timeout: 20_000})
-  await expect.poll(() => played(anne)).toBe(4)
+  await anne.waitForTimeout(800)
+  expect(await played(anne)).toBe(4)
 })
 
 test('each sound set plays its own files, and every file in the app\'s own set can be decoded', async ({browser}) => {

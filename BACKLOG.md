@@ -9,8 +9,8 @@ Things noted along the way that are not part of the current phase. The phased pl
   - One pool of sounds for both directions. Separate sets for sent and received, a per-chat mute, and a volume control are possible later.
   - Not yet heard on a real iPhone or Android phone; check that the silent switch mutes it on the iPhone.
   - Each set has its own volume in Settings, from 0 to 200%. Defaults: snrdl 10%, plink 50%. A device where the slider was moved keeps its own level. The low snrdl default suggests the files themselves could be re-levelled.
-  - The sound for sending plays when the message is known to have reached another member's device. Each device now answers what it receives with a short note (how many messages it holds from that author). A device on an older copy of the app does not send the note, so the sound can be up to half a minute late.
-  - **Delivered marks.** The same report could show, per message, that it has reached someone (and later, everyone). Not built.
+  - The sound for sending plays as the message is sent (since 14 October 2026; it used to wait until the message reached another member's device, which testers found confusing). A received message sounds only if it was written in the last two minutes, so history loading into a chat is silent.
+  - **Delivered marks.** Each device still answers what it receives with a short note (how many messages it holds from that author). That report could show, per message, that it has reached someone (and later, everyone). Not built.
   - The snrdl sounds are credited to Elan Katin in the README; under what licence they are shared is not recorded.
 - **Settings.** A window opened from the gear on the home screen. It holds the sounds, joining someone (scan or paste), installing, adding a device, the stay-connected switch and the version line. The front page keeps only Chat with one person, Start a group and the chat list (14 October 2026). Candidates to add: storage used.
 - **Names and nicknames.**

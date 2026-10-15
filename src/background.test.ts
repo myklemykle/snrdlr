@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import {describe, expect, it} from 'vitest'
-import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type KeepStatus} from './background'
+import {claimChat, heardNews, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type KeepStatus} from './background'
 import {createIdentity} from './identity'
 import {newGroupChat} from './chats'
 import type {ChatKeys} from './keys'
@@ -183,5 +183,24 @@ describe('keepChats', () => {
     await until(() => network.joins >= 3)
     await stop()
     expect(network.present()).not.toContain(kay.id)
+  })
+})
+
+describe('heardNews', () => {
+  const said = (author: string, seq: number, agoMs: number, type = 'text') => ({author, device: '', seq, sentAt: Date.now() - agoMs, content: {type}})
+
+  it('hears words or a picture just written by someone else, once', () => {
+    const heard = heardNews('me', [said('them', 1, 60_000)])
+    expect(heard([said('them', 1, 60_000)])).toBe(false)
+    expect(heard([said('them', 1, 60_000), said('them', 2, 1000)])).toBe(true)
+    expect(heard([said('them', 1, 60_000), said('them', 2, 1000)])).toBe(false)
+    expect(heard([said('them', 3, 1000, 'image')])).toBe(true)
+    // Not our own, nor a reaction.
+    expect(heard([said('me', 1, 1000), said('them', 4, 1000, 'reaction')])).toBe(false)
+  })
+
+  it('stays quiet for history that arrives after the chat opens, however much of it', () => {
+    const heard = heardNews('me', [])
+    for (let seq = 1; seq <= 50; seq++) expect(heard([said('them', seq, 3_600_000 - seq)])).toBe(false)
   })
 })
