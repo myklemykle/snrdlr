@@ -11,7 +11,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - Each set has its own volume in Settings, from 0 to 200%. Defaults: snrdl 10%, plink 50%, groovy 10%. A device where the slider was moved keeps its own level. The low snrdl default suggests the files themselves could be re-levelled.
   - The sound for sending plays as the message is sent (since 14 October 2026; it used to wait until the message reached another member's device, which testers found confusing). A received message sounds only if it was written in the last two minutes, so history loading into a chat is silent.
   - **Delivered marks.** Each device still answers what it receives with a short note (how many messages it holds from that author). That report could show, per message, that it has reached someone (and later, everyone). Not built.
-  - The snrdl sounds are credited to Elan Katin in the README; under what licence they are shared is not recorded.
+  - The snrdl and groovy sounds are credited to the Unknown Snerdler in the README (their maker asked to be credited anonymously); under what licence they are shared is not recorded.
 - **Settings.** A window opened from the gear on the home screen. It holds the sounds, joining someone (scan or paste), installing, adding a device, the stay-connected switch and the version line. The front page keeps only Chat with one person, Start a group and the chat list (14 October 2026). Candidates to add: storage used.
 - **Names and nicknames.**
   - A real name for each user, and a chat name set by whoever creates the chat. Both exist today; neither can be changed after creation.
@@ -123,7 +123,7 @@ Still to check on a real iPhone:
 
 Open:
 
-- The app icon is a placeholder drawing (`public/icon.svg`, regenerate sizes with `node scripts/make-icons.mjs`).
+- The app icon is the red bird (15 October 2026), drawn from `scripts/icon-source.png`; regenerate the sizes with `node scripts/make-icons.mjs`. A Home Screen app already installed keeps its old icon until it is removed and added again.
 - Old cached files are dropped only by count; revisit if the cache grows.
 - The lab page (`lab/`, `lab-out/`, `public/lab/`) is a throwaway; remove it once a tapped notification is seen to hand off to Safari on a real iPhone.
 

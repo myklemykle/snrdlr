@@ -20,7 +20,6 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 - **Sounds.** A sound when a message is sent, or when a fresh one arrives while the app is open; sets are the folders in `src/sounds` (snrdl, plink, groovy) plus "shhhhh" for none, each with its own volume.
 - **Install.** It can be installed to the home screen and opens without a network once it has been opened before. Open tabs update themselves to a new version once nobody is using them; Settings shows the running version.
 - **Stay connected** (desktop): keeps every chat connected while the tab is open, so it hands messages on to members who come online later.
-- **Testing aids.** `?dev=1` turns on developer mode: standing invite links for test chats, and "Hold updates". A `lab/` page holds throwaway experiments on what phones allow.
 
 ## How it works
 
@@ -54,7 +53,7 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 | `src/store.ts` | IndexedDB storage, unread counts |
 | `src/profile*.ts*`, `src/cards.ts`, `src/edits.ts`, `src/reactions.ts`, `src/image*.ts*`, `src/files.ts`, `src/emoji*` | Profiles, edits, reactions, pictures, emoji |
 | `src/sound.ts`, `src/sounds/` | Message sounds |
-| `src/update.ts`, `src/install.ts`, `src/gate.ts`, `src/standing-invite.ts` | Self-updating tabs, installing, the invite-only gate, developer mode |
+| `src/update.ts`, `src/install.ts`, `src/gate.ts`, `src/standing-invite.ts` | Self-updating tabs, installing, the invite-only gate, testing aids |
 | `src/transport.ts`, `src/relays.ts`, `src/turn.ts`, `src/route.ts` | Finding peers, the relay list, TURN, the route indicator |
 | `worker-relay/` | Our Nostr relay on Cloudflare: signaling, the 30-day message store, push |
 | `worker/` | TURN credentials |
@@ -86,13 +85,11 @@ For manual testing in desktop browsers without touching public relays, run `npm 
 
 `npm run probe` measures the public Nostr relays in `scripts/relay-candidates.json`, to choose which ones the app should use. For each relay it makes two connections and posts one short-lived event the size of a real connection setup, then hangs up. It will not probe a relay again within three hours, backs off to daily or weekly when one fails, never connects to one that says it needs a login or payment, and stops for good if a relay twice asks it to slow down. `.github/workflows/probe-relays.yml` runs it every six hours and keeps the results on the `probe-data` branch; `npm run probe:report` prints both sets.
 
-For showing the app to someone far away during development, open it once with `?dev=1` on the address. A group's Invite panel then offers "Copy standing link (testing)": a link that lets whoever holds it join that group at any time, with nobody at the other end. It never expires and cannot be cancelled, so use it only for chats made for testing. `?dev=0` turns developer mode off. See `src/standing-invite.ts`.
-
 To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in `.github/workflows/deploy.yml`), start a chat on one phone and scan the code with the other.
 
 ## Credits
 
-Snrdle and groovy sounds by Elan Katin.
+Snrdle and groovy sounds by the Unknown Snerdler.
 
 ## License
 
