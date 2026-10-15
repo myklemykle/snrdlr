@@ -80,7 +80,7 @@ async function notify(topic) {
     body: count > 1 ? `${count} new messages` : 'New message',
     tag,
     renotify: true,
-    icon: 'icon-192.png',
+    icon: 'bird-192.png',
     data: {id: chat?.id ?? null, count}
   })
 }

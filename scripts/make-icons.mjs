@@ -10,12 +10,13 @@ const BACKGROUND = '#c5d300'
 
 // Browsers show the plain icons as they are, so they get rounded corners. "Maskable" icons are cropped
 // to whatever shape the phone uses, so the picture sits well inside a full square of the background.
-// Apple rounds the corners itself, so its icon is square too.
+// Apple rounds the corners itself, so its icon is square too. A new picture gets new file names, so that
+// installed apps notice it: Chrome compares the manifest's icon addresses when it checks for updates.
 const icons = [
   ['favicon.png', 64, {rounded: true}],
-  ['icon-192.png', 192, {rounded: true}],
-  ['icon-512.png', 512, {rounded: true}],
-  ['icon-maskable-512.png', 512, {scale: 0.75}],
+  ['bird-192.png', 192, {rounded: true}],
+  ['bird-512.png', 512, {rounded: true}],
+  ['bird-maskable-512.png', 512, {scale: 0.75}],
   ['apple-touch-icon.png', 180, {}]
 ]
 
