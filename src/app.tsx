@@ -65,8 +65,13 @@ function storedStay(): boolean {
   }
 }
 
+// Safari on an iPhone sometimes never finishes opening the app's storage, typically in a tab it has
+// brought back from the background; the page would wait for ever, blank. A fresh load gets past it.
+const STUCK_MS = 6000
+const STUCK_RELOADED = 'snrdlr.stuckReload'
+
 type Boot =
-  | {status: 'loading'}
+  | {status: 'loading'; stuck?: boolean}
   | {status: 'blocked'}
   | {status: 'failed'}
   | {status: 'ready'; store: Store; identity: Identity; admitted: boolean}
@@ -78,8 +83,25 @@ export function App() {
   const [boot, setBoot] = useState<Boot>({status: 'loading'})
 
   useEffect(() => {
+    // Still waiting for the storage to open, with nothing else to say about it.
+    let waiting = true
+    const stuck = setTimeout(() => {
+      if (!waiting) return
+      setBoot(current => (current.status === 'loading' ? {status: 'loading', stuck: true} : current))
+      // Once by itself; if that did not help, the person is asked.
+      try {
+        if (sessionStorage.getItem(STUCK_RELOADED)) return
+        sessionStorage.setItem(STUCK_RELOADED, '1')
+        location.reload()
+      } catch {
+        // Then the person is asked.
+      }
+    }, STUCK_MS)
     openStore('snrdlr', {
-      onBlocked: () => setBoot(current => (current.status === 'loading' ? {status: 'blocked'} : current)),
+      onBlocked: () => {
+        waiting = false
+        setBoot(current => (current.status === 'loading' ? {status: 'blocked'} : current))
+      },
       // This tab is the old one: load the new version, which can use the storage as it now is.
       onOutdated: () => location.reload()
     })
@@ -102,11 +124,37 @@ export function App() {
         // Anyone with a name or a chat was here before the app became invite-only, or has been invited since.
         const established = secrets.name !== '' || (await store.listChats()).length > 0
         setBoot({status: 'ready', store, identity: loadIdentity(secrets), admitted: isAdmitted(established)})
+        try {
+          sessionStorage.removeItem(STUCK_RELOADED)
+        } catch {
+          // Only stops a second reload in a row.
+        }
       })
       .catch(() => setBoot({status: 'failed'}))
+      .finally(() => {
+        waiting = false
+        clearTimeout(stuck)
+      })
+    return () => clearTimeout(stuck)
   }, [])
 
-  if (boot.status === 'loading') return null
+  if (boot.status === 'loading') {
+    return (
+      <main class="home">
+        <h1>snrdlr</h1>
+        {boot.stuck && (
+          <>
+            <p>snrdlr is taking too long to start. This browser sometimes gets stuck opening the app's storage; reloading usually fixes it.</p>
+            <div class="row">
+              <button type="button" onClick={() => location.reload()}>
+                Reload
+              </button>
+            </div>
+          </>
+        )}
+      </main>
+    )
+  }
   if (boot.status === 'blocked') {
     return (
       <main class="home">

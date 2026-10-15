@@ -1964,3 +1964,30 @@ test('a message can have several lines: Shift+Enter on a computer, Enter on a ph
   await expect(anne.locator('.theirs', {hasText: 'two'})).toBeVisible()
   expect(await anne.locator('.theirs', {hasText: 'two'}).evaluate(element => element.textContent)).toContain('one\ntwo')
 })
+
+test('a tab whose storage never opens shows snrdlr, reloads itself once, then asks', async ({browser}) => {
+  // Stands in for Safari on an iPhone, which sometimes never finishes opening IndexedDB.
+  const hang = (always: boolean) => {
+    const real = indexedDB.open.bind(indexedDB)
+    if (!always && sessionStorage.getItem('test.hung')) return
+    sessionStorage.setItem('test.hung', '1')
+    indexedDB.open = ((name: string, version?: number) => {
+      const request = real(name, version)
+      // A real request whose success is never heard of.
+      if (name === 'snrdlr') request.addEventListener = ((type: string, ...rest: [EventListener, unknown?]) => type === 'success' || EventTarget.prototype.addEventListener.call(request, type, ...(rest as [EventListener]))) as typeof request.addEventListener
+      return request
+    }) as typeof indexedDB.open
+  }
+
+  const once = await newPerson(browser)
+  await once.addInitScript(hang, false)
+  await once.goto('/')
+  await expect(once.getByRole('heading', {name: 'snrdlr'})).toBeVisible()
+  await expect(once.getByLabel('Your name')).toBeVisible({timeout: 15_000})
+
+  const always = await newPerson(browser)
+  await always.addInitScript(hang, true)
+  await always.goto('/')
+  await expect(always.getByText('snrdlr is taking too long to start')).toBeVisible({timeout: 20_000})
+  await expect(always.getByRole('button', {name: 'Reload'})).toBeVisible()
+})
