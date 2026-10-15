@@ -490,7 +490,15 @@ function Settings(props: {onClose: () => void; children?: ComponentChildren}) {
   return (
     <div class="sheet-backdrop" onClick={onClose}>
       <section class="sheet" role="dialog" aria-label="Settings" onClick={event => event.stopPropagation()}>
-        <h2>Settings</h2>
+        {/* Stays in view as the rest scrolls, so closing never means scrolling to the end. */}
+        <header class="sheet-head">
+          <h2>Settings</h2>
+          <button type="button" class="close" aria-label="Close" onClick={onClose}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+        </header>
         <fieldset>
           <legend>Sounds</legend>
           {SOUND_CHOICES.map(choice => (

@@ -890,6 +890,32 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+/* The title and close button stay at the top while the rest of the sheet scrolls under them. */
+.sheet .sheet-head {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: -1.25rem -1.25rem 1rem;
+  padding: 1rem 1rem 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.sheet .sheet-head h2 {
+  margin: 0;
+}
+
+.sheet .sheet-head .close {
+  display: flex;
+  padding: 0.45rem;
+  border: none;
+  color: var(--muted);
+}
+
 /* The parts of Settings brought over from the front page. */
 .sheet section {
   margin: 0 0 1.25rem;

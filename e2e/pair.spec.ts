@@ -1159,8 +1159,8 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   // The gear beside the greeting opens settings. The app's own sounds are chosen to begin with.
   await bob.getByRole('button', {name: 'Settings'}).click()
   const settings = bob.getByRole('dialog', {name: 'Settings'})
-  await expect(settings.getByRole('radio')).toHaveCount(3)
-  await expect(settings.getByRole('group', {name: 'Sounds'}).locator('label')).toHaveText(['snrdl', 'plink', 'shhhhh'])
+  await expect(settings.getByRole('radio')).toHaveCount(4)
+  await expect(settings.getByRole('group', {name: 'Sounds'}).locator('label')).toHaveText(['snrdl', 'plink', 'groovy', 'shhhhh'])
   await expect(settings.getByRole('radio', {name: 'snrdl'})).toBeChecked()
 
   // Choosing another set plays one of its sounds, so it can be heard.
@@ -1220,7 +1220,7 @@ test('a sound plays when a message is sent or arrives, and can be turned off in 
   expect(await played(anne)).toBe(4)
 })
 
-test('each sound set plays its own files, and every file in the app\'s own set can be decoded', async ({browser}) => {
+test('each sound set plays its own files, and every file in every set can be decoded', async ({browser}) => {
   const page = await newPerson(browser)
   const fetched: string[] = []
   page.on('response', response => /\.(mp3|wav)$/.test(response.url()) && fetched.push(response.url().split('/').pop()!))
@@ -1229,6 +1229,13 @@ test('each sound set plays its own files, and every file in the app\'s own set c
   // The first tap fetches the chosen set, and only that one.
   await expect.poll(() => fetched.length).toBe(27)
   expect(fetched.every(name => name.startsWith('snrdle-'))).toBe(true)
+
+  await page.getByRole('button', {name: 'Settings'}).click()
+  await page.getByRole('radio', {name: 'plink'}).check()
+  await expect.poll(() => fetched.filter(name => name.startsWith('plink-')).length).toBe(3)
+  await page.getByRole('radio', {name: 'groovy'}).check()
+  await expect.poll(() => fetched.filter(name => name.startsWith('groovy-')).length).toBe(16)
+  expect(await page.getByText('Volume of groovy: 10%').count()).toBe(1)
   const broken = await page.evaluate(async names => {
     const audio = new AudioContext()
     const failures: string[] = []
@@ -1243,10 +1250,6 @@ test('each sound set plays its own files, and every file in the app\'s own set c
     return failures
   }, fetched)
   expect(broken).toEqual([])
-
-  await page.getByRole('button', {name: 'Settings'}).click()
-  await page.getByRole('radio', {name: 'plink'}).check()
-  await expect.poll(() => fetched.filter(name => name.startsWith('plink-')).length).toBe(3)
 })
 
 test('developer mode: a standing link lets someone join later, with the inviter gone', async ({browser}) => {
@@ -1817,6 +1820,24 @@ test('settings say which build is running', async ({browser}) => {
   await introduce(anne, 'Anne')
   await openSettings(anne)
   await expect(anne.getByText(/^Version \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · [0-9a-f]{7,}$/)).toBeVisible()
+})
+
+test('settings keep their title and close button in view while the rest scrolls', async ({browser}) => {
+  const anne = await newPerson(browser)
+  await anne.setViewportSize({width: 375, height: 500})
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  const sheet = await openSettings(anne)
+  await sheet.evaluate(element => (element.scrollTop = element.scrollHeight))
+  await expect(sheet.getByRole('button', {name: 'Done'})).toBeInViewport()
+  await expect(sheet.getByRole('heading', {name: 'Settings'})).toBeInViewport()
+  const close = sheet.getByRole('button', {name: 'Close'})
+  await expect(close).toBeInViewport()
+  // Nothing scrolled under it shows through, and it is what gets the tap.
+  const box = (await close.boundingBox())!
+  expect(await anne.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), [box.x + box.width / 2, box.y + box.height / 2])).toBe('Close')
+  await close.click()
+  await expect(sheet).toHaveCount(0)
 })
 
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {

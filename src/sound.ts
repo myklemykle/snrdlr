@@ -58,7 +58,7 @@ export const MAX_VOLUME = 2
 const volumeKey = (choice: string) => `snrdlr.soundVolume.${choice}`
 
 // Where each set starts, chosen by ear. A set not listed plays as its files were made.
-const DEFAULT_VOLUMES: Record<string, number> = {snrdl: 0.1, plink: 0.5}
+const DEFAULT_VOLUMES: Record<string, number> = {snrdl: 0.1, plink: 0.5, groovy: 0.1}
 
 export function soundVolume(choice: string): number {
   const usual = DEFAULT_VOLUMES[choice] ?? 1

@@ -11,3 +11,4 @@ To add a set, add a folder; it appears in Settings after the next deploy. `snrdl
 
 - `snrdl/`: the app's own sounds. Snrdle sounds by Elan Katin.
 - `plink/`: three generated blips.
+- `groovy/`: sixteen takes of "groovy", by Elan Katin.
