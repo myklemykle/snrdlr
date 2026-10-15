@@ -7,3 +7,4 @@ playwright-report
 .dev.vars
 dist-e2e
 probe-data
+.claude-chat
