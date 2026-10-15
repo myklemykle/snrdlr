@@ -2,12 +2,22 @@
 // saved profile, using the live app the way a person does. Its messages go through the same relay and
 // wake people's devices the same way.
 //
-//   node scripts/claude-chat.mjs join '<invite link>'      joins a chat, as "Claude" the first time
-//   node scripts/claude-chat.mjs say [--chat <name>] <text> writes in a chat (the only one, or by name)
-//   node scripts/claude-chat.mjs chats                     lists its chats
+//   node scripts/claude-chat.mjs join '<invite link>'       joins a chat, as "Claude" the first time
+//   node scripts/claude-chat.mjs say [--chat <name>] <text>  writes in a chat (the only one, or by name)
+//   node scripts/claude-chat.mjs listen [--chat <name>]      stays in a direct chat: prints each new message
+//                                                           from the other person as a line of JSON, and
+//                                                           sends what `say` hands it meanwhile
+//   node scripts/claude-chat.mjs chats                      lists its chats
+//
+// `listen` prints {"at", "text", "pictures": [paths], "edited"?, "replyTo"?} for each message, saving
+// pictures in .claude-chat/inbox/. It only passes on messages from the other member of a direct chat,
+// which nobody else can join: its keys come from the two people's own. While it runs, `say` gives it
+// the message to send through .claude-chat/outbox/, since two copies of the browser cannot share one
+// profile.
 //
 // The profile is kept in .claude-chat/ (not in git), or SNRDLR_PROFILE. SNRDLR_URL picks another copy of the site.
 import {chromium} from '@playwright/test'
+import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs'
 import {dirname, join} from 'node:path'
 import {fileURLToPath} from 'node:url'
 
@@ -15,9 +25,15 @@ const SITE = process.env.SNRDLR_URL ?? 'https://alpha.snrdlr.net/'
 const PROFILE = process.env.SNRDLR_PROFILE ?? join(dirname(fileURLToPath(import.meta.url)), '..', '.claude-chat')
 const NAME = process.env.SNRDLR_NAME ?? 'Claude'
 const MAX_TEXT_LENGTH = 4000
+const OUTBOX = join(PROFILE, 'outbox')
+const INBOX = join(PROFILE, 'inbox')
+const LISTENING = join(PROFILE, 'listen.json')
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function open() {
-  const context = await chromium.launchPersistentContext(PROFILE, {headless: true})
+  // bypassCSP: the database helper below builds its work from text, which a page's policy may forbid.
+  const context = await chromium.launchPersistentContext(PROFILE, {headless: true, bypassCSP: true})
   const page = context.pages()[0] ?? (await context.newPage())
   return {context, page}
 }
@@ -29,23 +45,76 @@ async function chatNames(page) {
   return page.locator('.chats .open .name').allTextContents()
 }
 
-/** How far this device's messages in a chat are known to be with the relay. */
-const storedSeq = (page, chatName) =>
+/** Which chat is meant: the one named, or the only one. */
+function pick(names, wanted) {
+  const name = wanted ?? (names.length === 1 ? names[0] : null)
+  if (!name || !names.includes(name)) throw new Error(`Say which chat with --chat. Chats: ${names.join(', ') || 'none'}`)
+  return name
+}
+
+/** Opens a chat from the front page. */
+async function openChat(page, name) {
+  await page.locator('.chats .open').filter({has: page.locator('.name').getByText(name, {exact: true})}).click()
+  await page.getByLabel('Message').waitFor({timeout: 30_000})
+}
+
+/** Runs `work` in the page with the app's database open, and closes it after. */
+const withDb = (page, work, arg) =>
   page.evaluate(
-    name =>
+    ([source, arg]) =>
       new Promise((resolve, reject) => {
         const request = indexedDB.open('snrdlr')
         request.onerror = () => reject(request.error)
         request.onsuccess = () => {
-          const all = request.result.transaction('chats').objectStore('chats').getAll()
-          all.onsuccess = () => {
-            request.result.close()
-            resolve(all.result.find(chat => chat.name === name)?.storedSeq ?? 0)
-          }
+          const db = request.result
+          const get = (store, query, index) =>
+            new Promise((done, fail) => {
+              const tx = db.transaction(store).objectStore(store)
+              const all = index ? tx.index(index).getAll(query) : query === undefined ? tx.getAll() : tx.get(query)
+              all.onsuccess = () => done(all.result)
+              all.onerror = () => fail(all.error)
+            })
+          // eslint-disable-next-line no-new-func
+          Promise.resolve(new Function('get', 'arg', `return (${source})(get, arg)`)(get, arg))
+            .then(resolve, reject)
+            .finally(() => db.close())
         }
       }),
-    chatName
+    [work.toString(), arg]
   )
+
+/** How far this device's messages in a chat are known to be with the relay. */
+const storedSeq = (page, name) => withDb(page, async (get, name) => (await get('chats')).find(chat => chat.name === name)?.storedSeq ?? 0, name)
+
+/** Splits a long message at paragraph or line breaks, so each part fits in one message. */
+function parts(text) {
+  const out = []
+  let rest = text
+  while (rest.length > MAX_TEXT_LENGTH) {
+    const window = rest.slice(0, MAX_TEXT_LENGTH)
+    const cut = Math.max(window.lastIndexOf('\n\n'), window.lastIndexOf('\n'), window.lastIndexOf(' '))
+    const at = cut > MAX_TEXT_LENGTH / 2 ? cut : MAX_TEXT_LENGTH
+    out.push(rest.slice(0, at).trim())
+    rest = rest.slice(at).trim()
+  }
+  if (rest) out.push(rest)
+  return out
+}
+
+/** Writes in the chat open on the page, and waits until the relay holds it. */
+async function send(page, name, text) {
+  for (const part of parts(text)) {
+    const before = await storedSeq(page, name)
+    await page.getByLabel('Message').fill(part)
+    await page.getByRole('button', {name: 'Send'}).click()
+    // Done once the relay holds it, so that whoever is away gets it and is woken for it.
+    const deadline = Date.now() + 60_000
+    while ((await storedSeq(page, name)) <= before) {
+      if (Date.now() > deadline) throw new Error('Sent, but the relay did not confirm keeping it within a minute.')
+      await sleep(500)
+    }
+  }
+}
 
 async function joinChat(invite) {
   const {context, page} = await open()
@@ -68,40 +137,172 @@ async function joinChat(invite) {
   }
 }
 
-async function say(given, wanted) {
-  // The app's message box holds one line.
-  const text = given.replace(/\s*\n+\s*/g, ' ').trim()
+/** The process listening, if one is running. */
+function listener() {
+  try {
+    const {pid} = JSON.parse(readFileSync(LISTENING, 'utf8'))
+    process.kill(pid, 0)
+    return pid
+  } catch {
+    return null
+  }
+}
+
+async function say(text, wanted) {
   if (!text.trim()) throw new Error('Nothing to say.')
-  if (text.length > MAX_TEXT_LENGTH) throw new Error(`Too long: ${text.length} characters, at most ${MAX_TEXT_LENGTH}.`)
+  if (listener()) {
+    // Handed to the listener, which has the profile open.
+    mkdirSync(OUTBOX, {recursive: true})
+    const id = `${Date.now()}-${process.pid}`
+    writeFileSync(join(OUTBOX, `${id}.tmp`), JSON.stringify({text, chat: wanted}))
+    renameSync(join(OUTBOX, `${id}.tmp`), join(OUTBOX, `${id}.json`))
+    const deadline = Date.now() + 5 * 60_000
+    while (Date.now() < deadline) {
+      for (const [ending, ok] of [['.sent', true], ['.failed', false]]) {
+        const done = join(OUTBOX, id + ending)
+        if (!existsSync(done)) continue
+        const answer = readFileSync(done, 'utf8')
+        rmSync(done)
+        if (!ok) throw new Error(answer)
+        return console.log(answer)
+      }
+      await sleep(300)
+    }
+    throw new Error('The listener did not send it within five minutes.')
+  }
   const {context, page} = await open()
   try {
-    const names = await chatNames(page)
-    const name = wanted ?? (names.length === 1 ? names[0] : null)
-    if (!name || !names.includes(name)) throw new Error(`Say which chat with --chat. Chats: ${names.join(', ') || 'none'}`)
-    const before = await storedSeq(page, name)
-    await page.locator('.chats .open').filter({has: page.locator('.name').getByText(name, {exact: true})}).click()
-    await page.getByLabel('Message').fill(text)
-    await page.getByRole('button', {name: 'Send'}).click()
-    // Done once the relay holds it, so that whoever is away gets it and is woken for it.
-    const deadline = Date.now() + 60_000
-    while ((await storedSeq(page, name)) <= before) {
-      if (Date.now() > deadline) throw new Error('Sent, but the relay did not confirm keeping it within a minute.')
-      await page.waitForTimeout(500)
-    }
+    const name = pick(await chatNames(page), wanted)
+    await openChat(page, name)
+    await send(page, name, text)
     console.log(`Said it in "${name}".`)
   } finally {
     await context.close()
   }
 }
 
+/** The other person's messages that arrived after `since`, with their pictures' files where held. */
+const newMessages = (page, chatId, since) =>
+  withDb(
+    page,
+    async (get, {chatId, since}) => {
+      const chat = await get('chats', chatId)
+      const other = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', chat.peer.signPublic)), byte => byte.toString(16).padStart(2, '0')).join('')
+      const arrived = await get('messages', IDBKeyRange.bound([chatId, since], [chatId, Infinity], true), 'received')
+      const all = arrived.length ? await get('messages', IDBKeyRange.bound([chatId], [chatId, []]), 'order') : []
+      const quote = ref => {
+        const found = ref && all.find(message => message.author === ref.author && message.device === (ref.device ?? '') && message.seq === ref.seq)
+        return found ? (found.content.text ?? found.content.caption ?? '(a picture)') : undefined
+      }
+      const out = []
+      for (const message of arrived) {
+        if (message.author !== other) continue
+        const {content} = message
+        const base = {seq: message.seq, device: message.device, receivedAt: message.receivedAt, at: new Date(message.sentAt).toISOString()}
+        if (content.type === 'text') out.push({...base, text: content.text, replyTo: quote(content.replyTo)})
+        else if (content.type === 'edit') {
+          const target = all.find(m => m.author === other && m.device === content.target.device && m.seq === content.target.seq)
+          out.push({...base, text: content.text, edited: target?.content.text ?? target?.content.caption ?? ''})
+        } else if (content.type === 'image') {
+          const file = await get('files', [chatId, content.hash])
+          let picture = null
+          if (file) {
+            const key = await crypto.subtle.importKey('raw', content.key, 'AES-GCM', false, ['decrypt'])
+            const plain = await crypto.subtle.decrypt({name: 'AES-GCM', iv: file.data.slice(0, 12)}, key, file.data.slice(12))
+            picture = btoa(Array.from(new Uint8Array(plain), byte => String.fromCharCode(byte)).join(''))
+          }
+          out.push({...base, text: content.caption ?? '', picture, replyTo: quote(content.replyTo)})
+        }
+      }
+      return {messages: out, held: arrived.length ? Math.max(...arrived.map(message => message.receivedAt)) : since}
+    },
+    {chatId, since}
+  )
+
+async function listen(wanted) {
+  if (listener()) throw new Error('Already listening.')
+  mkdirSync(OUTBOX, {recursive: true})
+  mkdirSync(INBOX, {recursive: true})
+  const {context, page} = await open()
+  const stop = () => {
+    rmSync(LISTENING, {force: true})
+    void context.close().finally(() => process.exit(0))
+  }
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  try {
+    const name = pick(await chatNames(page), wanted)
+    const chat = await withDb(page, async (get, name) => (await get('chats')).find(chat => chat.name === name), name)
+    if (chat.kind !== 'dm') throw new Error(`"${name}" is a group; listen only in a direct chat, where nobody else can join.`)
+    let since = Date.now()
+    writeFileSync(LISTENING, JSON.stringify({pid: process.pid, chat: name}))
+    await openChat(page, name)
+    console.error(`Listening in "${name}".`)
+    // A picture whose file has not arrived yet is waited for, a little. What was printed is not again.
+    const waiting = new Map()
+    const printed = new Set()
+    for (;;) {
+      // The app may have reloaded itself to update; go back into the chat.
+      if (!(await page.getByLabel('Message').isVisible().catch(() => false))) {
+        await chatNames(page)
+        await openChat(page, name)
+      }
+      const {messages, held} = await newMessages(page, chat.id, since)
+      for (const message of messages) {
+        const key = `${message.device}.${message.seq}`
+        if (printed.has(key)) continue
+        if (message.picture === null && (waiting.get(key) ?? 0) < 20) {
+          waiting.set(key, (waiting.get(key) ?? 0) + 1)
+          continue
+        }
+        waiting.delete(key)
+        printed.add(key)
+        const pictures = []
+        if (message.picture) {
+          const path = join(INBOX, `${message.at.replace(/[:.]/g, '-')}-${message.seq}.jpg`)
+          writeFileSync(path, Buffer.from(message.picture, 'base64'))
+          pictures.push(path)
+        }
+        const {at, text, edited, replyTo} = message
+        console.log(JSON.stringify({at, text, pictures, ...(message.picture === null ? {missing: 'a picture that did not arrive'} : {}), ...(edited !== undefined ? {edited} : {}), ...(replyTo ? {replyTo} : {})}))
+      }
+      // Messages put off until their picture arrives are looked at again from where they started.
+      const putOff = messages.filter(message => waiting.has(`${message.device}.${message.seq}`)).map(message => message.receivedAt)
+      since = putOff.length ? Math.min(...putOff) - 1 : held
+      for (const file of readdirSync(OUTBOX).filter(file => file.endsWith('.json')).sort()) {
+        const id = file.slice(0, -'.json'.length)
+        let reply
+        try {
+          const {text, chat: other} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          if (other && other !== name) throw new Error(`Listening in "${name}", not "${other}".`)
+          await send(page, name, text)
+          reply = [`${id}.sent`, `Said it in "${name}".`]
+        } catch (error) {
+          reply = [`${id}.failed`, error.message]
+        }
+        rmSync(join(OUTBOX, file))
+        writeFileSync(join(OUTBOX, reply[0]), reply[1])
+      }
+      await sleep(1500)
+    }
+  } finally {
+    rmSync(LISTENING, {force: true})
+    await context.close()
+  }
+}
+
 const [command, ...rest] = process.argv.slice(2)
+const option = name => {
+  const at = rest.indexOf(name)
+  return at >= 0 ? rest.splice(at, 2)[1] : undefined
+}
 try {
   if (command === 'join' && rest[0]) await joinChat(rest[0])
   else if (command === 'say') {
-    const at = rest.indexOf('--chat')
-    const chat = at >= 0 ? rest.splice(at, 2)[1] : undefined
+    const chat = option('--chat')
     await say(rest.join(' '), chat)
-  } else if (command === 'chats') {
+  } else if (command === 'listen') await listen(option('--chat'))
+  else if (command === 'chats') {
     const {context, page} = await open()
     try {
       console.log((await chatNames(page)).join('\n') || '(none)')
@@ -109,7 +310,7 @@ try {
       await context.close()
     }
   } else {
-    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | chats")
+    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--chat <name>] | chats")
     process.exitCode = 2
   }
 } catch (error) {

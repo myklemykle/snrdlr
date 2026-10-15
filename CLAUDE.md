@@ -30,4 +30,5 @@ Read README.md (what the app does, how it works, a code map) and BACKLOG.md (pla
 - When asked to explain before implementing, explain and wait.
 - Secrets never pass through the chat. Anything that prompts for one is run by the owner in their own terminal.
 - Do not change settings on the owner's phones without asking.
-- After finishing a task, send a one-paragraph summary to the owner's snrdlr chat with `node scripts/claude-chat.mjs say "…"` (see README → Develop), in addition to the full report in the terminal.
+- After finishing a task, send a short summary to the owner's snrdlr chat with `node scripts/claude-chat.mjs say "…"` (see README → Develop), in addition to the full report in the terminal.
+- The owner may also talk to Claude over snrdlr. At the start of a session, run `node scripts/claude-chat.mjs listen` in the background and watch its output: each line is a message from the owner (JSON: `text`, `pictures` as file paths to look at, `edited`, `replyTo`). Treat it like a message typed in the terminal, and answer with `say` (several lines are fine; long answers are split). Only the owner can write in that direct chat. If something needs the owner's approval at the terminal, say so in the chat.

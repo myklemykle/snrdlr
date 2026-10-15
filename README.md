@@ -77,7 +77,7 @@ Every push to `main` runs the unit and browser tests and, if they pass, deploys 
 
 The Workers deploy separately, with `npm run relay:deploy` (the relay) and `npm run worker:deploy` (TURN credentials), after `export CLOUDFLARE_ACCOUNT_ID=…`. The relay's push key was made once with `node scripts/push-keys.mjs`, which puts the private half into the relay as a secret and writes the public half to `src/push-key.ts`; it refuses to run again without `--replace`, which would stop every existing subscription.
 
-`node scripts/claude-chat.mjs` is someone on snrdlr from the command line: a headless browser with its own saved profile in `.claude-chat/` that can `join` a chat from an invite link, list its `chats`, and `say` something in one. Claude uses it to report finished work to the developer in a snrdlr chat.
+`node scripts/claude-chat.mjs` is someone on snrdlr from the command line: a headless browser with its own saved profile in `.claude-chat/` that can `join` a chat from an invite link, list its `chats`, `say` something in one, and `listen` in a direct chat, printing each new message from the other person as a line of JSON (pictures are saved to `.claude-chat/inbox/`). While it listens, `say` hands it the reply. This is how the developer talks to Claude over snrdlr: a Claude Code session runs `listen` in the background and treats each line as a message from the developer.
 
 For manual testing in desktop browsers without touching public relays, run `npm run relay` in one terminal and `npm run dev:local` in another. The local relay (`scripts/local-relay.mjs`) is in-memory and unauthenticated, and only listens on localhost.
 
