@@ -41,7 +41,7 @@ const PUSH_FORGET_MS = 60 * 24 * 3600_000
 const PUSH_GAP_MS = 5000
 
 /** Push registrations in the object's own SQLite database, and the sending of pushes. */
-function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknown>) => void, stats: RelayStats): PushBook {
+export function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknown>) => void, stats: RelayStats): PushBook {
   sql.exec('CREATE TABLE IF NOT EXISTS push_targets (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, updated_at INTEGER NOT NULL)')
   sql.exec('CREATE TABLE IF NOT EXISTS push_topics (topic TEXT NOT NULL, endpoint TEXT NOT NULL, me TEXT NOT NULL, last_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (topic, endpoint))')
   sql.exec('CREATE INDEX IF NOT EXISTS push_topics_by_endpoint ON push_topics (endpoint)')
@@ -66,9 +66,17 @@ function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknow
     },
     forget,
     awake(topics, seconds) {
+      const now = Date.now()
       for (const {topic, me} of topics) {
-        if (seconds === 0) sql.exec('DELETE FROM push_awake WHERE topic = ? AND me = ?', topic, me)
-        else sql.exec('INSERT OR REPLACE INTO push_awake (topic, me, until) VALUES (?, ?, ?)', topic, me, Date.now() + seconds * 1000)
+        if (seconds === 0) {
+          sql.exec('DELETE FROM push_awake WHERE topic = ? AND me = ?', topic, me)
+          continue
+        }
+        // Said again before it runs out, as it is while someone is using the app: only rewritten once
+        // less than half is left, which saves most of the writes this would otherwise cost.
+        const [held] = sql.exec('SELECT until FROM push_awake WHERE topic = ? AND me = ?', topic, me).toArray() as {until: number}[]
+        if (held && held.until - now > (seconds * 1000) / 2) continue
+        sql.exec('INSERT OR REPLACE INTO push_awake (topic, me, until) VALUES (?, ?, ?)', topic, me, now + seconds * 1000)
       }
     },
     async stored(topic, me) {
@@ -179,7 +187,7 @@ export class RelayRoom {
   ) {
     this.stats = sqlStats(ctx.storage.sql)
     const pushes = env.VAPID_PRIVATE_KEY ? sqlPushes(ctx.storage.sql, env.VAPID_PRIVATE_KEY, work => ctx.waitUntil(work), this.stats) : null
-    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql, this.stats), pushes)
+    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql, this.stats), pushes, kind => this.stats.tally(kind))
     // Waking after an idle spell: the sockets are still open, and each remembers its own subscriptions.
     for (const socket of ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() as ConnectionState | null
@@ -200,6 +208,7 @@ export class RelayRoom {
       this.ctx.storage.sql.exec('DELETE FROM push_targets WHERE updated_at < ?', old)
       this.ctx.storage.sql.exec('DELETE FROM push_awake WHERE until < ?', Date.now())
     }
+    this.stats.flush()
     this.stats.trim()
     await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
   }

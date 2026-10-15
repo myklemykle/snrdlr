@@ -158,9 +158,13 @@ export async function clearNotifications(chat: ChatRecord): Promise<void> {
 
 /** Someone who has not touched the app for this long is not using it, even if it is on screen. */
 const IDLE_MS = 2 * 60_000
-/** How long the relay holds back notifications after being told; renewed well before it runs out. */
-const AWAKE_SECONDS = 90
-const AWAKE_EVERY_MS = 30_000
+/**
+ * How long the relay holds back notifications after being told; renewed well before it runs out. It is
+ * told at once when the app is put away or left idle, so the length only matters if the app is closed
+ * without warning. The relay rewrites its record only once less than half is left.
+ */
+const AWAKE_SECONDS = 180
+const AWAKE_EVERY_MS = 60_000
 
 /**
  * While the person is using the app here, has it on screen and has touched it lately, tells the relay

@@ -1,3 +1,5 @@
+import type {IncomingKind} from './relay'
+
 // Counts for the developers' dashboard: how much the relay is used, never by whom.
 //
 // Each day has a handful of totals (connections, messages stored, notifications sent). Nothing in them
@@ -21,6 +23,16 @@ export type Counter =
   | 'push_sent'
   | 'push_gone'
   | 'push_failed'
+  /** Messages devices send the relay, by kind (relay.ts). */
+  | IncomingKind
+
+/**
+ * Incoming messages are counted in memory and written now and then, since writing a row for each would
+ * itself cost thousands of writes a day. When the relay sleeps between messages the unwritten ones are
+ * lost, so these counts run a little low; they are for proportions.
+ */
+const FLUSH_AFTER = 25
+const FLUSH_EVERY_MS = 10 * 60_000
 
 /** Daily totals are kept this long. */
 export const KEEP_DAYS = 400
@@ -51,16 +63,33 @@ export function sqlStats(sql: Sql, now: () => number = Date.now) {
   sql.exec('CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, counter TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY (day, counter))')
   const hasTable = (name: string) => sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", name).toArray().length > 0
   const one = (query: string) => Number(Object.values(sql.exec(query).toArray()[0] ?? {})[0] ?? 0)
+  const count = (counter: Counter, by = 1) => {
+    if (by <= 0) return
+    sql.exec('INSERT INTO daily (day, counter, count) VALUES (?, ?, ?) ON CONFLICT (day, counter) DO UPDATE SET count = count + excluded.count', day(now()), counter, by)
+  }
+  const pending = new Map<Counter, number>()
+  let held = 0
+  let flushedAt = now()
+  const flush = () => {
+    for (const [counter, by] of pending) count(counter, by)
+    pending.clear()
+    held = 0
+    flushedAt = now()
+  }
   return {
-    count(counter: Counter, by = 1) {
-      if (by <= 0) return
-      sql.exec('INSERT INTO daily (day, counter, count) VALUES (?, ?, ?) ON CONFLICT (day, counter) DO UPDATE SET count = count + excluded.count', day(now()), counter, by)
+    count,
+    /** Counts one, to be written with others later. */
+    tally(counter: Counter) {
+      pending.set(counter, (pending.get(counter) ?? 0) + 1)
+      if (++held >= FLUSH_AFTER || now() - flushedAt >= FLUSH_EVERY_MS) flush()
     },
+    flush,
     /** Drops totals older than KEEP_DAYS. */
     trim() {
       sql.exec('DELETE FROM daily WHERE day < ?', day(now() - KEEP_DAYS * 86400_000))
     },
     read(connected: number, sinceDays = 90): Stats {
+      flush()
       const days = sql
         .exec('SELECT day, counter, count FROM daily WHERE day >= ? ORDER BY day, counter', day(now() - sinceDays * 86400_000))
         .toArray() as Stats['days']

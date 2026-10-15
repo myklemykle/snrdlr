@@ -26,6 +26,20 @@
 // While a person is using the app on any device, that device says so (AWAKE) with the same tags, and
 // none of their devices is woken for those chats until it stops saying so.
 
+/** What a device said, in the few kinds worth counting apart. */
+export type IncomingKind = 'in_announce' | 'in_store' | 'in_event_other' | 'in_req' | 'in_close' | 'in_push' | 'in_unpush' | 'in_awake' | 'in_other'
+
+export function incomingKind(type: unknown, first: unknown): IncomingKind {
+  if (type === 'EVENT') {
+    const kind = (first as {kind?: unknown} | null)?.kind
+    // Short-lived events are how devices find each other in a chat's room.
+    if (typeof kind === 'number' && kind >= FIRST_KIND && kind <= LAST_KIND) return 'in_announce'
+    return kind === STORED_KIND ? 'in_store' : 'in_event_other'
+  }
+  const known: Record<string, IncomingKind> = {REQ: 'in_req', CLOSE: 'in_close', PUSH: 'in_push', UNPUSH: 'in_unpush', AWAKE: 'in_awake'}
+  return (typeof type === 'string' && known[type]) || 'in_other'
+}
+
 export const LIMITS = {
   /** Bytes in one incoming message. A connection offer is a few kilobytes. */
   messageBytes: 64 * 1024,
@@ -233,7 +247,9 @@ export class Relay {
     private now: () => number = Date.now,
     /** Without one, the relay keeps nothing and refuses messages meant to be stored. */
     private store: MessageStore | null = null,
-    private pushes: PushBook | null = null
+    private pushes: PushBook | null = null,
+    /** Told the kind of each message that arrives, for the developers' counts (stats.ts). */
+    private heard: (kind: IncomingKind) => void = () => {}
   ) {}
 
   get size(): number {
@@ -278,6 +294,7 @@ export class Relay {
     }
     if (!Array.isArray(message)) return reply('NOTICE', 'invalid: expected an array')
     const [type, ...rest] = message
+    this.heard(incomingKind(type, rest[0]))
     const allowed = this.spend(id)
 
     if (type === 'EVENT') {
