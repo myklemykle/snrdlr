@@ -232,6 +232,7 @@ Cheapest thing to do early: settle the final address before there are users to s
 
 ## Engineering follow-ups
 
+- **Style: sheet corners under a scrollbar** (Mykle, 15 October 2026, macOS Chrome). When the Settings sheet scrolls, its scrollbar runs the full height of the right edge, so the top-right and bottom-right corners show square instead of rounded. Likely fix: scroll an inner part of the sheet rather than the rounded box itself, or clip it. Fix with the next style change.
 - **A relay holding a non-member's messages keeps offering them.** Phones refuse a message whose author has no certificate, but do not tell the sender, so it is offered again on every sync round. Only a blind bot could hold such messages. Costs bandwidth only.
 - **Removing a member.** Still impossible: a member keeps the chat's secret and their certificate. Needs key rotation.
 - **An uninvited device sees itself as connected.** Someone holding a stolen copy of a chat can verify the real members, so their own screen says "Connected", although the members ignore them and send them nothing.
