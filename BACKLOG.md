@@ -285,7 +285,7 @@ Still open:
 
 - **"Add someone" in a direct chat is confusing.** It reads as adding to this chat; it starts a new group. Rename it ("New group with Anne") or explain it.
 - **Many connection-check page loads with no credential request after them** from the Android phone, seen in the Worker's log. The phone had four tabs of the app open at once, each connecting its own chats, which accounts for much of it. Each chat that connects also runs its own check at the same moment; they should share one.
-- **Several tabs of the app on one phone.** Android opens a new tab for each scanned code, so tabs pile up, each holding connections. A message stored by one tab did not show in another (fixed for an open chat; the chat list still needs it). Consider having a new tab hand over to an existing one.
+- **Several tabs of the app on one phone.** Android opens a new tab for each scanned code, so tabs pile up, each holding connections. A message stored by one tab did not show in another (fixed for an open chat; the chat list still needs it). Consider having a new tab hand over to an existing one. Seen on iOS too (Mykle, 15 October 2026): Safari also ends up with several snrdlr tabs.
 - **Not yet run:** emoji sizes (4.4), mobile data (6.2 to 6.5, the phone has no SIM), next-day persistence (9.1, 9.2), other browsers, incognito.
 
 ## Testing still owed
