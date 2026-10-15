@@ -153,6 +153,7 @@ What it could draw on:
 - **TURN usage**: relayed gigabytes this month against the limit, by day, from Cloudflare's analytics. The Worker already stores the month's total every ten minutes for the spending cap.
 - **Worker and Turnstile analytics**: credential requests per day, by country and browser; challenges passed and failed; rate-limit refusals.
 - **Alerts**: tell the developer when the spending cap trips or the usage check stops working.
+- **Message delivery times** (requested 14 October 2026): how long messages take to reach the other members, directly and by way of the relay, and how often they wait for someone to come back. Each device already answers what it receives with a short note, which says when a message reached someone; how to gather the times without telling the developer who is talking to whom is to be decided, along with the rest of this section.
 
 "Who the users are" needs deciding before building, because today the app tells its developer nothing, on purpose:
 
