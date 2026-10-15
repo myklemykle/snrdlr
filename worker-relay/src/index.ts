@@ -6,6 +6,7 @@
 // the object go idle between messages without dropping the sockets, so each socket carries its
 // own subscriptions as an attachment and the object rebuilds its picture from them when it wakes.
 import {LIMITS, Relay, STORED_KIND, type ConnectionState, type MessageStore, type PushBook} from './relay'
+import {sqlStats, type RelayStats, type Sql} from './stats'
 import {sendPush, type PushTarget} from './webpush'
 
 type RateLimiter = {limit: (options: {key: string}) => Promise<{success: boolean}>}
@@ -24,7 +25,6 @@ type HeldSocket = {
   serializeAttachment: (value: unknown) => void
   deserializeAttachment: () => unknown
 }
-type Sql = {exec: (query: string, ...values: (string | number)[]) => {toArray: () => Record<string, string | number>[]}; databaseSize: number}
 type ObjectContext = {
   waitUntil: (work: Promise<unknown>) => void
   acceptWebSocket: (socket: HeldSocket) => void
@@ -41,7 +41,7 @@ const PUSH_FORGET_MS = 60 * 24 * 3600_000
 const PUSH_GAP_MS = 5000
 
 /** Push registrations in the object's own SQLite database, and the sending of pushes. */
-function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknown>) => void): PushBook {
+function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknown>) => void, stats: RelayStats): PushBook {
   sql.exec('CREATE TABLE IF NOT EXISTS push_targets (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, updated_at INTEGER NOT NULL)')
   sql.exec('CREATE TABLE IF NOT EXISTS push_topics (topic TEXT NOT NULL, endpoint TEXT NOT NULL, me TEXT NOT NULL, last_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (topic, endpoint))')
   sql.exec('CREATE INDEX IF NOT EXISTS push_topics_by_endpoint ON push_topics (endpoint)')
@@ -92,6 +92,7 @@ function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknow
         Promise.all(
           targets.map(async target => {
             const outcome = await sendPush(target, {t: topic}, {vapid, subject: PUSH_SUBJECT, collapse: topic.slice(0, 32)})
+            stats.count(outcome === 'sent' ? 'push_sent' : outcome === 'gone' ? 'push_gone' : 'push_failed')
             if (outcome === 'gone') forget(target.endpoint)
           })
         )
@@ -101,14 +102,19 @@ function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise<unknow
 }
 
 /** Stored messages in the object's own SQLite database. */
-function sqlStore(sql: Sql): MessageStore {
+function sqlStore(sql: Sql, stats: RelayStats): MessageStore {
   sql.exec('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, topic TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, bytes INTEGER NOT NULL, json TEXT NOT NULL)')
   sql.exec('CREATE INDEX IF NOT EXISTS events_by_topic ON events (topic, created_at)')
   sql.exec('CREATE INDEX IF NOT EXISTS events_by_expiry ON events (expires_at)')
   return {
     put({id, topic, createdAt, expiresAt, json}) {
       const added = sql.exec('INSERT OR IGNORE INTO events (id, topic, created_at, expires_at, bytes, json) VALUES (?, ?, ?, ?, ?, ?) RETURNING id', id, topic, createdAt, expiresAt, json.length, json)
-      return added.toArray().length > 0
+      const isNew = added.toArray().length > 0
+      if (isNew) {
+        stats.count('stored')
+        stats.count('stored_bytes', json.length)
+      }
+      return isNew
     },
     query: (topic, since, now, limit) =>
       sql
@@ -152,6 +158,8 @@ export default {
       const address = request.headers.get('CF-Connecting-IP') ?? 'unknown'
       const {success} = await env.CONNECT_LIMITER.limit({key: address})
       if (!success) return new Response('Too many connections. Try again in a minute.', {status: 429})
+      // Only WebSocket upgrades are passed to the object. Anything else it is asked comes from another of
+      // our Workers through a binding, which is what keeps its /stats private (see RelayRoom.fetch).
       return env.RELAY.get(env.RELAY.idFromName('main')).fetch(request)
     }
     if (request.headers.get('Accept')?.includes('application/nostr+json')) {
@@ -163,13 +171,15 @@ export default {
 
 export class RelayRoom {
   private relay: Relay
+  private stats: RelayStats
 
   constructor(
     private ctx: ObjectContext,
     private env: Env
   ) {
-    const pushes = env.VAPID_PRIVATE_KEY ? sqlPushes(ctx.storage.sql, env.VAPID_PRIVATE_KEY, work => ctx.waitUntil(work)) : null
-    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql), pushes)
+    this.stats = sqlStats(ctx.storage.sql)
+    const pushes = env.VAPID_PRIVATE_KEY ? sqlPushes(ctx.storage.sql, env.VAPID_PRIVATE_KEY, work => ctx.waitUntil(work), this.stats) : null
+    this.relay = new Relay(Date.now, sqlStore(ctx.storage.sql, this.stats), pushes)
     // Waking after an idle spell: the sockets are still open, and each remembers its own subscriptions.
     for (const socket of ctx.getWebSockets()) {
       const state = socket.deserializeAttachment() as ConnectionState | null
@@ -190,14 +200,24 @@ export class RelayRoom {
       this.ctx.storage.sql.exec('DELETE FROM push_targets WHERE updated_at < ?', old)
       this.ctx.storage.sql.exec('DELETE FROM push_awake WHERE until < ?', Date.now())
     }
+    this.stats.trim()
     await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
   }
 
   async fetch(request: Request): Promise<Response> {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
+    // Not an upgrade, so not from the relay's public face, which passes on nothing else: the dashboard.
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      if (new URL(request.url).pathname === '/stats') return Response.json(this.stats.read(this.ctx.getWebSockets().length))
+      return new Response('Not found', {status: 404})
+    }
     const from = await shortHash(request.headers.get('CF-Connecting-IP') ?? 'unknown')
     const refusal = this.relay.refusal(from)
-    if (refusal) return new Response(refusal, {status: 503})
+    if (refusal) {
+      this.stats.count('refused')
+      return new Response(refusal, {status: 503})
+    }
+    this.stats.count('connections')
     const pair = new WebSocketPair()
     const state: ConnectionState = {id: crypto.randomUUID(), from, subs: {}}
     this.ctx.acceptWebSocket(pair[1])
