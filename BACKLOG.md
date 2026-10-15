@@ -4,11 +4,11 @@ Things noted along the way that are not part of the current phase. The phased pl
 
 ## Features requested
 
-- **Sounds: built.** A random sound from the chosen set plays when a message or picture is sent or arrives, in the open chat and (on a stay-connected computer) in the others. Settings offers the sets, which are the folders in `src/sounds/` ("snrdl", the default, and "plink"), and "shhhhh" for silence. Still open:
-  - Nothing plays while the app is closed or the phone is locked; that needs notifications (Phase 6).
+- **Sounds: built.** A random sound from the chosen set plays when a message or picture is sent or arrives, in the open chat and (on a stay-connected computer) in the others. Settings offers the sets, which are the folders in `src/sounds/` ("snrdl", the default, "plink", and "groovy", added 15 October 2026), and "shhhhh" for silence. Still open:
+  - Nothing plays while the app is closed or the phone is locked; a notification (built 14 October 2026) uses the system's own sound instead.
   - One pool of sounds for both directions. Separate sets for sent and received, a per-chat mute, and a volume control are possible later.
   - Not yet heard on a real iPhone or Android phone; check that the silent switch mutes it on the iPhone.
-  - Each set has its own volume in Settings, from 0 to 200%. Defaults: snrdl 10%, plink 50%. A device where the slider was moved keeps its own level. The low snrdl default suggests the files themselves could be re-levelled.
+  - Each set has its own volume in Settings, from 0 to 200%. Defaults: snrdl 10%, plink 50%, groovy 10%. A device where the slider was moved keeps its own level. The low snrdl default suggests the files themselves could be re-levelled.
   - The sound for sending plays as the message is sent (since 14 October 2026; it used to wait until the message reached another member's device, which testers found confusing). A received message sounds only if it was written in the last two minutes, so history loading into a chat is silent.
   - **Delivered marks.** Each device still answers what it receives with a short note (how many messages it holds from that author). That report could show, per message, that it has reached someone (and later, everyone). Not built.
   - The snrdl sounds are credited to Elan Katin in the README; under what licence they are shared is not recorded.
@@ -125,7 +125,9 @@ Open:
 
 - The app icon is a placeholder drawing (`public/icon.svg`, regenerate sizes with `node scripts/make-icons.mjs`).
 - Old cached files are dropped only by count; revisit if the cache grows.
-- The lab page (`lab/`, `lab-out/`, `public/lab/`) is a throwaway; remove it once notifications are built.
+- The lab page (`lab/`, `lab-out/`, `public/lab/`) is a throwaway; remove it once a tapped notification is seen to hand off to Safari on a real iPhone.
+
+**Notifications built, 14 October 2026.** Settings → Notifications. A device registers its push subscription with our relay for its chats; when a message just written is left with the relay, the relay pushes to every member's devices except the writer's own, and to none of a person's devices while they are actively using snrdlr on one (the page tells the relay every 30 seconds while it is visible and touched in the last two minutes). A notification names the chat, never the message; several quick messages collapse into "N new messages". In the iPhone Home Screen app a tapped notification can open the chat in Safari ("Open them in Safari, where you use snrdlr"). Verified in desktop Chrome through Google's push service; not yet on an iPhone or Android. Known gap: the Home Screen app only registers chats it knows, so a chat joined in Safari is covered once the app has been opened since.
 
 ## One person on several devices (built 14 October 2026)
 

@@ -4,35 +4,81 @@ An experimental chat app where the only way to add someone is to meet them: one 
 
 **Try it: https://alpha.snrdlr.net/** This is a test deployment; chats may be wiped by any update.
 
-**Status: Phases 1, 2 and 4 of the plan.** People pair through a QR code that only works while it is being shown, exchange signed and encrypted text in groups and direct chats, and keep their chats and history on the device. Only people who were invited are let into a chat. Messages written while someone is away reach them the next time they are online together with any member who has them. Nobody has reviewed the cryptography. Do not rely on it for anything private.
+**Status (15 October 2026): a working test, used by its developer and a few testers.** Nobody has reviewed the cryptography. Do not rely on it for anything private. What is planned next, and what was decided along the way, is in [BACKLOG.md](BACKLOG.md).
 
-The app is invite-only: a device gets in by joining a chat through someone's invite. That is a courtesy gate in the app itself (`src/gate.ts`), not a lock.
+The app is invite-only: a device gets in by joining a chat through someone's invite, or by being added to a person's other device. That is a courtesy gate in the app itself (`src/gate.ts`), not a lock.
+
+## What it does
+
+- **Meet to connect.** "Chat with one person" or "Start a group" shows a QR code (and a link to copy) that only works while it is on screen. Scanning it, with the app or the phone's camera, joins the chat. Several people can join through one code while it shows.
+- **Chats.** Text, pictures (several at once, with a caption), replies, editing your own messages (up arrow in an empty box edits the last one), one emoji reaction per person per message (quick set plus a full picker), renaming a group, leaving a chat. "Add someone" in a direct chat starts a new group.
+- **Profiles.** A name, plus optional icon, photo, contact and colour, each shown only in the chats you choose (`src/profile.ts`, `src/cards.ts`).
+- **One person, several devices.** Settings → Your devices → Add a device: one device shows a code, the other scans or opens it, both show the same six-digit number, and the new device becomes you, with your chats. Your devices keep each other's chat lists and read positions in step through a hidden chat of your own; the others show a notice when a device they did not add appears (`src/devices.ts`, `src/link-device.ts`).
+- **Offline delivery.** Every message is also left, sealed, with our relay for 30 days, so members who were away get it when they next open the app, even if nobody else is online.
+- **Notifications.** Settings → Notifications. The relay wakes the other members' devices through the browser's push service when a message is left for them. A notification names the chat, never the message. None are sent to any of your devices while you are actively using snrdlr on one of them. On an iPhone only the Home Screen app can receive them; tapping one can open the chat in Safari (`src/push.ts`, `src/push-view.tsx`, `public/sw.js`).
+- **Unread counts** on the front page, shared across your devices.
+- **Sounds.** A sound when a message is sent, or when a fresh one arrives while the app is open; sets are the folders in `src/sounds` (snrdl, plink, groovy) plus "shhhhh" for none, each with its own volume.
+- **Install.** It can be installed to the home screen and opens without a network once it has been opened before. Open tabs update themselves to a new version once nobody is using them; Settings shows the running version.
+- **Stay connected** (desktop): keeps every chat connected while the tab is open, so it hands messages on to members who come online later.
+- **Testing aids.** `?dev=1` turns on developer mode: standing invite links for test chats, and "Hold updates". A `lab/` page holds throwaway experiments on what phones allow.
 
 ## How it works
 
-- **Identity.** Each device makes an Ed25519 signing key and an X25519 key on first launch. There is no account and no recovery.
+- **Identity.** Each person has an Ed25519 signing key and an X25519 key, made on their first device and copied to the others when a device is added; each device also has a tag of its own and numbers its own messages. There is no account and no recovery.
 - **Groups.** A group has a random 32-byte secret and a founder. Everyone derives a room ID, a signaling password and a message key from the secret and the founder's key with HKDF-SHA256.
 - **Invites.** A code carries only a random one-time token and the inviter's public key, in a URL fragment (`#i=…`) that browsers never send to the server. While the inviter keeps the code on screen, their app waits in a temporary room derived from the token. A joiner sends a signed request naming their keys and gets back, signed, the group's secret and a certificate admitting them. Closing the code forgets the token, so a saved or forwarded code stops working.
 - **Membership.** Certificates chain from the founder down: each is signed by a member admitting the next. On every connection each side proves it holds a member's key, with a signature tied to that connection's encryption fingerprints so it cannot be relayed. Anyone who reaches the room without proving membership is ignored, even if they hold the group's secret. Each member's "joined" message carries their certificates, and a message is only kept, shown or passed on if its author is known to be a member, so it does not matter who delivered it.
 - **Direct chats.** A "chat with me" code works the same way, but no secret travels: the two people derive the chat's keys from an X25519 agreement between their identities. Nobody can be added; "Add someone" starts a new group instead.
+- **Messages.** Every message is signed by its author, then encrypted with the chat's message key (AES-256-GCM), so other members cannot forge or alter it or copy it into another chat (`src/envelope.ts`). Replies, edits, reactions, renames, profile cards and the hidden chat's notes are all messages of their own kinds in the same log.
 - **Pictures.** A picture is shrunk and re-encoded on the sender's device, which removes location and camera details, then encrypted with a key of its own. The message carries the file's hash, that key and a tiny preview; the file travels separately and is fetched by hash from any member who has it.
-- **Reactions.** An emoji reaction is a small signed message that names the message it is about. Each person's latest reaction to a message is the one shown, and an empty one removes it.
-- **Always-on device.** A desktop browser can be told to stay connected: it then holds every chat open while the tab is open, and hands messages to members who come online later. It is an ordinary member, not a server.
-- **Transport.** [Trystero](https://github.com/dmotz/trystero) finds peers through Nostr relays, which see only a hash of the room ID and password-encrypted connection setup. The list is pinned in `src/relays.ts`: our own relay (`worker-relay/`, a Cloudflare Worker that passes short-lived events between connected devices, stores nothing, and refuses subscriptions that do not name their topics) and five public ones. Messages travel over WebRTC data channels, directly where possible and through a TURN relay otherwise.
-- **Messages.** Every message is signed by its author, then encrypted with the chat's message key (AES-256-GCM), so other members cannot forge or alter it or copy it into another chat.
-- **Sync.** When members connect, they compare how much of each author's log they hold and send each other what is missing, so history spreads through whoever is online. Chats that are not open catch up when the app is opened. When the app returns from the background it checks its connections and rejoins if they have died.
-- **Storage.** Identity, chats and messages are kept in IndexedDB on the device.
+- **Sync.** When members connect, they compare how much of each author's (and device's) log they hold and send each other what is missing, so history spreads through whoever is online. Chats that are not open are swept briefly on launch and on return to the app (`src/background.ts`). When the app returns from the background it checks its connections and rejoins if they have died.
+- **The relay's store.** Each message is also posted to our relay as a Nostr event tagged with the chat's store topic, which only members can work out, and locked a second time to the members' own keys (`src/store-seal.ts`), so someone holding only a chat's secret cannot read it. The relay keeps it for 30 days and hands it to whoever asks for that topic (`src/mailbox.ts`, `worker-relay/`).
+- **Push.** A device registers its push subscription with the relay for its chats' topics, with a per-person tag so the writer's own devices are not woken. The relay sends an encrypted, VAPID-signed Web Push saying only which chat (`worker-relay/src/webpush.ts`).
+- **Transport.** [Trystero](https://github.com/dmotz/trystero) finds peers through Nostr relays, which see only a hash of the room ID and password-encrypted connection setup. The list is pinned in `src/relays.ts`: our own relay and five public ones. Messages travel over WebRTC data channels, directly where possible and through Cloudflare's TURN relay otherwise; a small Worker (`worker/`) hands out short-lived TURN credentials behind Turnstile and a rate limit.
+- **Storage.** Identity, chats, messages and files are kept in IndexedDB on the device (`src/store.ts`).
+
+## Code map
+
+| Where | What |
+| --- | --- |
+| `src/main.tsx`, `src/app.tsx` | Start-up, the front page, Settings, joining and the invite-only gate |
+| `src/chat-screen.tsx` | One chat on screen: messages, composer, menus, invite panel |
+| `src/session.ts` | One open chat's connection and sync; leaving messages with the relay |
+| `src/background.ts` | Syncing chats that are not on screen; "stay connected" |
+| `src/envelope.ts` | Message kinds and their signed, encrypted envelope |
+| `src/keys.ts`, `src/identity.ts`, `src/membership.ts`, `src/chats.ts` | Keys, people, certificates, making and joining chats |
+| `src/invite.ts`, `src/invite-room.ts`, `src/scanner.tsx`, `src/qr.tsx` | Invites, the room they are exchanged in, scanning and drawing codes |
+| `src/devices.ts`, `src/link-device.ts`, `src/link-view.tsx` | One person on several devices |
+| `src/mailbox.ts`, `src/store-seal.ts` | Messages left with and fetched from the relay |
+| `src/push*.ts`, `src/push-view.tsx`, `public/sw.js` | Notifications and the service worker |
+| `src/store.ts` | IndexedDB storage, unread counts |
+| `src/profile*.ts*`, `src/cards.ts`, `src/edits.ts`, `src/reactions.ts`, `src/image*.ts*`, `src/files.ts`, `src/emoji*` | Profiles, edits, reactions, pictures, emoji |
+| `src/sound.ts`, `src/sounds/` | Message sounds |
+| `src/update.ts`, `src/install.ts`, `src/gate.ts`, `src/standing-invite.ts` | Self-updating tabs, installing, the invite-only gate, developer mode |
+| `src/transport.ts`, `src/relays.ts`, `src/turn.ts`, `src/route.ts` | Finding peers, the relay list, TURN, the route indicator |
+| `worker-relay/` | Our Nostr relay on Cloudflare: signaling, the 30-day message store, push |
+| `worker/` | TURN credentials |
+| `e2e/pair.spec.ts`, `e2e-android/` | Browser tests (desktop Chromium; a real Android phone) |
+| `scripts/` | Local relay, relay probe, push keys, icons, emoji data, `claude-chat.mjs` |
+| `BACKLOG.md` | Plans, decisions, open questions, services depended on |
 
 ## Develop
 
 ```sh
 npm install
 npm run dev      # local dev server
-npm test         # unit tests (keys, invites, membership, envelopes, storage, sync, TURN worker)
-npm run e2e      # two-browser pairing test, against a relay started on this machine
+npm test         # unit tests (app, both workers, scripts)
+npm run e2e      # browser tests, against a relay started on this machine
 npm run e2e:android  # the same app on a real Android phone attached by USB (see below)
 npm run build    # typecheck and build to dist/
+npx tsc --noEmit # typecheck everything, tests and workers included
 ```
+
+Every push to `main` runs the unit and browser tests and, if they pass, deploys to GitHub Pages (`.github/workflows/deploy.yml`). The site's `version.json` names the build that is live.
+
+The Workers deploy separately, with `npm run relay:deploy` (the relay) and `npm run worker:deploy` (TURN credentials), after `export CLOUDFLARE_ACCOUNT_ID=…`. The relay's push key was made once with `node scripts/push-keys.mjs`, which puts the private half into the relay as a secret and writes the public half to `src/push-key.ts`; it refuses to run again without `--replace`, which would stop every existing subscription.
+
+`node scripts/claude-chat.mjs` is someone on snrdlr from the command line: a headless browser with its own saved profile in `.claude-chat/` that can `join` a chat from an invite link, list its `chats`, and `say` something in one. Claude uses it to report finished work to the developer in a snrdlr chat.
 
 For manual testing in desktop browsers without touching public relays, run `npm run relay` in one terminal and `npm run dev:local` in another. The local relay (`scripts/local-relay.mjs`) is in-memory and unauthenticated, and only listens on localhost.
 
@@ -46,7 +92,7 @@ To try it on phones, serve it over HTTPS (for example the GitHub Pages deploy in
 
 ## Credits
 
-Snrdle sounds by Elan Katin.
+Snrdle and groovy sounds by Elan Katin.
 
 ## License
 
