@@ -16,6 +16,24 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // A copy of this page from before the last deploy names scripts the server no longer has, and
+      // would stay blank. If the app's script cannot be loaded, load the page again, once.
+      addEventListener(
+        'error',
+        event => {
+          if (!(event.target instanceof HTMLScriptElement)) return
+          try {
+            if (sessionStorage.getItem('snrdlr.scriptReload')) return
+            sessionStorage.setItem('snrdlr.scriptReload', '1')
+          } catch {
+            return
+          }
+          location.reload()
+        },
+        true
+      )
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

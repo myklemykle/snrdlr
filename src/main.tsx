@@ -10,6 +10,12 @@ import {watchForUpdates} from './update'
 import './style.css'
 
 readDevSwitch()
+// The script loaded, so the page's one reload for a missing script (index.html) is free again.
+try {
+  sessionStorage.removeItem('snrdlr.scriptReload')
+} catch {
+  // Then a later missing script is simply not reloaded for.
+}
 watchForUpdates()
 setUpInstall()
 

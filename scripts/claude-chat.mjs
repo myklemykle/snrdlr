@@ -40,9 +40,24 @@ async function open() {
 
 /** Names of the chats on the front page, once it is showing. */
 async function chatNames(page) {
-  await page.goto(SITE)
-  await page.locator('.greeting').waitFor({timeout: 30_000})
-  return page.locator('.chats .open .name').allTextContents()
+  for (let attempt = 0; ; attempt++) {
+    try {
+      // The app can navigate by itself as it loads (opening a chat, updating), which interrupts this.
+      await page.goto(SITE)
+      const greeting = page.locator('.greeting')
+      const aside = page.getByRole('button', {name: 'Use it here'})
+      await Promise.race([greeting.waitFor({timeout: 30_000}), aside.waitFor({timeout: 30_000})])
+      // This browser's tab had stepped aside for another (one-tab.ts); this is the one now.
+      if (await aside.isVisible()) {
+        await aside.click()
+        await greeting.waitFor({timeout: 30_000})
+      }
+      return await page.locator('.chats .open .name').allTextContents()
+    } catch (error) {
+      if (attempt >= 2) throw error
+      await sleep(2000)
+    }
+  }
 }
 
 /** Which chat is meant: the one named, or the only one. */
@@ -242,6 +257,15 @@ async function listen(wanted) {
     const waiting = new Map()
     const printed = new Set()
     for (;;) {
+      try {
+        await listenOnce()
+      } catch (error) {
+        // One bad round (the app reloading under us, a slow network) is not the end of listening.
+        console.error(`listen: ${error.message.split('\n')[0]}`)
+      }
+      await sleep(1500)
+    }
+    async function listenOnce() {
       // The app may have reloaded itself to update; go back into the chat.
       if (!(await page.getByLabel('Message').isVisible().catch(() => false))) {
         await chatNames(page)
@@ -283,7 +307,6 @@ async function listen(wanted) {
         rmSync(join(OUTBOX, file))
         writeFileSync(join(OUTBOX, reply[0]), reply[1])
       }
-      await sleep(1500)
     }
   } finally {
     rmSync(LISTENING, {force: true})

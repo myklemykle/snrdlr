@@ -21,7 +21,9 @@ async function keep(key, response) {
 
 async function freshFirst(request, key) {
   try {
-    const response = await fetch(request)
+    // Checked with the server every time. Left to the browser's own cache, the page could be a copy
+    // from before the last deploy, naming scripts the server no longer has: a blank page.
+    const response = await fetch(request, {cache: 'no-cache'})
     void keep(key, response.clone())
     return response
   } catch (error) {

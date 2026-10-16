@@ -2069,3 +2069,13 @@ test('the chat list shows direct chats first, each with the other person\'s icon
   await expect(entry).toHaveCSS('box-shadow', /rgb\(138, 86, 214\)/)
   await expect(chatEntry(anne, 'Picnic').locator('.avatar')).toHaveCount(0)
 })
+
+test('a page naming a script the server no longer has loads itself again, once', async ({browser}) => {
+  const page = await newPerson(browser)
+  // As after a deploy, when an old copy of the page names the scripts of the version before.
+  let missing = 1
+  await page.route(/\/assets\/main-[^/]+\.js$/, route => (missing-- > 0 ? route.fulfill({status: 404, body: ''}) : route.continue()))
+  await page.goto('/')
+  await expect(page.getByLabel('Your name')).toBeVisible({timeout: 15_000})
+  expect(missing).toBeLessThan(0)
+})
