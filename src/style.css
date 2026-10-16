@@ -197,6 +197,13 @@ button:disabled {
   color: var(--accent-fg);
 }
 
+/* Web addresses in a message, in the bubble's own colour. */
+.log li a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .log .theirs {
   align-self: flex-start;
   background: var(--bubble);

@@ -11,7 +11,7 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 ## What it does
 
 - **Meet to connect.** "Chat with one person" or "Start a group" shows a QR code (and a link to copy) that only works while it is on screen. Scanning it, with the app or the phone's camera, joins the chat. Several people can join through one code while it shows.
-- **Chats.** Text, pictures (several at once, with a caption), replies, editing your own messages (up arrow in an empty box edits the last one), one emoji reaction per person per message (quick set plus a full picker), renaming a group, leaving a chat. "Add someone" in a direct chat starts a new group.
+- **Chats.** Text (several lines; web addresses can be tapped), pictures (several at once, with a caption), replies, editing your own messages (up arrow in an empty box edits the last one), one emoji reaction per person per message (quick set plus a full picker), renaming a group, leaving a chat. "Add someone" in a direct chat starts a new group.
 - **Profiles.** A name, plus optional icon, photo, contact and colour, each shown only in the chats you choose (`src/profile.ts`, `src/cards.ts`).
 - **One person, several devices.** Settings → Your devices → Add a device: one device shows a code, the other scans or opens it, both show the same six-digit number, and the new device becomes you, with your chats. Your devices keep each other's chat lists and read positions in step through a hidden chat of your own; the others show a notice when a device they did not add appears (`src/devices.ts`, `src/link-device.ts`).
 - **Offline delivery.** Every message is also left, sealed, with our relay for 30 days, so members who were away get it when they next open the app, even if nobody else is online.

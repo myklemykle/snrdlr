@@ -4,6 +4,7 @@ import {latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
+import {findLinks} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type ImageContent, type MessageRef} from './envelope'
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
@@ -552,6 +553,24 @@ export function ChatScreen(props: {
   }
   useEffect(() => cancelPress, [])
 
+  /** A message's words, with emoji a little larger and web addresses that can be tapped. */
+  const withLinks = (text: string) =>
+    findLinks(text).map(piece => {
+      const words = splitEmoji(piece.text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))
+      if (!piece.href) return words
+      return (
+        <a
+          href={piece.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          // The tap that ends a long press opens the menu, not the link.
+          onClick={event => (menu || Date.now() - menuOpenedAt.current <= 700) && event.preventDefault()}
+        >
+          {words}
+        </a>
+      )
+    })
+
   // A group's name being changed, in place of the title. Any member can; everyone gets the new name.
   const [renaming, setRenaming] = useState<string | null>(null)
   const nameBox = useRef<HTMLInputElement>(null)
@@ -832,8 +851,8 @@ export function ChatScreen(props: {
                 />
               )}
               {image
-                ? text && <span class="caption">{splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}</span>
-                : splitEmoji(text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))}
+                ? text && <span class="caption">{withLinks(text)}</span>
+                : withLinks(text)}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
                 {edited && 'edited · '}
                 {formatTime(message.sentAt)}

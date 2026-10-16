@@ -1991,3 +1991,23 @@ test('a tab whose storage never opens shows snrdlr, reloads itself once, then as
   await expect(always.getByText('snrdlr is taking too long to start')).toBeVisible({timeout: 20_000})
   await expect(always.getByRole('button', {name: 'Reload'})).toBeVisible()
 })
+
+test('web addresses in a message can be tapped; nothing else becomes a link', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Links')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'See https://example.com/menu. Or www.snrdlr.net, not javascript:alert(1)')
+  const bubble = bob.locator('.theirs', {hasText: 'See'})
+  await expect(bubble.getByRole('link')).toHaveCount(2)
+  const first = bubble.getByRole('link', {name: 'https://example.com/menu'})
+  await expect(first).toHaveAttribute('href', 'https://example.com/menu')
+  await expect(first).toHaveAttribute('target', '_blank')
+  await expect(first).toHaveAttribute('rel', 'noopener noreferrer')
+  await expect(bubble.getByRole('link', {name: 'www.snrdlr.net'})).toHaveAttribute('href', 'https://www.snrdlr.net/')
+  // The words around them are unchanged, the sentence's full stop included.
+  await expect(bubble).toContainText('See https://example.com/menu. Or www.snrdlr.net, not javascript:alert(1)')
+  // The sender's own copy has them too.
+  await expect(anne.locator('.mine', {hasText: 'See'}).getByRole('link')).toHaveCount(2)
+})
