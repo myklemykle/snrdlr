@@ -5,6 +5,9 @@ import {deriveInviteKeys} from './keys'
 import {APP_ID, leaveWhenSettled, relayConfig} from './transport'
 
 const REQUEST_TIMEOUT_MS = 15_000
+/** How many more times to ask someone who did not answer, and how long to wait between. */
+const ASK_AGAIN = 3
+const ASK_AGAIN_AFTER_MS = 1500
 const MAX_REQUEST_BYTES = 1024
 const MAX_GRANT_BYTES = 64 * 1024
 
@@ -68,17 +71,27 @@ export function redeemInvite<T>(
       void leaveWhenSettled(room, joinedAt)
       settle()
     }
-    const timer = setTimeout(() => finish(() => reject(new Error('invite is not active'))), timeoutMs)
+    let done = false
+    const timer = setTimeout(() => {
+      done = true
+      finish(() => reject(new Error('invite is not active')))
+    }, timeoutMs)
 
     // Other people joining through the same code are in this room too; only the inviter can answer validly.
-    room.onPeerJoin = peerId => {
+    // An answer can go astray, so whoever has not answered is asked again, a few times, while there is time.
+    const ask = (peerId: string, attempt: number) => {
       join
         .request(request, {target: peerId, timeoutMs: REQUEST_TIMEOUT_MS})
         .then(sealed => {
+          if (done) return
           const accepted = accept(toBytes(sealed))
+          done = true
           finish(() => resolve(accepted))
         })
-        .catch(() => {})
+        .catch(() => {
+          if (!done && attempt < ASK_AGAIN) setTimeout(() => !done && ask(peerId, attempt + 1), ASK_AGAIN_AFTER_MS)
+        })
     }
+    room.onPeerJoin = peerId => ask(peerId, 0)
   })
 }

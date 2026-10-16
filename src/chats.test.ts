@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {admit, authFor, chatFromGrant, chatFromGroupInvite, chatKeys, dmContext, groupFromDirect, newGroupChat, pairDirect} from './chats'
+import {admit, authFor, chatFromGrant, chatFromGroupInvite, chatKeys, directAnswerer, dmContext, groupFromDirect, newGroupChat, pairDirect} from './chats'
 import {createIdentity} from './identity'
 import {createInvite, sealJoinRequest} from './invite'
 
@@ -149,5 +149,19 @@ describe('adding someone from a direct chat', () => {
 
   it('is only possible from a direct chat', () => {
     expect(() => groupFromDirect(anne, newGroupChat(anne, 'Cabin', [], 0), 'Group', [], 5)).toThrow(/not a direct chat/)
+  })
+
+  it('answers the same person again if they ask again, makes one chat, and turns anyone else away', () => {
+    const anne = createIdentity('Anne')
+    const code = createInvite(anne)
+    const answer = directAnswerer(anne, code)
+    const daughter = createIdentity('Daughter')
+    const first = answer(sealJoinRequest(daughter, code), [], 1)
+    expect(first.chat?.peer?.signPublic).toEqual(daughter.signPublic)
+    // Her phone never got the answer and asks again: the same answer, and no second chat.
+    const again = answer(sealJoinRequest(daughter, code), [], 2)
+    expect(again.chat).toBeNull()
+    expect(again.sealedGrant).toEqual(first.sealedGrant)
+    expect(() => answer(sealJoinRequest(createIdentity('Someone else'), code), [], 3)).toThrow('code already used')
   })
 })

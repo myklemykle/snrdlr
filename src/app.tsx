@@ -5,7 +5,7 @@ import {useEffect, useRef, useState} from 'preact/hooks'
 import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
-import {authFor, chatFromGrant, newGroupChat, pairDirect} from './chats'
+import {authFor, chatFromGrant, directAnswerer, newGroupChat} from './chats'
 import {admit, isAdmitted} from './gate'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
@@ -32,7 +32,8 @@ const SWEEP_INTERVAL_MS = 30_000
 // A forgotten "chat with me" code should not stay live indefinitely.
 const PAIRING_LIFETIME_MS = 10 * 60 * 1000
 // How long the pairing room is kept after someone has scanned the code.
-const PAIRING_LINGER_MS = 2000
+// Long enough for the person who scanned the code to ask again if our answer went astray.
+const PAIRING_LINGER_MS = 20_000
 // Only one tab per browser keeps the chats connected; the others wait for this lock.
 const KEEP_LOCK = 'snrdlr-stay-connected'
 const KEEP_SETTING = 'snrdlr.stayConnected'
@@ -669,19 +670,19 @@ function Home(props: {
   useEffect(() => {
     if (!pairing) return
     let cancelled = false
-    let used = false
+    const answer = directAnswerer(identity, pairing)
     let host: {close: () => void} | null = null
     void fetchTurnServers().then(turnServers => {
       if (cancelled) return
       host = hostInvite(
         pairing,
         request => {
-          // One showing of the code makes one chat: a second person scanning it a moment later is turned away.
-          if (used) throw new Error('code already used')
-          const {chat, sealedGrant} = pairDirect(identity, pairing, request, takenNames.current, Date.now())
-          used = true
+          const {chat, sealedGrant} = answer(request, takenNames.current, Date.now())
+          // Asked again by the same person: answered again, and nothing more to do.
+          if (!chat) return sealedGrant
           takenNames.current = [...takenNames.current, chat.name]
-          // The room stays a moment longer than the screen, so our answer is sure to have gone out.
+          // The room stays a while longer than the screen, so our answer is sure to have gone out, or can
+          // be asked for again.
           const answering = host
           host = null
           setTimeout(() => answering?.close(), PAIRING_LINGER_MS)

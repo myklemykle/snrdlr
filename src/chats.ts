@@ -118,6 +118,24 @@ export function pairDirect(
   return {chat, sealedGrant: sealGrant(identity, invite, {kind: 'dm', dhPublic: identity.dhPublic, name: identity.name})}
 }
 
+/**
+ * Answers whoever scans one showing of a "chat with me" code. The first person gets a direct chat, and
+ * the chat is returned so it can be kept. The same person asking again, because the answer never reached
+ * them, gets the same answer and no new chat. Anyone else is turned away: one showing makes one chat.
+ */
+export function directAnswerer(identity: Identity, invite: Invite) {
+  let answered: {joiner: Uint8Array; sealedGrant: Uint8Array} | null = null
+  return (request: Uint8Array, takenNames: string[], now: number): {chat: ChatRecord | null; sealedGrant: Uint8Array} => {
+    if (answered) {
+      if (bytesEqual(openJoinRequest(invite, request).signPublic, answered.joiner)) return {chat: null, sealedGrant: answered.sealedGrant}
+      throw new Error('code already used')
+    }
+    const {chat, sealedGrant} = pairDirect(identity, invite, request, takenNames, now)
+    answered = {joiner: openJoinRequest(invite, request).signPublic, sealedGrant}
+    return {chat, sealedGrant}
+  }
+}
+
 type GroupInvite = Extract<Content, {type: 'group-invite'}>
 
 /**
