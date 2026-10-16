@@ -19,6 +19,7 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 - **Unread counts** on the front page, shared across your devices.
 - **Sounds.** A sound when a message is sent, or when a fresh one arrives while the app is open; sets are the folders in `src/sounds` (snrdl, plink, groovy) plus "shhhhh" for none, each with its own volume.
 - **Install.** It can be installed to the home screen and opens without a network once it has been opened before. Open tabs update themselves to a new version once nobody is using them; Settings shows the running version.
+- **One tab at a time.** Each browser keeps one snrdlr tab connected: the newest takes over, and any other steps aside, holding nothing, with a button to take over again (`src/one-tab.ts`).
 - **Stay connected** (desktop): keeps every chat connected while the tab is open, so it hands messages on to members who come online later.
 
 ## How it works

@@ -506,14 +506,20 @@ test('a computer set to stay connected passes messages between people who are ne
   await openSettings(kay)
   await expect(keeping).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
 
-  // A second tab in the same browser leaves the job to the first.
+  // A second tab in the same browser takes over, and the first steps aside, holding nothing.
   const second = await kay.context().newPage()
   await second.goto('/')
+  await expect(kay.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
   await openSettings(second)
   await expect(second.getByLabel('Keep every chat connected')).toBeChecked()
-  await expect(second.locator('.keeping')).toHaveText('Another snrdlr tab in this browser is already doing this.')
-  // When the first tab closes, the second takes over, and the choice has survived the reload.
+  await expect(second.locator('.keeping')).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
+  // The first can take over again, and then the second steps aside.
+  await kay.getByRole('button', {name: 'Use it here'}).click()
+  await expect(second.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
+  await expect(kay.locator('.greeting')).toBeVisible()
+  await second.getByRole('button', {name: 'Use it here'}).click()
   await kay.close()
+  await openSettings(second)
   await expect(second.locator('.keeping')).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
 
   await second.getByLabel('Keep every chat connected').uncheck()
@@ -2010,4 +2016,24 @@ test('web addresses in a message can be tapped; nothing else becomes a link', as
   await expect(bubble).toContainText('See https://example.com/menu. Or www.snrdlr.net, not javascript:alert(1)')
   // The sender's own copy has them too.
   await expect(anne.locator('.mine', {hasText: 'See'}).getByRole('link')).toHaveCount(2)
+})
+
+test('one snrdlr tab at a time: the newest takes over, and an old one steps aside until asked', async ({browser}) => {
+  const first = await newPerson(browser)
+  const invite = await startChat(first, 'Anne', 'Tabs')
+  const chat = new URL(first.url()).hash
+  const second = await first.context().newPage()
+  await second.goto('/')
+  await expect(second.locator('.greeting')).toBeVisible()
+  await expect(first.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
+  // Reloaded, or brought back, it stays aside.
+  await first.reload()
+  await expect(first.getByText('snrdlr is open in another tab')).toBeVisible()
+  await expect(second.locator('.greeting')).toBeVisible()
+  // A link followed in it means it is wanted again: it takes over, where the link points.
+  expect(new URL(first.url()).hash).toBe(chat)
+  await first.evaluate(() => (location.hash = ''))
+  await expect(first.locator('.greeting')).toBeVisible({timeout: 15_000})
+  await expect(second.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
+  expect(invite).toContain('#i=')
 })
