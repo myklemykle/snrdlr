@@ -518,6 +518,8 @@ test('a computer set to stay connected passes messages between people who are ne
   await expect(second.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
   await expect(kay.locator('.greeting')).toBeVisible()
   await second.getByRole('button', {name: 'Use it here'}).click()
+  // The first reloads to step aside; closing it in the middle of that can hang.
+  await expect(kay.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
   await kay.close()
   await openSettings(second)
   await expect(second.locator('.keeping')).toHaveText(/Keeping 1 chat connected, with 1 device online/, {timeout: 30_000})
