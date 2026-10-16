@@ -196,7 +196,17 @@ export class RelayRoom {
   }
 
   private connectionFor(socket: HeldSocket) {
-    return {send: (text: string) => socket.send(text), save: (state: ConnectionState) => socket.serializeAttachment(state)}
+    return {
+      send: (text: string) => socket.send(text),
+      save: (state: ConnectionState) => socket.serializeAttachment(state),
+      close: () => {
+        try {
+          socket.close(1013, 'Too many connections from this address; this was the oldest.')
+        } catch {
+          // Already closed.
+        }
+      }
+    }
   }
 
   /** Throws away messages that have been held long enough. */
@@ -228,7 +238,7 @@ export class RelayRoom {
     }
     this.stats.count('connections')
     const pair = new WebSocketPair()
-    const state: ConnectionState = {id: crypto.randomUUID(), from, subs: {}}
+    const state: ConnectionState = {id: crypto.randomUUID(), from, subs: {}, since: Date.now()}
     this.ctx.acceptWebSocket(pair[1])
     pair[1].serializeAttachment(state)
     this.relay.add(this.connectionFor(pair[1]), state)

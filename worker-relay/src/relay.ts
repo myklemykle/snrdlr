@@ -49,7 +49,11 @@ export const LIMITS = {
   /** Bytes of subscription state kept per connection; Cloudflare allows 16,384. */
   stateBytes: 15_000,
   connections: 3000,
-  connectionsPerAddress: 30,
+  /**
+   * Connections from one address. A household shares one, with several devices and tabs each holding a
+   * few; and a phone that puts a tab to sleep often leaves its connections open, dead, for hours.
+   */
+  connectionsPerAddress: 60,
   /** Messages a connection may send in a burst, and how fast the allowance refills. */
   burst: 300,
   perSecond: 5,
@@ -176,11 +180,15 @@ export type ConnectionState = {
   from: string
   /** Subscription ID to the topic keys it wants. */
   subs: Record<string, string[]>
+  /** When it connected; missing on connections from before this was kept, which count as oldest. */
+  since?: number
 }
 
 export type Connection = {
   send: (text: string) => void
   save: (state: ConnectionState) => void
+  /** Hangs up, to make room for a newer connection from the same address. */
+  close?: () => void
 }
 
 type NostrEvent = {id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string}
@@ -259,9 +267,23 @@ export class Relay {
   /** Why a new connection from this address cannot be taken, if it cannot. */
   refusal(from: string): string | null {
     if (this.connections.size >= LIMITS.connections) return 'The relay is full. Try again shortly.'
-    let fromHere = 0
-    for (const {state} of this.connections.values()) if (state.from === from) fromHere++
-    return fromHere >= LIMITS.connectionsPerAddress ? 'Too many connections from this address.' : null
+    this.makeRoom(from)
+    return null
+  }
+
+  /**
+   * An address with as many connections as it may have gets room for a new one by losing its oldest,
+   * which is most likely one a sleeping tab left behind. A device that was still using it connects again.
+   */
+  private makeRoom(from: string): void {
+    const fromHere = [...this.connections.entries()].filter(([, {state}]) => state.from === from)
+    const extra = fromHere.length - LIMITS.connectionsPerAddress + 1
+    if (extra <= 0) return
+    const oldest = fromHere.sort(([, a], [, b]) => (a.state.since ?? 0) - (b.state.since ?? 0)).slice(0, extra)
+    for (const [id, {connection}] of oldest) {
+      this.remove(id)
+      connection.close?.()
+    }
   }
 
   /** Takes on a connection: a new one, or one that was open before the relay last went idle. */

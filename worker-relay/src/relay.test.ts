@@ -243,10 +243,28 @@ describe('Relay', () => {
     expect(greedy.got.at(-1)).toEqual(['CLOSED', 'second', expect.stringMatching(/too many topics/)])
     expect(JSON.stringify(greedy.saved).length).toBeLessThanOrEqual(LIMITS.stateBytes)
 
-    expect(relay.refusal('address-b')).toBeNull()
-    for (let i = 0; i < LIMITS.connectionsPerAddress; i++) join(relay, 'address-b')
-    expect(relay.refusal('address-b')).toMatch(/Too many connections/)
-    expect(relay.refusal('address-c')).toBeNull()
+  })
+
+  it('makes room for a new connection from a busy address by closing that address\'s oldest', async () => {
+    const relay = new Relay()
+    const closed: number[] = []
+    const ours = Array.from({length: LIMITS.connectionsPerAddress}, (_, i) => {
+      const id = `home-${i}`
+      relay.add({send: () => {}, save: () => {}, close: () => closed.push(i)}, {id, from: 'home', subs: {}, since: 1000 + i})
+      return id
+    })
+    const neighbour = join(relay, 'next-door')
+    expect(relay.refusal('home')).toBeNull()
+    // The oldest one from that address was closed and forgotten; nobody else's was touched.
+    expect(closed).toEqual([0])
+    expect(relay.size).toBe(LIMITS.connectionsPerAddress)
+    await neighbour.say('REQ', 's', {'#x': [TOPIC]})
+    expect(neighbour.got.at(-1)?.[0]).toBe('EOSE')
+    expect(ours.length).toBe(LIMITS.connectionsPerAddress)
+    // A connection from before ages were kept counts as the oldest.
+    relay.add({send: () => {}, save: () => {}, close: () => closed.push(-1)}, {id: 'ancient', from: 'home', subs: {}})
+    expect(relay.refusal('home')).toBeNull()
+    expect(closed).toEqual([0, -1])
   })
 
   describe('push notifications', () => {
