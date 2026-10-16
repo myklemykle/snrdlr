@@ -281,6 +281,9 @@ function Main(props: {
 
   const connectFor: ConnectFor = chat => async (keys, handlers) =>
     joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity))
+  // For rooms held open for hours: they answer others but do not announce themselves (transport.ts).
+  const listenFor: ConnectFor = chat => async (keys, handlers) =>
+    joinChat(keys, handlers, await fetchTurnServers(), authFor(chat, identity), true)
 
   const [stay, setStay] = useState(storedStay)
   const [keep, setKeep] = useState<Keep>(null)
@@ -320,7 +323,8 @@ function Main(props: {
       clearTimeout(queued)
       if (cancelled) return
       setKeep({chats: 0, connections: 0})
-      stop = keepChats({store, identity, connectFor, mailbox: mailboxes, onStatus: status => !cancelled && setKeep(status)})
+      // Anyone who opens one of these chats announces themselves, and this tab answers.
+      stop = keepChats({store, identity, connectFor: listenFor, mailbox: mailboxes, onStatus: status => !cancelled && setKeep(status)})
       return untilFinished
     }
     // The lock normally arrives at once; only say another tab has it if it does not.
@@ -339,7 +343,9 @@ function Main(props: {
   // Keeps this device's chats in step with the person's other devices.
   useEffect(() => {
     if (!named) return
-    const stop = startSelfSync({store, identity, connectFor, mailbox: mailboxes})
+    // Every device of the person listens and none announces, so they keep in step through the relay's
+    // store alone, which is how they do it whenever they are not online together anyway.
+    const stop = startSelfSync({store, identity, connectFor: listenFor, mailbox: mailboxes})
     return () => void stop()
   }, [named])
 

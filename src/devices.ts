@@ -1,9 +1,9 @@
 // One person on several devices. Every device of a person holds the same keys (identity.ts) and numbers
 // its own messages (envelope.ts). What keeps the devices in step is the person's own hidden chat, whose
 // only members are those devices: each one says there which chats it holds and which it has left, and
-// each takes up what the others say. It is an ordinary chat in every other way, synced directly between
-// the devices when they are online together and left with the relay's store when they are not, so it
-// also keeps a copy of the chat list that a device can come back to. Each device also says there how far
+// each takes up what the others say. It is an ordinary chat in every other way, but its notes travel
+// through the relay's store (its devices do not announce themselves to each other; see transport.ts), so
+// it also keeps a copy of the chat list that a device can come back to. Each device also says there how far
 // it has read each chat, so that what was read on one is not unread on the others.
 import {hkdf} from '@noble/hashes/hkdf.js'
 import {sha256} from '@noble/hashes/sha2.js'

@@ -54,12 +54,16 @@ type PeerState = {
 /**
  * Joins a chat's room. Peers only count, and only exchange messages with us, once they have proved
  * they are members; anyone else who finds the room is ignored.
+ *
+ * A room is joined `passive` when it is held open for a long time without needing to find anyone itself:
+ * it then does not announce itself (trystero announces every five seconds or so, on every relay, which is
+ * most of what our relay is asked to do), but answers anyone who does. Two passive devices never meet.
  */
-export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: TurnServerConfig[], auth: ChatAuth): Wire {
+export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: TurnServerConfig[], auth: ChatAuth, passive = false): Wire {
   const joined = new Set<string>()
   const members = new Set<string>()
   const states = new Map<string, PeerState>()
-  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers, relayConfig}, keys.roomId, {
+  const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers, relayConfig, ...(passive ? {passive: true} : {})}, keys.roomId, {
     // Trystero's error text is aimed at developers; keep it in the console.
     onJoinError: ({error}) => {
       console.warn(error)
