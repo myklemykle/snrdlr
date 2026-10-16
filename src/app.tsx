@@ -7,7 +7,7 @@ import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, typ
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, directAnswerer, newGroupChat} from './chats'
 import {admit, isAdmitted} from './gate'
-import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
+import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
 import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
@@ -19,7 +19,9 @@ import {mailboxes} from './mailbox'
 import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
 import {DeviceCode, OpenedDeviceLink} from './link-view'
 import {JoinByCode} from './scanner'
-import {ProfileEditor} from './profile-view'
+import {Avatar, ProfileEditor} from './profile-view'
+import {latestCards} from './cards'
+import type {CardContent} from './envelope'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -641,6 +643,8 @@ function Home(props: {
   const [desktop] = useState(() => matchMedia('(hover: hover) and (pointer: fine)').matches)
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
   const [unread, setUnread] = useState<Record<string, number>>({})
+  // For each direct chat, the other person's card as they show it there: their icon and colour.
+  const [cards, setCards] = useState<Record<string, CardContent | undefined>>({})
   const [name, setName] = useState('')
   const [leaving, setLeaving] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -716,8 +720,13 @@ function Home(props: {
   }
 
   const refresh = async () => {
-    const stored = await store.listChats()
+    // Direct chats first, then groups, each newest first.
+    const stored = (await store.listChats()).sort((a, b) => Number(a.kind !== 'dm') - Number(b.kind !== 'dm'))
     const counts = await Promise.all(stored.map(chat => store.unreadCount(chat, identity.id)))
+    const shown = await Promise.all(
+      stored.map(async chat => [chat.id, chat.kind === 'dm' && chat.peer ? latestCards(await store.listMessages(chat.id)).get(memberId(chat.peer.signPublic)) : undefined] as const)
+    )
+    setCards(Object.fromEntries(shown))
     setChats(stored)
     setUnread(Object.fromEntries(stored.map((chat, index) => [chat.id, counts[index]])))
   }
@@ -912,7 +921,14 @@ function Home(props: {
               </li>
             ) : (
               <li key={chat.id}>
-                <button type="button" class="open" onClick={() => onOpen(chat.id)}>
+                <button
+                  type="button"
+                  class="open"
+                  onClick={() => onOpen(chat.id)}
+                  // The other person's chosen colour, as a stripe down the side.
+                  style={cards[chat.id]?.color ? {boxShadow: `inset 0.3rem 0 0 ${cards[chat.id]!.color}`} : undefined}
+                >
+                  {chat.kind === 'dm' && chat.peer && <Avatar card={cards[chat.id]} name={chat.name} id={memberId(chat.peer.signPublic)} />}
                   <span class="name">{chat.name}</span>
                   {chat.kind === 'dm' && <span class="tag">direct</span>}
                   {unread[chat.id] > 0 && (

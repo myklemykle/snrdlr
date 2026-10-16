@@ -2037,3 +2037,30 @@ test('one snrdlr tab at a time: the newest takes over, and an old one steps asid
   await expect(second.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
   expect(invite).toContain('#i=')
 })
+
+test('the chat list shows direct chats first, each with the other person\'s icon and colour', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await bob.goto('/')
+  await introduce(bob, 'Bob')
+  // Bob shows a colour everywhere.
+  await bob.evaluate(() => localStorage.setItem('snrdlr.profile', JSON.stringify({color: '#8a56d6', shareAll: true, chats: []})))
+  await bob.reload()
+  await anne.getByRole('button', {name: 'Chat with one person'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(anne.getByRole('heading', {name: 'Bob'})).toBeVisible({timeout: 15_000})
+  await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
+  // A group started after it would come first by age; direct chats come first anyway.
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByLabel('Chat name').fill('Picnic')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.chats .open .name')).toHaveText(['Bob', 'Picnic'])
+  const entry = chatEntry(anne, 'Bob')
+  await expect(entry.locator('.avatar.initial')).toHaveAttribute('data-initial', 'B', {timeout: 15_000})
+  await expect(entry.locator('.avatar.initial')).toHaveCSS('background-color', 'rgb(138, 86, 214)')
+  await expect(entry).toHaveCSS('box-shadow', /rgb\(138, 86, 214\)/)
+  await expect(chatEntry(anne, 'Picnic').locator('.avatar')).toHaveCount(0)
+})

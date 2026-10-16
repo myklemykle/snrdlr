@@ -315,6 +315,18 @@ button:disabled {
   font-weight: 600;
 }
 
+.chats .open {
+  align-items: center;
+}
+
+.chats .open .name {
+  flex: 1;
+}
+
+.chats .open .avatar {
+  flex: none;
+}
+
 .chats .open::after {
   content: '›';
   color: var(--muted);
