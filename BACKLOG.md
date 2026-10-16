@@ -36,7 +36,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - A change made on the front page reaches each chat when that chat next connects, not at once (a stay-connected tab can take a couple of hours).
   - Taking a profile back only stops showing it; what was shown stays in other members' history. Say so more plainly, or build real deletion.
   - No line in the chat when someone changes their name; the "joined" line keeps the old one.
-  - **Own messages in your own colour** (requested 14 October 2026). Your own messages keep the app's blue. Show them in the colour you chose instead, in the chats where your colour is shown.
+  - **Own messages in your own colour** (requested 14 October 2026; built 16 October). In a chat where you show your colour, your own messages are in it, darkened only as far as white words need (contrast 4.5:1): red and purple stay as they are; yellow becomes a dark olive.
   - The tiny photo is cut from the middle of the picture; no cropping tool.
   - The profile is per device, like everything else.
 - **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.

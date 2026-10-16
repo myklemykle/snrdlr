@@ -41,6 +41,24 @@ export const COLORS: [name: string, value: string][] = [
   ['Pink', '#d6539a']
 ]
 
+/** How light a colour looks (WCAG relative luminance), from 0 for black to 1 for white. */
+function luminance([r, g, b]: number[]): number {
+  const linear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  return 0.2126 * linear(r / 255) + 0.7152 * linear(g / 255) + 0.0722 * linear(b / 255)
+}
+
+/**
+ * The colour, darkened only as far as it takes for white words on it to read easily (a contrast of at
+ * least 4.5 to 1, the usual standard for text): for one's own messages in one's own colour.
+ */
+export function behindWhiteText(hex: string): string {
+  const rgb = [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16))
+  if (rgb.some(Number.isNaN)) return hex
+  let shade = rgb
+  for (let step = 0; step < 40 && 1.05 / (luminance(shade) + 0.05) < 4.5; step++) shade = shade.map(c => Math.round(c * 0.95))
+  return `#${shade.map(c => c.toString(16).padStart(2, '0')).join('')}`
+}
+
 export const CONTACT_KINDS = ['email', 'phone', 'instagram', 'other'] as const
 export type ContactKind = (typeof CONTACT_KINDS)[number]
 export const CONTACT_LABELS: Record<ContactKind, string> = {email: 'Email', phone: 'Phone', instagram: 'Instagram', other: 'Other'}

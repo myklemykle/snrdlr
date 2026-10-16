@@ -1,6 +1,6 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, heardNews, unclaimChat} from './background'
-import {latestCards} from './cards'
+import {behindWhiteText, latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
@@ -237,6 +237,9 @@ export function ChatScreen(props: {
   const edits = useMemo(() => latestEdits(messages ?? []), [messages])
   // What each person shows of their profile in this chat, and whose profile is open.
   const cards = useMemo(() => latestCards(messages ?? []), [messages])
+  // Our own messages are in our own colour where we show it in this chat, dark enough for white words.
+  const ownColor = cards.get(identity.id)?.color
+  const ownShade = useMemo(() => (ownColor ? behindWhiteText(ownColor) : null), [ownColor])
   const [profileOf, setProfileOf] = useState<string | null>(null)
   const [ownProfile, setOwnProfile] = useState(loadProfile)
   const showOwnProfile = async (part: Part, shown: boolean) => {
@@ -809,7 +812,7 @@ export function ChatScreen(props: {
               key={key}
               data-key={key}
               class={`${mine ? 'mine' : 'theirs'}${image ? ' image' : ''}${size && !replied ? ` ${size}` : ''}${tallies ? ' reacted' : ''}${open ? ' menu-open' : ''}${marked === key || (editing && messageKey(editing) === key) ? ' marked' : ''}${!mine && card?.color ? ' tinted' : ''}`}
-              style={!mine && card?.color ? {'--tint': card.color} : undefined}
+              style={!mine && card?.color ? {'--tint': card.color} : mine && ownShade ? {background: ownShade} : undefined}
               onPointerDown={event => startPress(event, key)}
               onPointerMove={movePress}
               onPointerUp={cancelPress}

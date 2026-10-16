@@ -1563,6 +1563,8 @@ test('people have profiles: shown in every chat or only where turned on, with an
   await ownCard.getByLabel('Colour').check()
   await expect(his).toHaveClass(/tinted/)
   await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
+  // His own messages are in his colour too, on his screen (purple is dark enough for white words as it is).
+  await expect(own).toHaveCSS('background-color', 'rgb(138, 86, 214)')
   await ownCard.getByLabel('Icon').check()
   await expect(his.locator('.author img.avatar')).toBeVisible()
   expect(await his.locator('.author img.avatar').evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([96, 96])
@@ -1573,6 +1575,7 @@ test('people have profiles: shown in every chat or only where turned on, with an
     await bob.screenshot({path: process.env.SHOTS + '/p-own.png'})
   }
   await ownCard.getByLabel('Colour').uncheck()
+  await expect(own).not.toHaveCSS('background-color', 'rgb(138, 86, 214)')
   await ownCard.getByLabel('Icon').uncheck()
   await expect(his).not.toHaveClass(/tinted/)
   await expect(his.locator('.author .avatar.initial')).toHaveAttribute('data-initial', 'B')
