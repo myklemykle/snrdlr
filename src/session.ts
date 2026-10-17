@@ -17,6 +17,7 @@ import type {ChatKeys} from './keys'
 import {KEEP_SECONDS, type Mailbox, type OpenMailbox} from './mailbox'
 import {pushTag, worthNotifying} from './push-tag'
 import {loadProfile, nameIn} from './profile'
+import {fetchFile, leaveFile} from './file-store'
 import {makeRoster} from './membership'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
@@ -260,7 +261,39 @@ export async function openSession(options: {
     for (const {photo} of latestCards(messages).values()) if (photo && !heldFiles.has(photo.hash)) missing.set(photo.hash, photo)
     return missing
   }
+  // And from the relay, which keeps what members leave for those who are away (file-store.ts). Each is
+  // tried there once per opening of the chat, a couple at a time.
+  const triedRelay = new Set<string>()
+  let fetchingFromRelay = 0
+  function fetchFromRelay() {
+    const open = options.mailbox
+    if (!open || closed) return
+    for (const [hash, {size}] of missingFiles()) {
+      if (fetchingFromRelay >= 2) break
+      if (triedRelay.has(hash) || asked.has(hash)) continue
+      triedRelay.add(hash)
+      fetchingFromRelay++
+      void fetchFile(open, keys.storeTopic, hash, size).then(async data => {
+        fetchingFromRelay--
+        if (data && !closed && !heldFiles.has(hash)) {
+          await store.putFile(chat.id, hash, data)
+          heldFiles.add(hash)
+          publishFiles()
+        }
+        fetchFromRelay()
+      })
+    }
+  }
+  /** Leaves a file of ours with the relay, for members who are not online, trying again a few times. */
+  function leaveForAway(hash: string, data: Uint8Array, attempt = 0) {
+    const open = options.mailbox
+    if (!open || closed) return
+    void leaveFile(open, keys.storeTopic, hash, data).then(kept => {
+      if (!kept && !closed && attempt < 3) setTimeout(() => leaveForAway(hash, data, attempt + 1), SHELF_RETRY_MS[attempt])
+    })
+  }
   function fetchFiles() {
+    fetchFromRelay()
     if (closed || !wire || peers.length === 0) return
     const now = Date.now()
     for (const [hash, request] of asked) {
@@ -569,6 +602,7 @@ export async function openSession(options: {
       publishFiles()
     }
     await post(card)
+    if (card.photo && wanted?.photoFile) leaveForAway(card.photo.hash, wanted.photoFile)
   }
   if (options.card !== undefined) await shareCard(options.card)
   openMailbox()
@@ -594,6 +628,7 @@ export async function openSession(options: {
       heldFiles.add(image.hash)
       publishFiles()
       await post(image)
+      leaveForAway(image.hash, file)
     },
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return

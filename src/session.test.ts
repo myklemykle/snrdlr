@@ -955,6 +955,28 @@ describe('session', () => {
     expect(said).toEqual(['Anne', 'Annie'])
   })
 
+  it('leaves a picture with the relay, so someone never online at the same time still gets it', async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    // They meet once, so each knows the other's key; then never connect again.
+    const meeting = makeNetwork()
+    const [annes, bobs] = [await openStore(`session-shelf-${counter++}`), await openStore(`session-shelf-${counter++}`)]
+    const [first, met] = [await join(meeting, chat, createIdentity('Anne'), annes), await join(meeting, chat, createIdentity('Bob'), bobs)]
+    await settle()
+    await first.session.close()
+    await met.session.close()
+    const anne = await join(makeNetwork(), chat, first.identity, annes, undefined, shelf.open)
+    const {image, file} = await picture([5, 6, 7, 8], 'while you were out')
+    await anne.session.postImage(image, file)
+    await vi.waitFor(() => expect(shelf.kept.size).toBeGreaterThan(1))
+    await anne.session.close()
+    // Bob comes along later, on a network of his own: nobody to fetch it from but the relay.
+    const bob = await join(makeNetwork(), chat, met.identity, bobs, undefined, shelf.open)
+    await vi.waitFor(() => expect(bob.files.has(image.hash)).toBe(true), {timeout: 5000})
+    expect(await bob.store.getFile(chat.id, image.hash)).toEqual(file)
+    await bob.session.close()
+  })
+
   it('sends a picture: the message at once, the file fetched by whoever lacks it', async () => {
     const network = makeNetwork()
     const chat = makeChat()

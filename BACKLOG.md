@@ -236,7 +236,6 @@ Cheapest thing to do early: settle the final address before there are users to s
 
 ## Engineering follow-ups
 
-- **Pictures to Claude's listener need a direct connection** (17 October 2026). Picture files travel only device to device. The listener's headless browser fails the Turnstile check that guards TURN, so a picture from a phone on mobile data never reaches it. Fixes: let the relay hold encrypted picture files for members who are away (they are already sealed with their own key), or give scripted members another way to get TURN credentials.
 - **Intermittent test: "a computer set to stay connected passes messages…"** (16 October 2026). Failed three times in a cluster (60 s timeout), then passed fourteen times running. It started after "stay connected" tabs became passive (they wait for others to announce), It then failed in CI too and stopped a deploy. Every failure ended at the test closing the first tab right after it had begun reloading to step aside for the second; the test now waits for that reload to finish first. If it recurs, look at closing a tab mid-reload, and at whether a passive keeper is slow to reach people.
 - **A relay holding a non-member's messages keeps offering them.** Phones refuse a message whose author has no certificate, but do not tell the sender, so it is offered again on every sync round. Only a blind bot could hold such messages. Costs bandwidth only.
 - **Removing a member.** Still impossible: a member keeps the chat's secret and their certificate. Needs key rotation.
