@@ -8,7 +8,7 @@ import {cleanName, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identit
 import {openImage, prepareAvatar, prepareImage} from './image'
 import {useImageUrl} from './image-view'
 import {Sheet} from './sheet'
-import {loadProfile, PART_LABELS, PROFILE_FILES, profileCard, saveProfile, type Part, type Profile} from './profile'
+import {ALTERABLE, asIn, hasPart, isInstead, loadProfile, PART_LABELS, PARTS, PROFILE_FILES, profileCard, saveProfile, showsIn, type Alterable, type Instead, type Part, type Profile} from './profile'
 import type {Store} from './store'
 
 /** The longest side of a profile photo. */
@@ -77,6 +77,133 @@ function useEscape(onClose: () => void) {
 }
 
 /** One person's profile, as they show it in this chat. For our own, also where it is switched on here. */
+/** In a chat, our own profile part by part: shown here or not, and the usual or something else here. */
+function OwnHere(props: {
+  profile: Profile
+  chatId: string
+  name: string
+  id: string
+  onShow: (part: Part, shown: boolean) => void
+  onInstead: (part: Alterable, value: Instead | null) => void
+  onPickEmoji: () => void
+}) {
+  const {profile, chatId, name, id, onShow, onInstead, onPickEmoji} = props
+  // The part whose something-else is being chosen, before anything is chosen.
+  const [choosing, setChoosing] = useState<Alterable | null>(null)
+  const here = asIn(profile, chatId)
+  const alterable = (part: Part): part is Alterable => (ALTERABLE as readonly string[]).includes(part)
+  const parts = PARTS.filter(part => hasPart(profile, part) || (alterable(part) && isInstead(profile, part, chatId)))
+  if (parts.length === 0) return <p class="note">Your profile is empty. Fill it in from the front page, with the button beside Settings.</p>
+  const colourName = (value?: string) => COLORS.find(([, color]) => color === value)?.[0] ?? 'your colour'
+  const usualOf = (part: Part) =>
+    part === 'icon' ? (profile.icon ?? (profile.avatar ? 'your tiny photo' : 'none')) : part === 'color' ? colourName(profile.color) : part === 'contact' ? (profile.contact?.value ?? 'none') : ''
+  const status = (part: Part, shown: boolean) => {
+    const {everywhere} = profile.show[part]
+    if (!shown) return everywhere ? 'Shown in every chat but this one' : 'Not shown here'
+    return everywhere ? 'Shown in every chat' : 'Shown here'
+  }
+  return (
+    <div class="own-here">
+      {parts.map(part => {
+        const shown = showsIn(profile, part, chatId)
+        const instead = alterable(part) && isInstead(profile, part, chatId)
+        const open = alterable(part) && (instead || choosing === part)
+        return (
+          <div class="part" key={part}>
+            <label>
+              <input type="checkbox" checked={shown} onChange={event => onShow(part, event.currentTarget.checked)} /> {PART_LABELS[part]}
+              {instead && <span class="here"> just here</span>}
+            </label>
+            <p class="note">{instead ? `Your usual is ${usualOf(part)}` : status(part, shown)}</p>
+            {!open && part !== 'photo' && (
+              <div class="row value">
+                {part === 'icon' && <Avatar card={profileCard(here)} name={name} id={id} />}
+                {part === 'color' && here.color && <span class="swatch" style={{background: here.color}} aria-hidden="true" />}
+                {part === 'contact' && here.contact && <span>{here.contact.value}</span>}
+                <button type="button" class="link" onClick={() => setChoosing(part as Alterable)}>
+                  Use something else here
+                </button>
+              </div>
+            )}
+            {open && part === 'icon' && (
+              <div class="row value">
+                <Avatar card={profileCard(here)} name={name} id={id} />
+                <button type="button" onClick={onPickEmoji}>
+                  Emoji
+                </button>
+              </div>
+            )}
+            {open && part === 'color' && (
+              <div class="row swatches">
+                {COLORS.map(([label, value]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    class={`swatch${here.color === value && instead ? ' chosen' : ''}`}
+                    style={{background: value}}
+                    aria-label={`${label} here`}
+                    aria-pressed={here.color === value && instead}
+                    onClick={() => onInstead('color', {color: value})}
+                  />
+                ))}
+              </div>
+            )}
+            {open && part === 'contact' && (
+              <ContactHere
+                start={here.contact}
+                onSave={contact => onInstead('contact', {contact})}
+              />
+            )}
+            {open && (
+              <button
+                type="button"
+                class="link"
+                onClick={() => {
+                  setChoosing(null)
+                  if (instead) onInstead(part as Alterable, null)
+                }}
+              >
+                {instead ? 'Back to my usual' : 'Keep my usual'}
+              </button>
+            )}
+          </div>
+        )
+      })}
+      <p class="note">
+        Tick to show something here, untick to hide it here; anyone who has already seen it may have kept it. Changes here are for this chat only. Your
+        usual profile is set from the front page, and is the same on all your devices.
+      </p>
+    </div>
+  )
+}
+
+/** A contact to show in one chat instead of the usual one. */
+function ContactHere(props: {start?: {kind: ContactKind; value: string}; onSave: (contact: {kind: ContactKind; value: string}) => void}) {
+  const [kind, setKind] = useState<ContactKind>(props.start?.kind ?? 'email')
+  const [value, setValue] = useState(props.start?.value ?? '')
+  return (
+    <form
+      class="row value"
+      onSubmit={event => {
+        event.preventDefault()
+        if (value.trim()) props.onSave({kind, value: value.trim()})
+      }}
+    >
+      <select aria-label="Kind of contact here" value={kind} onChange={event => setKind(event.currentTarget.value as ContactKind)}>
+        {CONTACT_KINDS.map(option => (
+          <option key={option} value={option}>
+            {CONTACT_LABELS[option]}
+          </option>
+        ))}
+      </select>
+      <input value={value} onInput={event => setValue(event.currentTarget.value)} maxLength={MAX_CONTACT_LENGTH} aria-label="Contact here" autocomplete="off" autocapitalize="off" />
+      <button type="submit" disabled={!value.trim()}>
+        Use here
+      </button>
+    </form>
+  )
+}
+
 export function ProfileCard(props: {
   name: string
   id: string
@@ -85,12 +212,17 @@ export function ProfileCard(props: {
   chatId: string
   files: ReadonlySet<string>
   /** Set when the profile is our own. */
-  own?: {parts: {part: Part; everywhere: boolean; shown: boolean}[]; onShow: (part: Part, shown: boolean) => void}
+  own?: {profile: Profile; onShow: (part: Part, shown: boolean) => void; onInstead: (part: Alterable, value: Instead | null) => void}
   onClose: () => void
 }) {
   const {name, id, card, store, chatId, files, own, onClose} = props
-  useEscape(onClose)
+  // Choosing an emoji for this chat; Escape closes the picker first.
+  const [picking, setPicking] = useState(false)
+  const pickingNow = useRef(false)
+  pickingNow.current = picking
+  useEscape(() => !pickingNow.current && onClose())
   return (
+    <>
     <Sheet class="profile" label={own ? 'Your profile' : `${name}'s profile`} title={own ? 'Your profile in this chat' : 'Profile'} onClose={onClose}>
         {card?.photo && <Photo store={store} chatId={chatId} photo={card.photo} held={files.has(card.photo.hash)} />}
         <div class="who">
@@ -100,29 +232,24 @@ export function ProfileCard(props: {
         </div>
         {card?.contact && <Contact contact={card.contact} />}
         {!card && !own && <p class="note">{name} isn't showing a profile in this chat.</p>}
-        {own &&
-          (own.parts.length === 0 ? (
-            <p class="note">Your profile is empty. Fill it in from the front page, with the button beside Settings.</p>
-          ) : (
-            <fieldset>
-              <legend>Show in this chat</legend>
-              {own.parts.map(({part, everywhere, shown}) => (
-                <label key={part}>
-                  <input type="checkbox" checked={shown} onChange={event => own.onShow(part, event.currentTarget.checked)} />{' '}
-                  {PART_LABELS[part]}
-                  {everywhere && <span class="everywhere"> · {shown ? 'shown in every chat' : 'shown in every chat but this one'}</span>}
-                </label>
-              ))}
-              <p class="note">
-                {own.parts.some(({shown}) => shown) ? 'Above is what people in this chat see.' : 'People in this chat see only your name.'} Unticking
-                stops showing something here, but anyone who has already seen it may have kept it. This changes only this chat; what is shown in every chat is set from the front page.
-              </p>
-            </fieldset>
-          ))}
+        {own && <OwnHere profile={own.profile} chatId={chatId} name={name} id={id} onShow={own.onShow} onInstead={own.onInstead} onPickEmoji={() => setPicking(true)} />}
         <button type="button" onClick={onClose}>
           Done
         </button>
     </Sheet>
+      {/* Beside the sheet, not inside it: a tap in the picker must not count as a tap on what is behind. */}
+      {picking && own && (
+        <div class="over-sheet">
+          <EmojiPicker
+            onPick={emoji => {
+              own.onInstead('icon', {icon: emoji})
+              setPicking(false)
+            }}
+            onClose={() => setPicking(false)}
+          />
+        </div>
+      )}
+    </>
   )
 }
 

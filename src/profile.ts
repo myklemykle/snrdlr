@@ -18,7 +18,14 @@ export type Profile = {
   color?: string
   /** For each part, where it is shown: in every chat but those it is hidden in, or only in the chats listed. */
   show: Record<Part, Showing>
+  /** By chat, something other than the usual to show there instead. */
+  instead?: Record<string, Instead>
 }
+
+/** The parts that can be something else in one chat. The photo is the same everywhere. */
+export const ALTERABLE = ['icon', 'color', 'contact'] as const
+export type Alterable = (typeof ALTERABLE)[number]
+export type Instead = {icon?: string; avatar?: Uint8Array; color?: string; contact?: {kind: ContactKind; value: string}}
 
 /** The parts of a profile that can each be shown or kept back. The icon is the emoji or the tiny photo. */
 export const PARTS = ['icon', 'color', 'contact', 'photo'] as const
@@ -33,7 +40,9 @@ const showNowhere = (): Record<Part, Showing> => ({icon: nowhere(), color: nowhe
 export const hasPart = (profile: Profile, part: Part) =>
   part === 'icon' ? !!(profile.icon || profile.avatar) : part === 'contact' ? !!profile.contact?.value.trim() : !!profile[part]
 
-type Stored = Omit<Profile, 'avatar' | 'photo' | 'show'> & {
+type StoredInstead = Omit<Instead, 'avatar'> & {avatar?: string}
+type Stored = Omit<Profile, 'avatar' | 'photo' | 'show' | 'instead'> & {
+  instead?: Record<string, StoredInstead>
   /** When it was last changed on any of the person's devices; missing until changed since this was kept. */
   updatedAt?: number
   avatar?: string
@@ -56,8 +65,13 @@ export function loadProfile(): Profile {
         const list = (value: unknown) => (Array.isArray(value) ? (value as string[]) : [])
         showing[part] = kept ? {everywhere: kept.everywhere === true, chats: list(kept.chats), hidden: list(kept.hidden)} : {...whole}
       }
+      const instead: Record<string, Instead> = {}
+      for (const [chatId, here] of Object.entries(stored.instead ?? {})) {
+        if (here && typeof here === 'object') instead[chatId] = {...here, avatar: here.avatar ? fromHex(here.avatar) : undefined}
+      }
       return {
         ...rest,
+        instead,
         avatar: stored.avatar ? fromHex(stored.avatar) : undefined,
         photo: stored.photo ? {...stored.photo, key: fromHex(stored.photo.key), preview: fromHex(stored.photo.preview)} : undefined,
         show: showing
@@ -75,7 +89,8 @@ export function saveProfile(profile: Profile, at = Date.now()): void {
     ...profile,
     updatedAt: at,
     avatar: profile.avatar ? toHex(profile.avatar) : undefined,
-    photo: profile.photo ? {...profile.photo, key: toHex(profile.photo.key), preview: toHex(profile.photo.preview)} : undefined
+    photo: profile.photo ? {...profile.photo, key: toHex(profile.photo.key), preview: toHex(profile.photo.preview)} : undefined,
+    instead: Object.fromEntries(Object.entries(profile.instead ?? {}).map(([chatId, here]) => [chatId, {...here, avatar: here.avatar ? toHex(here.avatar) : undefined}]))
   }
   try {
     localStorage.setItem(SETTING, JSON.stringify(stored))
@@ -119,17 +134,55 @@ export function takeProfileNote(text: string, at: number): string | null {
   return typeof name === 'string' ? name : null
 }
 
-/** The profile as a card: all of it, or with `chatId` only the parts shown in that chat. */
+/** The profile as a card: all of it, or with `chatId` only the parts shown in that chat, as they are there. */
 export function profileCard(profile: Profile, chatId?: string): CardContent {
   const shown = (part: Part) => chatId === undefined || showsIn(profile, part, chatId)
+  const here = chatId === undefined ? profile : asIn(profile, chatId)
   return {
     type: 'card',
     // A tiny photo stands in place of the emoji.
-    ...(!shown('icon') ? {} : profile.avatar ? {avatar: profile.avatar} : profile.icon ? {icon: profile.icon} : {}),
+    ...(!shown('icon') ? {} : here.avatar ? {avatar: here.avatar} : here.icon ? {icon: here.icon} : {}),
     ...(shown('photo') && profile.photo ? {photo: profile.photo} : {}),
-    ...(shown('contact') && profile.contact?.value.trim() ? {contact: {kind: profile.contact.kind, value: profile.contact.value.trim()}} : {}),
-    ...(shown('color') && profile.color ? {color: profile.color} : {})
+    ...(shown('contact') && here.contact?.value.trim() ? {contact: {kind: here.contact.kind, value: here.contact.value.trim()}} : {}),
+    ...(shown('color') && here.color ? {color: here.color} : {})
   }
+}
+
+/** Whether a part is something other than the usual in this chat. */
+export const isInstead = (profile: Profile, part: Alterable, chatId: string) => {
+  const here = profile.instead?.[chatId]
+  return !!here && (part === 'icon' ? here.icon !== undefined || here.avatar !== undefined : here[part] !== undefined)
+}
+
+/** The profile as it is in one chat: the usual, with whatever is something else there in its place. */
+export function asIn(profile: Profile, chatId: string): Profile {
+  const here = profile.instead?.[chatId]
+  if (!here) return profile
+  return {
+    ...profile,
+    ...(isInstead(profile, 'icon', chatId) ? {icon: here.icon, avatar: here.avatar} : {}),
+    ...(isInstead(profile, 'color', chatId) ? {color: here.color} : {}),
+    ...(isInstead(profile, 'contact', chatId) ? {contact: here.contact} : {})
+  }
+}
+
+/**
+ * Shows something other than the usual for one part in one chat, and shows that part there; or, given
+ * null, goes back to the usual.
+ */
+export function setInstead(chatId: string, part: Alterable, value: Instead | null): Profile {
+  const profile = loadProfile()
+  const here: Instead = {...profile.instead?.[chatId]}
+  if (part === 'icon') {
+    delete here.icon
+    delete here.avatar
+  } else delete here[part]
+  if (value) Object.assign(here, part === 'icon' ? {icon: value.icon, avatar: value.avatar} : {[part]: value[part]})
+  const instead = {...profile.instead}
+  if (Object.keys(here).length > 0) instead[chatId] = here
+  else delete instead[chatId]
+  saveProfile({...profile, instead})
+  return value && !showsIn(profile, part, chatId) ? setShownIn(chatId, part, true) : loadProfile()
 }
 
 export const showsIn = (profile: Profile, part: Part, chatId: string) => {

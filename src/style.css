@@ -1406,6 +1406,58 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* Our own profile in a chat, part by part (profile-view.tsx). */
+.own-here .part {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.own-here .note {
+  text-align: left;
+}
+
+.own-here .part .note {
+  margin: 0.15rem 0 0.4rem 1.6rem;
+}
+
+.own-here .value {
+  margin-left: 1.6rem;
+}
+
+.own-here .swatches {
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.4rem 1.6rem;
+}
+
+.own-here .swatches .swatch {
+  flex: none;
+  width: 1.65rem;
+  height: 1.65rem;
+}
+
+.own-here .here {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.own-here button.link {
+  padding: 0.2rem 0;
+  border: none;
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.own-here > button.link,
+.own-here .part > button.link {
+  margin-left: 1.6rem;
+}
+
 .sheet.profile fieldset {
   margin-top: 0.5rem;
 }

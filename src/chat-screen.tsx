@@ -15,7 +15,7 @@ import {createInvite, inviteToFragment, type Invite} from './invite'
 import {mailboxes} from './mailbox'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
-import {cardFor, hasPart, loadProfile, PARTS, setShownIn, showsIn, type Part} from './profile'
+import {cardFor, loadProfile, setInstead, setShownIn, type Alterable, type Instead, type Part} from './profile'
 import {Avatar, ProfileCard} from './profile-view'
 import {QrCode} from './qr'
 import {messageKey, QUICK_REACTIONS, tallyReactions} from './reactions'
@@ -245,6 +245,10 @@ export function ChatScreen(props: {
   const [ownProfile, setOwnProfile] = useState(loadProfile)
   const showOwnProfile = async (part: Part, shown: boolean) => {
     setOwnProfile(setShownIn(chat.id, part, shown))
+    await session.current?.shareCard(await cardFor(chat.id, store)).catch(() => setError('Your profile could not be sent.'))
+  }
+  const insteadHere = async (part: Alterable, value: Instead | null) => {
+    setOwnProfile(setInstead(chat.id, part, value))
     await session.current?.shareCard(await cardFor(chat.id, store)).catch(() => setError('Your profile could not be sent.'))
   }
   const peerId = chat.peer ? memberId(chat.peer.signPublic) : null
@@ -954,14 +958,7 @@ export function ChatScreen(props: {
           files={files}
           own={
             profileOf === identity.id
-              ? {
-                  parts: PARTS.filter(part => hasPart(ownProfile, part)).map(part => ({
-                    part,
-                    everywhere: ownProfile.show[part].everywhere,
-                    shown: showsIn(ownProfile, part, chat.id)
-                  })),
-                  onShow: showOwnProfile
-                }
+              ? {profile: ownProfile, onShow: showOwnProfile, onInstead: insteadHere}
               : undefined
           }
           onClose={() => setProfileOf(null)}

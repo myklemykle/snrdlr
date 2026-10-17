@@ -2211,3 +2211,54 @@ test("a person's profile, name and photo included, is the same on all their devi
   await expect(there.getByRole('img', {name: 'Your profile photo'})).toBeVisible({timeout: 30_000})
   expect(bob).toBeTruthy()
 })
+
+test('in one chat, your profile can show something other than your usual', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await anne.evaluate(() =>
+    localStorage.setItem('snrdlr.profile', JSON.stringify({color: '#8a56d6', contact: {kind: 'email', value: 'anne@example.com'}, show: {color: {everywhere: true}}}))
+  )
+  await anne.reload()
+  await anne.getByLabel('Chat name').fill('Elsewhere')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  await bob.goto(await copyInvite(anne))
+  await introduce(bob, 'Bob')
+  await send(anne, 'hello from anne')
+  const hers = bob.locator('.theirs', {hasText: 'hello from anne'})
+  await expect(hers).toHaveAttribute('style', /#8a56d6/, {timeout: 15_000})
+
+  const openOwn = async () => {
+    const mine = anne.locator('.mine', {hasText: 'hello from anne'})
+    await mine.hover()
+    await mine.getByRole('button', {name: 'React or copy'}).click()
+    await anne.getByRole('button', {name: 'Your profile'}).click()
+    return anne.getByRole('dialog', {name: 'Your profile'})
+  }
+  // Teal in this chat only.
+  let own = await openOwn()
+  const colour = own.locator('.part', {hasText: 'Colour'})
+  await colour.getByRole('button', {name: 'Use something else here'}).click()
+  await colour.getByRole('button', {name: 'Teal here'}).click()
+  await expect(colour.getByText('just here')).toBeVisible()
+  await expect(colour.getByText('Your usual is Purple')).toBeVisible()
+  await expect(hers).toHaveAttribute('style', /#1f9aa8/, {timeout: 15_000})
+  // A contact just for this chat, shown here, though the usual one is not.
+  const contact = own.locator('.part', {hasText: 'Contact'})
+  await contact.getByRole('button', {name: 'Use something else here'}).click()
+  await contact.getByLabel('Contact here', {exact: true}).fill('anne.elsewhere@example.com')
+  await contact.getByRole('button', {name: 'Use here'}).click()
+  await expect(contact.getByRole('checkbox')).toBeChecked()
+  await own.getByRole('button', {name: 'Done'}).click()
+  await hers.hover()
+  await hers.getByRole('button', {name: 'React or copy'}).click()
+  await bob.getByRole('button', {name: "Anne's profile"}).click()
+  await expect(bob.getByRole('link', {name: 'anne.elsewhere@example.com'})).toBeVisible({timeout: 15_000})
+  await bob.keyboard.press('Escape')
+
+  // The usual is unchanged; and back to it here.
+  expect(await anne.evaluate(() => JSON.parse(localStorage.getItem('snrdlr.profile')!).color)).toBe('#8a56d6')
+  own = await openOwn()
+  await own.locator('.part', {hasText: 'Colour'}).getByRole('button', {name: 'Back to my usual'}).click()
+  await expect(hers).toHaveAttribute('style', /#8a56d6/, {timeout: 15_000})
+})
