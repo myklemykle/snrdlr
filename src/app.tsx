@@ -21,6 +21,7 @@ import {DeviceCode, OpenedDeviceLink} from './link-view'
 import {JoinByCode} from './scanner'
 import {Avatar, ProfileEditor} from './profile-view'
 import {Sheet} from './sheet'
+import {setShowsLinkPictures, showsLinkPictures} from './links'
 import {saveDraft} from './drafts'
 import {latestCards} from './cards'
 import type {CardContent} from './envelope'
@@ -542,6 +543,31 @@ function AddThisBrowser(props: {store: Store; identity: Identity}) {
   )
 }
 
+/** Whether pictures that messages link to are shown, and what that costs in privacy. */
+function LinkPicturesSetting() {
+  const [on, setOn] = useState(showsLinkPictures)
+  return (
+    <section>
+      <h3>Pictures from links</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={event => {
+            setShowsLinkPictures(event.currentTarget.checked)
+            setOn(event.currentTarget.checked)
+          }}
+        />{' '}
+        Show pictures that messages link to
+      </label>
+      <p class="note">
+        Such a picture is loaded from the site that has it, which then sees this device's internet address and when it looked, as with any web page. Turn
+        this off to see just the link. Pictures sent in snrdlr are not affected.
+      </p>
+    </section>
+  )
+}
+
 /** Choices that apply to the whole app on this device. */
 /** Sounds, and below them the rest of what is set up now and then, which the front page hands in. */
 function Settings(props: {onClose: () => void; children?: ComponentChildren}) {
@@ -776,6 +802,7 @@ function Home(props: {
       {settingsOpen && (
         <Settings onClose={() => setSettingsOpen(false)}>
           <NotificationSettings store={store} identity={identity} />
+          <LinkPicturesSetting />
 
           <section>
             <h3>Join someone</h3>

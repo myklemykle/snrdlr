@@ -2378,3 +2378,30 @@ test('a GIF is sent as a GIF, so an animated one keeps moving', async ({browser}
   const type = await shown.evaluate(async (img: HTMLImageElement) => (await (await fetch(img.src)).blob()).type)
   expect(type).toBe('image/gif')
 })
+
+test('a link to a picture shows the picture below the message, once per message, unless turned off', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  // Stands in for a site that has pictures.
+  const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+  await bob.route('https://pictures.example/**', route => route.fulfill({contentType: 'image/gif', body: pixel}))
+  const invite = await startChat(anne, 'Anne', 'Links')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  await send(anne, 'two: https://pictures.example/cat.gif and https://pictures.example/dog.png')
+  await send(anne, 'not a picture: https://pictures.example/about')
+  const both = bob.locator('.theirs', {hasText: 'two:'})
+  await expect(both.locator('.link-picture img')).toHaveCount(1)
+  await expect(both.locator('.link-picture img')).toHaveAttribute('src', 'https://pictures.example/cat.gif')
+  await expect(both.locator('.link-picture img')).toHaveJSProperty('naturalWidth', 1, {timeout: 10_000})
+  await expect(bob.locator('.theirs', {hasText: 'not a picture'}).locator('.link-picture')).toHaveCount(0)
+
+  // Turned off in Settings: just the links.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  const settings = await openSettings(bob)
+  await settings.getByLabel('Show pictures that messages link to').uncheck()
+  await closeSettings(bob)
+  await chatEntry(bob, 'Links').click()
+  await expect(bob.locator('.theirs', {hasText: 'two:'})).toBeVisible()
+  await expect(bob.locator('.link-picture')).toHaveCount(0)
+})

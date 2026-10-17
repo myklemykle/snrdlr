@@ -76,6 +76,8 @@ Open:
 
 ## Images and audio messages
 
+- **Pictures from links** (built 17 October 2026): the first link in a message that points at a picture is shown below it, loaded by each reader's device from the site that has it, which so learns their address and when they looked; Settings can turn it off. A sender-side preview (as Signal does) would need our own server to fetch pictures, since a page cannot read another site's pictures; worth it only if the privacy cost matters to people.
+
 ### Pictures: built
 
 A picture message is a small signed message holding the file's hash, size, dimensions, a key of its own and a tiny preview. The file is encrypted with that key, kept in its own table, and fetched automatically by hash from any member who has it. Before sending, the device shrinks the picture to 1600 pixels on its longest side and re-encodes it as a JPEG, which removes location and camera details. Several can be sent at once (up to ten), with a caption on the first; they can be chosen, pasted or dropped. Reactions work on them. A stay-connected computer fetches every picture, so it can pass them on.

@@ -39,3 +39,40 @@ export function findLinks(text: string): Piece[] {
   if (at < text.length) pieces.push({text: text.slice(at)})
   return pieces
 }
+
+const PICTURE = /\.(gif|png|jpe?g|webp|avif)$/i
+
+/** The first web address in the text that points straight at a picture, to show it below the words. */
+export function pictureLink(text: string): string | null {
+  for (const piece of findLinks(text)) {
+    if (!piece.href) continue
+    try {
+      if (PICTURE.test(new URL(piece.href).pathname)) return piece.href
+    } catch {
+      // Not an address after all.
+    }
+  }
+  return null
+}
+
+const SETTING = 'snrdlr.linkPictures'
+
+/**
+ * Whether pictures that messages link to are shown. They are loaded from the site that has them, by
+ * this device, which tells that site this device's address and when it looked; so it can be turned off.
+ */
+export function showsLinkPictures(): boolean {
+  try {
+    return localStorage.getItem(SETTING) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export function setShowsLinkPictures(on: boolean): void {
+  try {
+    localStorage.setItem(SETTING, on ? '1' : '0')
+  } catch {
+    // Then as it was, until the page is closed.
+  }
+}

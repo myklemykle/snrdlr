@@ -5,7 +5,7 @@ import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {loadDraft, saveDraft} from './drafts'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
-import {findLinks} from './links'
+import {findLinks, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
@@ -468,6 +468,8 @@ export function ChatScreen(props: {
   const [recorder, setRecorder] = useState<Recorder | null>(null)
   const [recorded, setRecorded] = useState<{recording: Recording; url: string} | null>(null)
   const recordable = useMemo(canRecord, [])
+  // Pictures that messages link to, loaded from where they are (Settings can turn this off).
+  const [linkPictures] = useState(showsLinkPictures)
   const stopVoice = async (which: Recorder) => {
     const recording = await which.stop()
     setRecorder(null)
@@ -924,6 +926,9 @@ export function ChatScreen(props: {
               {image
                 ? text && <span class="caption">{withLinks(text)}</span>
                 : withLinks(text)}
+              {!image && !audio && linkPictures && pictureLink(text) && (
+                <LinkPicture href={pictureLink(text)!} onOpen={event => (menu || Date.now() - menuOpenedAt.current <= 700) && event.preventDefault()} />
+              )}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
                 {edited && 'edited · '}
                 {formatTime(message.sentAt)}
@@ -1143,5 +1148,16 @@ export function ChatScreen(props: {
         )}
       </form>
     </main>
+  )
+}
+
+/** A picture that a message links to, shown below its words; the link itself, if it cannot be shown. */
+function LinkPicture(props: {href: string; onOpen: (event: MouseEvent) => void}) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return (
+    <a class="link-picture" href={props.href} target="_blank" rel="noopener noreferrer" onClick={props.onOpen}>
+      <img src={props.href} alt="" loading="lazy" referrerpolicy="no-referrer" onError={() => setFailed(true)} />
+    </a>
   )
 }

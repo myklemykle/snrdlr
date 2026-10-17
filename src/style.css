@@ -1700,3 +1700,16 @@ button:disabled {
   display: flex;
   padding: 0.55rem 0.7rem;
 }
+
+/* A picture a message links to, below its words (chat-screen.tsx). */
+.log .link-picture {
+  display: block;
+  margin-top: 0.4rem;
+}
+
+.log .link-picture img {
+  display: block;
+  max-width: 100%;
+  max-height: 16rem;
+  border-radius: 0.6rem;
+}

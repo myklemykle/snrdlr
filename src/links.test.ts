@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {findLinks} from './links'
+import {findLinks, pictureLink} from './links'
 
 const links = (text: string) => findLinks(text).filter(piece => piece.href).map(piece => [piece.text, piece.href])
 
@@ -24,5 +24,12 @@ describe('links in messages', () => {
     expect(links('javascript:alert(1) data:text/html,hi file:///etc/passwd ftp://x.org')).toEqual([])
     expect(links('http://localhost:5173')).toEqual([])
     expect(links('https:// broken')).toEqual([])
+  })
+
+  it('finds the first link that points straight at a picture', () => {
+    expect(pictureLink('look https://example.com/page and https://media.example.com/cat.GIF and https://x.org/b.png')).toBe('https://media.example.com/cat.GIF')
+    expect(pictureLink('https://example.com/pic.jpg?size=large')).toBe('https://example.com/pic.jpg?size=large')
+    expect(pictureLink('https://example.com/gallery')).toBeNull()
+    expect(pictureLink('no links')).toBeNull()
   })
 })
