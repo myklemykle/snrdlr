@@ -3,7 +3,9 @@
 // wake people's devices the same way.
 //
 //   node scripts/claude-chat.mjs join '<invite link>'       joins a chat, as "Claude" the first time
-//   node scripts/claude-chat.mjs say [--chat <name>] <text>  writes in a chat (the only one, or by name)
+//   node scripts/claude-chat.mjs say [--chat <name>] [--picture <file>] <text>
+//                                                           writes in a chat (the only one, or by name),
+//                                                           with a picture if given (the text is its caption)
 //   node scripts/claude-chat.mjs listen [--chat <name>]      stays in a direct chat: prints each new message
 //                                                           from the other person as a line of JSON, and
 //                                                           sends what `say` hands it meanwhile
@@ -18,7 +20,7 @@
 // The profile is kept in .claude-chat/ (not in git), or SNRDLR_PROFILE. SNRDLR_URL picks another copy of the site.
 import {chromium} from '@playwright/test'
 import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs'
-import {dirname, join} from 'node:path'
+import {dirname, join, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 
 const SITE = process.env.SNRDLR_URL ?? 'https://alpha.snrdlr.net/'
@@ -116,10 +118,14 @@ function parts(text) {
   return out
 }
 
-/** Writes in the chat open on the page, and waits until the relay holds it. */
-async function send(page, name, text) {
-  for (const part of parts(text)) {
+/** Writes in the chat open on the page, and waits until the relay holds it. A picture goes with the first part. */
+async function send(page, name, text, picture) {
+  for (const [index, part] of (parts(text).length ? parts(text) : ['']).entries()) {
     const before = await storedSeq(page, name)
+    if (picture && index === 0) {
+      await page.getByLabel('Pictures to add').setInputFiles(picture)
+      await page.locator('.attached').waitFor({timeout: 30_000})
+    }
     await page.getByLabel('Message').fill(part)
     await page.getByRole('button', {name: 'Send'}).click()
     // Done once the relay holds it, so that whoever is away gets it and is woken for it.
@@ -163,13 +169,14 @@ function listener() {
   }
 }
 
-async function say(text, wanted) {
-  if (!text.trim()) throw new Error('Nothing to say.')
+async function say(text, wanted, picture) {
+  if (!text.trim() && !picture) throw new Error('Nothing to say.')
+  if (picture && !existsSync(picture)) throw new Error(`No such picture: ${picture}`)
   if (listener()) {
     // Handed to the listener, which has the profile open.
     mkdirSync(OUTBOX, {recursive: true})
     const id = `${Date.now()}-${process.pid}`
-    writeFileSync(join(OUTBOX, `${id}.tmp`), JSON.stringify({text, chat: wanted}))
+    writeFileSync(join(OUTBOX, `${id}.tmp`), JSON.stringify({text, chat: wanted, picture}))
     renameSync(join(OUTBOX, `${id}.tmp`), join(OUTBOX, `${id}.json`))
     const deadline = Date.now() + 5 * 60_000
     while (Date.now() < deadline) {
@@ -189,7 +196,7 @@ async function say(text, wanted) {
   try {
     const name = pick(await chatNames(page), wanted)
     await openChat(page, name)
-    await send(page, name, text)
+    await send(page, name, text, picture)
     console.log(`Said it in "${name}".`)
   } finally {
     await context.close()
@@ -297,9 +304,9 @@ async function listen(wanted) {
         const id = file.slice(0, -'.json'.length)
         let reply
         try {
-          const {text, chat: other} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          const {text, chat: other, picture} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
           if (other && other !== name) throw new Error(`Listening in "${name}", not "${other}".`)
-          await send(page, name, text)
+          await send(page, name, text, picture)
           reply = [`${id}.sent`, `Said it in "${name}".`]
         } catch (error) {
           reply = [`${id}.failed`, error.message]
@@ -323,7 +330,8 @@ try {
   if (command === 'join' && rest[0]) await joinChat(rest[0])
   else if (command === 'say') {
     const chat = option('--chat')
-    await say(rest.join(' '), chat)
+    const picture = option('--picture')
+    await say(rest.join(' '), chat, picture && resolve(picture))
   } else if (command === 'listen') await listen(option('--chat'))
   else if (command === 'chats') {
     const {context, page} = await open()
