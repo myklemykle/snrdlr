@@ -2338,3 +2338,28 @@ test('a microphone that is turned off says where to turn it on', async ({browser
   await anne.getByRole('button', {name: 'Dismiss'}).click()
   await expect(anne.getByText('The microphone is turned off for snrdlr.')).toHaveCount(0)
 })
+
+test("recording tells an iPhone it is recording, which an ambient page cannot do, and goes back after", async ({browser}) => {
+  const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write', 'microphone']})
+  await context.addInitScript(() => {
+    localStorage.setItem('snrdlr.invited', '1')
+    // As Safari on an iPhone: an audio session, and no microphone while it is ambient.
+    const session = {type: 'auto'}
+    Object.defineProperty(navigator, 'audioSession', {value: session})
+    const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+    navigator.mediaDevices.getUserMedia = constraints =>
+      session.type === 'ambient' ? Promise.reject(Object.assign(new Error('Failed to start the audio device'), {name: 'InvalidStateError'})) : real(constraints)
+  })
+  const anne = await context.newPage()
+  await startChat(anne, 'Anne', 'Session')
+  // A tap has set the page up for message sounds.
+  await anne.getByLabel('Message').click()
+  expect(await anne.evaluate(() => (navigator as unknown as {audioSession: {type: string}}).audioSession.type)).toBe('ambient')
+  await anne.getByRole('button', {name: 'Record your voice'}).click()
+  await expect(anne.getByRole('status', {name: 'Recording your voice'})).toBeVisible()
+  expect(await anne.evaluate(() => (navigator as unknown as {audioSession: {type: string}}).audioSession.type)).toBe('play-and-record')
+  await anne.waitForTimeout(1200)
+  await anne.getByRole('button', {name: 'Stop', exact: true}).click()
+  await expect(anne.locator('.review')).toBeVisible()
+  expect(await anne.evaluate(() => (navigator as unknown as {audioSession: {type: string}}).audioSession.type)).toBe('ambient')
+})

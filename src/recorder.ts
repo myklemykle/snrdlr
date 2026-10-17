@@ -2,6 +2,7 @@
 // can record from the list below: AAC in an MP4 file where it can (Safari, and Chrome lately), so that
 // iPhones can play everything that is sent; Opus in WebM or Ogg only where it cannot (Firefox).
 import {AUDIO_TYPES, MAX_AUDIO_MS, type AudioType} from './envelope'
+import {audioFor} from './sound'
 
 const WANTED = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
 
@@ -52,9 +53,12 @@ export type Recorder = {
  */
 export async function startRecording(onLimit: () => void): Promise<Recorder> {
   let stream: MediaStream
+  // Synchronously, before anything is awaited, so it is still part of the tap that asked to record.
+  audioFor('recording')
   try {
     stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}})
   } catch (error) {
+    audioFor('sounds')
     throw await described(error, 'the microphone')
   }
   // A browser that says it can record a kind may still refuse some settings, or refuse to start with
@@ -82,11 +86,15 @@ export async function startRecording(onLimit: () => void): Promise<Recorder> {
   }
   if (!recorder) {
     stream.getTracks().forEach(track => track.stop())
+    audioFor('sounds')
     throw await described(failure, 'the recorder')
   }
   const chosen = recorder.mimeType || kinds[0] || 'audio/mp4'
   const startedAt = Date.now()
-  const release = () => stream.getTracks().forEach(track => track.stop())
+  const release = () => {
+    stream.getTracks().forEach(track => track.stop())
+    audioFor('sounds')
+  }
   const limit = setTimeout(onLimit, MAX_AUDIO_MS - 250)
   const stopped = new Promise<void>(resolve => (recorder.onstop = () => resolve()))
   return {

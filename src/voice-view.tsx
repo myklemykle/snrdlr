@@ -3,6 +3,7 @@
 import {useEffect, useRef, useState} from 'preact/hooks'
 import type {AudioContent} from './envelope'
 import {openFile} from './files'
+import {audioFor} from './sound'
 import type {Store} from './store'
 
 /** Minutes and seconds, as a voice message's length is usually written. */
@@ -27,6 +28,8 @@ export function VoicePlayer(props: {url: string | null; duration: number; waitin
   const toggle = () => {
     const element = audio.current
     if (!element) return
+    // Told before playing, within the tap, so the first moment is not lost to the silent switch.
+    if (element.paused) audioFor('listening')
     if (element.paused) void element.play().catch(() => setPlaying(false))
     else element.pause()
   }
@@ -38,9 +41,16 @@ export function VoicePlayer(props: {url: string | null; duration: number; waitin
           ref={audio}
           src={url}
           preload="metadata"
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPlay={() => {
+            audioFor('listening')
+            setPlaying(true)
+          }}
+          onPause={() => {
+            audioFor('sounds')
+            setPlaying(false)
+          }}
           onEnded={() => {
+            audioFor('sounds')
             setPlaying(false)
             setAt(0)
           }}

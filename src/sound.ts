@@ -102,6 +102,23 @@ if (typeof document !== 'undefined') {
   })
 }
 
+/**
+ * What an iPhone is told the page's audio is for (Safari's navigator.audioSession). Message sounds are
+ * "ambient": quiet with the silent switch on, and no interruption to music. But an ambient page cannot
+ * record (the microphone fails with InvalidStateError), and a voice message should be heard even with
+ * the silent switch on, as in any other app; so recording and playing one change it for as long as they
+ * last. Elsewhere there is nothing to tell.
+ */
+export function audioFor(use: 'sounds' | 'recording' | 'listening'): void {
+  const session = (navigator as Navigator & {audioSession?: {type: string}}).audioSession
+  if (!session) return
+  try {
+    session.type = use === 'recording' ? 'play-and-record' : use === 'listening' ? 'playback' : 'ambient'
+  } catch {
+    // An older Safari: as it was.
+  }
+}
+
 /** Call from a tap or click. Until one has happened, the browser will not let anything play. */
 export function unlockSound(): void {
   const wanted = urls()
@@ -116,8 +133,7 @@ export function unlockSound(): void {
     stale = false
     if (!context) {
       // Tells an iPhone these are interface sounds: quiet when the silent switch is on, and no interruption to music.
-      const session = (navigator as Navigator & {audioSession?: {type: string}}).audioSession
-      if (session) session.type = 'ambient'
+      audioFor('sounds')
       context = new AudioContext()
       const made = context
       // If the phone stops it later, start over rather than trust it to resume.

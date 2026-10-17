@@ -98,7 +98,7 @@ Recorded in the composer (the Send button is a microphone while the box is empty
 
 Still open:
 
-- Safari asks for the microphone through the system before the first recording; smooth that out (Mykle, 17 October 2026).
+- Safari on an iPhone refused the microphone with InvalidStateError (17 October 2026): the page had told iOS its audio was "ambient" (for message sounds that follow the silent switch), and an ambient page cannot record. Recording now switches to "play-and-record", and playing a voice message to "playback" (heard with the silent switch on), then back.
 - A waveform picture; hold-to-talk as a shortcut; playing one message after another.
 - A recording in a format this device cannot play says nothing useful yet.
 
