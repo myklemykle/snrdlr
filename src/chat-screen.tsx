@@ -11,7 +11,7 @@ import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type 
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {MAX_FILE_BYTES, sealFile} from './files'
 import {prepareImage, type PreparedImage} from './image'
-import {canRecord, startRecording, type Recorder, type Recording} from './recorder'
+import {canRecord, microphoneProblem, startRecording, type Recorder, type Recording} from './recorder'
 import {RecordingBar, VoiceMessage, VoicePlayer} from './voice-view'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
@@ -478,8 +478,8 @@ export function ChatScreen(props: {
     try {
       const started: Recorder = await startRecording(() => void stopVoice(started))
       setRecorder(started)
-    } catch {
-      setError("snrdlr couldn't use the microphone. Allow it for this site in the browser's settings, then try again.")
+    } catch (error) {
+      setError(microphoneProblem(error))
     }
   }
   const discardVoice = () => {
@@ -781,7 +781,14 @@ export function ChatScreen(props: {
         )}
       </header>
 
-      {error && <p class="error">{error}</p>}
+      {error && (
+        <p class="error dismissable">
+          <span>{error}</span>
+          <button type="button" class="close" aria-label="Dismiss" onClick={() => setError(null)}>
+            ✕
+          </button>
+        </p>
+      )}
 
       {inviteNote && <p class="note">{inviteNote}</p>}
 

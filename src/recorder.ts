@@ -10,6 +10,21 @@ export const canRecord = () => typeof MediaRecorder !== 'undefined' && !!navigat
 
 export type Recording = {blob: Blob; mime: AudioType; duration: number}
 
+/** What to tell the person when recording could not start, from what the browser said. */
+export function microphoneProblem(error: unknown): string {
+  const name = (error as {name?: unknown} | null)?.name
+  const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent)
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    // Safari asks once; after "Don't Allow", or with the microphone set to Deny, it refuses without asking.
+    return iphone
+      ? 'The microphone is turned off for snrdlr. In Safari, tap the aA (or page) button in the address bar, then Website Settings, and set Microphone to Ask or Allow. Then tap the microphone again.'
+      : "The microphone is turned off for snrdlr. Allow it for this site in the browser's settings (often the icon at the left of the address bar), then try again."
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return "This device doesn't seem to have a microphone snrdlr can use."
+  if (name === 'NotReadableError' || name === 'AbortError') return 'Another app is using the microphone. Close it, or end the call, and try again.'
+  return `Recording couldn't start here (${typeof name === 'string' ? name : 'unknown problem'}). Try again, or reload the page.`
+}
+
 export type Recorder = {
   /** Stops and gives the recording. */
   stop: () => Promise<Recording>
@@ -25,7 +40,20 @@ export type Recorder = {
 export async function startRecording(onLimit: () => void): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}})
   const chosen = WANTED.find(type => MediaRecorder.isTypeSupported(type))!
-  const recorder = new MediaRecorder(stream, {mimeType: chosen, audioBitsPerSecond: 32_000})
+  // A browser that says it can record a kind may still refuse some settings: ask for less, then nothing.
+  let recorder: MediaRecorder | undefined
+  for (const options of [{mimeType: chosen, audioBitsPerSecond: 32_000}, {mimeType: chosen}, {}]) {
+    try {
+      recorder = new MediaRecorder(stream, options)
+      break
+    } catch {
+      // The next, plainer one.
+    }
+  }
+  if (!recorder) {
+    stream.getTracks().forEach(track => track.stop())
+    throw Object.assign(new Error('could not record'), {name: 'NotSupportedError'})
+  }
   const chunks: Blob[] = []
   recorder.ondataavailable = event => event.data.size > 0 && chunks.push(event.data)
   const startedAt = Date.now()

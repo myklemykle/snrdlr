@@ -1013,7 +1013,7 @@ test('several pictures at once, by choosing, pasting and dropping; and a file th
 
   // Something that only claims to be a picture is refused, and one can be taken back out.
   await anne.getByLabel('Pictures to add').setInputFiles(photoFile(Buffer.from('not a picture at all'), 'notes.jpg'))
-  await expect(anne.locator('.error')).toHaveText('"notes.jpg" isn\'t a picture this browser can open.')
+  await expect(anne.locator('.error')).toContainText('"notes.jpg" isn\'t a picture this browser can open.')
   await anne.getByRole('button', {name: 'Remove picture 4'}).click()
   await expect(waiting).toHaveCount(3)
 
@@ -2323,4 +2323,18 @@ test('a voice message is recorded, listened to, sent, and played by the other pe
   // The chat list catches up when the app is opened again.
   await bob.reload()
   await expect(chatEntry(bob, 'Voices').getByLabel('1 unread')).toBeVisible({timeout: 20_000})
+})
+
+test('a microphone that is turned off says where to turn it on', async ({browser}) => {
+  const anne = await newPerson(browser)
+  await anne.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(Object.assign(new Error('denied'), {name: 'NotAllowedError'}))
+  })
+  await startChat(anne, 'Anne', 'Quiet')
+  await anne.getByRole('button', {name: 'Record your voice'}).click()
+  await expect(anne.getByText('The microphone is turned off for snrdlr.')).toBeVisible()
+  await expect(anne.getByRole('status', {name: 'Recording your voice'})).toHaveCount(0)
+  // Read, and put away.
+  await anne.getByRole('button', {name: 'Dismiss'}).click()
+  await expect(anne.getByText('The microphone is turned off for snrdlr.')).toHaveCount(0)
 })
