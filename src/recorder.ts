@@ -10,9 +10,21 @@ export const canRecord = () => typeof MediaRecorder !== 'undefined' && !!navigat
 
 export type Recording = {blob: Blob; mime: AudioType; duration: number}
 
+/** A failure to start, with which part failed and whether the microphone is allowed, for the message. */
+async function described(error: unknown, stage: string) {
+  let permission: string | undefined
+  try {
+    permission = (await navigator.permissions?.query({name: 'microphone' as PermissionName}))?.state
+  } catch {
+    // Not every browser says.
+  }
+  const name = (error as {name?: unknown} | null)?.name
+  return Object.assign(new Error(`${stage}: ${String(name)}`), {name: typeof name === 'string' ? name : 'Error', stage, permission})
+}
+
 /** What to tell the person when recording could not start, from what the browser said. */
 export function microphoneProblem(error: unknown): string {
-  const name = (error as {name?: unknown} | null)?.name
+  const {name, stage, permission} = (error ?? {}) as {name?: unknown; stage?: string; permission?: string}
   const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent)
   if (name === 'NotAllowedError' || name === 'SecurityError') {
     // Safari asks once; after "Don't Allow", or with the microphone set to Deny, it refuses without asking.
@@ -22,7 +34,8 @@ export function microphoneProblem(error: unknown): string {
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return "This device doesn't seem to have a microphone snrdlr can use."
   if (name === 'NotReadableError' || name === 'AbortError') return 'Another app is using the microphone. Close it, or end the call, and try again.'
-  return `Recording couldn't start here (${typeof name === 'string' ? name : 'unknown problem'}). Try again, or reload the page.`
+  const detail = [typeof name === 'string' ? name : 'unknown problem', stage && `from ${stage}`, permission && `microphone ${permission}`].filter(Boolean).join(', ')
+  return `Recording couldn't start here (${detail}). Try again, or reload the page.`
 }
 
 export type Recorder = {
@@ -38,27 +51,41 @@ export type Recorder = {
  * is called if the recording reaches the longest a voice message may be, which stops it.
  */
 export async function startRecording(onLimit: () => void): Promise<Recorder> {
-  const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}})
-  const chosen = WANTED.find(type => MediaRecorder.isTypeSupported(type))!
-  // A browser that says it can record a kind may still refuse some settings: ask for less, then nothing.
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}})
+  } catch (error) {
+    throw await described(error, 'the microphone')
+  }
+  // A browser that says it can record a kind may still refuse some settings, or refuse to start with
+  // them (Safari on an iPhone has): each kind it can record, with fewer settings, then none at all.
+  const kinds = WANTED.filter(type => MediaRecorder.isTypeSupported(type))
+  const tries: MediaRecorderOptions[] = [...kinds.flatMap(mimeType => [{mimeType, audioBitsPerSecond: 32_000}, {mimeType}]), {}]
   let recorder: MediaRecorder | undefined
-  for (const options of [{mimeType: chosen, audioBitsPerSecond: 32_000}, {mimeType: chosen}, {}]) {
-    try {
-      recorder = new MediaRecorder(stream, options)
-      break
-    } catch {
-      // The next, plainer one.
+  let failure: unknown
+  const chunks: Blob[] = []
+  for (const options of tries) {
+    for (const slice of [1000, undefined]) {
+      try {
+        const trying = new MediaRecorder(stream, options)
+        trying.ondataavailable = event => event.data.size > 0 && chunks.push(event.data)
+        // Some browsers only hand over the recording in pieces as it goes; a second at a time is plenty.
+        if (slice) trying.start(slice)
+        else trying.start()
+        recorder = trying
+        break
+      } catch (error) {
+        failure = error
+      }
     }
+    if (recorder) break
   }
   if (!recorder) {
     stream.getTracks().forEach(track => track.stop())
-    throw Object.assign(new Error('could not record'), {name: 'NotSupportedError'})
+    throw await described(failure, 'the recorder')
   }
-  const chunks: Blob[] = []
-  recorder.ondataavailable = event => event.data.size > 0 && chunks.push(event.data)
+  const chosen = recorder.mimeType || kinds[0] || 'audio/mp4'
   const startedAt = Date.now()
-  // Some browsers only hand over the recording in pieces as it goes; a second at a time is plenty.
-  recorder.start(1000)
   const release = () => stream.getTracks().forEach(track => track.stop())
   const limit = setTimeout(onLimit, MAX_AUDIO_MS - 250)
   const stopped = new Promise<void>(resolve => (recorder.onstop = () => resolve()))
