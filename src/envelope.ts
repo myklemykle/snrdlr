@@ -91,6 +91,8 @@ export type ImageContent = {
   height: number
   /** A very small JPEG of the picture; may be empty. */
   preview: Uint8Array
+  /** Set for an animated GIF, sent as it was; otherwise the picture is a JPEG. */
+  mime?: typeof GIF_MIME
   caption?: string
   replyTo?: MessageRef
 }
@@ -149,6 +151,7 @@ export const MAX_CONTACT_LENGTH = 100
 const CARD_CONTACTS = ['email', 'phone', 'instagram', 'other']
 
 export const IMAGE_MIME = 'image/jpeg'
+export const GIF_MIME = 'image/gif'
 export const MAX_PREVIEW_BYTES = 2048
 const MAX_IMAGE_SIDE = 16384
 
@@ -246,7 +249,7 @@ function encodeContent(content: Content): [string, unknown] {
       return [
         'image',
         {
-          m: IMAGE_MIME,
+          m: content.mime ?? IMAGE_MIME,
           ...encodePicture(content),
           ...(content.caption ? {c: content.caption} : {}),
           ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
@@ -415,8 +418,8 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'image') {
     const {m, h, k, z, w, t, p, c, r} = (body ?? {}) as Record<string, unknown>
     // A kind of picture a newer version sends: keep the message for when this device can show it.
-    if (typeof m === 'string' && m !== IMAGE_MIME && m.length <= 64) return {type: 'unknown', kind: 'image'}
-    if (m !== IMAGE_MIME) throw new Error('bad image body')
+    if (typeof m === 'string' && m !== IMAGE_MIME && m !== GIF_MIME && m.length <= 64) return {type: 'unknown', kind: 'image'}
+    if (m !== IMAGE_MIME && m !== GIF_MIME) throw new Error('bad image body')
     let picture: PictureRef
     try {
       picture = decodePicture({h, k, z, w, t, p})
@@ -427,6 +430,7 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {
       type,
       ...picture,
+      ...(m === GIF_MIME ? {mime: GIF_MIME} : {}),
       ...(c ? {caption: c as string} : {}),
       ...(r !== undefined ? {replyTo: decodeRef(r)} : {})
     }

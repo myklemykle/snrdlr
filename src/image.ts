@@ -1,6 +1,8 @@
 // Gets a chosen picture ready to send: shrinks it, re-encodes it, and seals it. Redrawing the picture
-// is also what removes the location and camera details that phones embed in photos.
-import {IMAGE_MIME, MAX_AVATAR_BYTES, MAX_PREVIEW_BYTES, type ImageContent, type PictureRef} from './envelope'
+// is also what removes the location and camera details that phones embed in photos. An animated GIF
+// would stop moving if redrawn, so one small enough is sent as it is, with everything but its pictures
+// and its looping taken out.
+import {GIF_MIME, IMAGE_MIME, MAX_AVATAR_BYTES, MAX_PREVIEW_BYTES, type ImageContent, type PictureRef} from './envelope'
 import {MAX_FILE_BYTES, openFile, sealFile} from './files'
 
 /** The longest side of a sent picture, in pixels. Sharp on any screen; not print quality. */
@@ -44,13 +46,37 @@ export async function prepareImage(chosen: Blob, caption?: string, longestSide =
     await source.decode()
     if (!source.naturalWidth || !source.naturalHeight) throw new Error('empty picture')
 
+    const preview = new Uint8Array(await (await encode(draw(source, PREVIEW_SIDE), 0.5)).arrayBuffer())
+    const previewOrNone = preview.length <= MAX_PREVIEW_BYTES ? preview : new Uint8Array(0)
+    if (chosen.type === GIF_MIME && longestSide === MAX_SIDE) {
+      const gif = onlyPictures(new Uint8Array(await chosen.arrayBuffer()))
+      const sealed = gif && (await sealFile(gif))
+      if (gif && sealed && sealed.data.length <= MAX_FILE_BYTES) {
+        return {
+          image: {
+            type: 'image',
+            mime: GIF_MIME,
+            hash: sealed.hash,
+            key: sealed.key,
+            size: sealed.data.length,
+            width: source.naturalWidth,
+            height: source.naturalHeight,
+            preview: previewOrNone,
+            ...(caption ? {caption} : {})
+          },
+          file: sealed.data,
+          shown: new Blob([new Uint8Array(gif)], {type: GIF_MIME})
+        }
+      }
+      // Too big to send as it is, or not a GIF this can read: it goes as a still picture.
+    }
+
     const canvas = draw(source, longestSide)
     let shown = await encode(canvas, QUALITIES[0])
     for (const quality of QUALITIES.slice(1)) {
       if (shown.size <= TARGET_BYTES) break
       shown = await encode(canvas, quality)
     }
-    const preview = new Uint8Array(await (await encode(draw(source, PREVIEW_SIDE), 0.5)).arrayBuffer())
     const sealed = await sealFile(new Uint8Array(await shown.arrayBuffer()))
     if (sealed.data.length > MAX_FILE_BYTES) throw new Error('picture too large')
     return {
@@ -61,7 +87,7 @@ export async function prepareImage(chosen: Blob, caption?: string, longestSide =
         size: sealed.data.length,
         width: canvas.width,
         height: canvas.height,
-        preview: preview.length <= MAX_PREVIEW_BYTES ? preview : new Uint8Array(0),
+        preview: previewOrNone,
         ...(caption ? {caption} : {})
       },
       file: sealed.data,
@@ -100,6 +126,72 @@ export async function prepareAvatar(chosen: Blob): Promise<Uint8Array> {
 }
 
 /** Opens a stored picture for display. */
-export async function openImage(file: Uint8Array, image: Pick<PictureRef, 'key'>): Promise<Blob> {
-  return new Blob([new Uint8Array(await openFile(file, image.key))], {type: IMAGE_MIME})
+export async function openImage(file: Uint8Array, image: Pick<PictureRef, 'key'> & {mime?: string}): Promise<Blob> {
+  return new Blob([new Uint8Array(await openFile(file, image.key))], {type: image.mime ?? IMAGE_MIME})
+}
+
+/**
+ * A GIF with only its pictures and how they loop: comments and the blocks that editing programs add
+ * (which can carry details of who made it, and where) are left out. Null if it is not a GIF this can
+ * follow, in which case it is sent as a still picture instead.
+ */
+export function onlyPictures(gif: Uint8Array): Uint8Array<ArrayBuffer> | null {
+  const out: number[] = []
+  let at = 0
+  const take = (count: number) => {
+    if (at + count > gif.length) throw new Error('short')
+    for (let i = 0; i < count; i++) out.push(gif[at + i])
+    at += count
+  }
+  const skipBlocks = () => {
+    for (;;) {
+      const size = gif[at++]
+      if (size === undefined) throw new Error('short')
+      if (size === 0) return
+      at += size
+    }
+  }
+  const takeBlocks = () => {
+    for (;;) {
+      const size = gif[at]
+      if (size === undefined) throw new Error('short')
+      take(1 + size)
+      if (size === 0) return
+    }
+  }
+  try {
+    const header = String.fromCharCode(...gif.subarray(0, 6))
+    if (header !== 'GIF87a' && header !== 'GIF89a') return null
+    take(6 + 7)
+    const flags = gif[10]
+    if (flags & 0x80) take(3 * 2 ** ((flags & 7) + 1))
+    for (;;) {
+      const kind = gif[at]
+      if (kind === 0x3b) {
+        take(1)
+        return new Uint8Array(out)
+      }
+      if (kind === 0x2c) {
+        // A picture: its place, its own colours if any, then its compressed pixels.
+        take(10)
+        const own = gif[at - 1]
+        if (own & 0x80) take(3 * 2 ** ((own & 7) + 1))
+        take(1)
+        takeBlocks()
+      } else if (kind === 0x21) {
+        const label = gif[at + 1]
+        const app = String.fromCharCode(...gif.subarray(at + 3, at + 14))
+        // Timing between pictures (0xf9), and the looping that browsers read from a NETSCAPE block, stay.
+        if (label === 0xf9 || (label === 0xff && (app === 'NETSCAPE2.0' || app === 'ANIMEXTS1.0'))) {
+          take(2)
+          takeBlocks()
+        } else {
+          at += 2
+          skipBlocks()
+        }
+      } else return null
+    }
+  } catch {
+    return null
+  }
 }

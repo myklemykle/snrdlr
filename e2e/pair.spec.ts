@@ -2363,3 +2363,18 @@ test("recording tells an iPhone it is recording, which an ambient page cannot do
   await expect(anne.locator('.review')).toBeVisible()
   expect(await anne.evaluate(() => (navigator as unknown as {audioSession: {type: string}}).audioSession.type)).toBe('ambient')
 })
+
+test('a GIF is sent as a GIF, so an animated one keeps moving', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Gifs')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+  const pixel = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')
+  await anne.getByLabel('Pictures to add').setInputFiles({name: 'wave.gif', mimeType: 'image/gif', buffer: pixel})
+  await anne.getByRole('button', {name: 'Send'}).click()
+  const shown = bob.locator('.theirs.image img.full')
+  await expect(shown).toBeVisible({timeout: 15_000})
+  const type = await shown.evaluate(async (img: HTMLImageElement) => (await (await fetch(img.src)).blob()).type)
+  expect(type).toBe('image/gif')
+})

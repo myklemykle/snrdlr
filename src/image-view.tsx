@@ -110,10 +110,12 @@ export function ImageViewer(props: {url: string; onClose: () => void}) {
   // Phones offer "Save Image" in their share sheet; elsewhere the browser downloads it.
   const [sharing] = useState(canShareImages)
   const save = async () => {
-    const name = `snrdlr-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`
+    const blob = await (await fetch(url)).blob()
+    const gif = blob.type === 'image/gif'
+    const name = `snrdlr-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${gif ? 'gif' : 'jpg'}`
     try {
       if (sharing) {
-        await navigator.share({files: [new File([await (await fetch(url)).blob()], name, {type: IMAGE_MIME})]})
+        await navigator.share({files: [new File([blob], name, {type: gif ? 'image/gif' : IMAGE_MIME})]})
         return
       }
     } catch (error) {
