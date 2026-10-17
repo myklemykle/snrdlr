@@ -20,6 +20,7 @@ import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
 import {DeviceCode, OpenedDeviceLink} from './link-view'
 import {JoinByCode} from './scanner'
 import {Avatar, ProfileEditor} from './profile-view'
+import {Sheet} from './sheet'
 import {saveDraft} from './drafts'
 import {latestCards} from './cards'
 import type {CardContent} from './envelope'
@@ -546,17 +547,7 @@ function Settings(props: {onClose: () => void; children?: ComponentChildren}) {
     return () => removeEventListener('keydown', onKey)
   }, [])
   return (
-    <div class="sheet-backdrop" onClick={onClose}>
-      <section class="sheet" role="dialog" aria-label="Settings" onClick={event => event.stopPropagation()}>
-        {/* Stays in view as the rest scrolls, so closing never means scrolling to the end. */}
-        <header class="sheet-head">
-          <h2>Settings</h2>
-          <button type="button" class="close" aria-label="Close" onClick={onClose}>
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-        </header>
+    <Sheet label="Settings" title="Settings" onClose={onClose}>
         <fieldset>
           <legend>Sounds</legend>
           {SOUND_CHOICES.map(choice => (
@@ -605,8 +596,7 @@ function Settings(props: {onClose: () => void; children?: ComponentChildren}) {
         <button type="button" onClick={onClose}>
           Done
         </button>
-      </section>
-    </div>
+    </Sheet>
   )
 }
 

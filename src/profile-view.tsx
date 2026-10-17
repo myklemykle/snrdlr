@@ -7,6 +7,7 @@ import {IMAGE_MIME, MAX_CONTACT_LENGTH, type CardContent, type PictureRef} from 
 import {cleanName, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {openImage, prepareAvatar, prepareImage} from './image'
 import {useImageUrl} from './image-view'
+import {Sheet} from './sheet'
 import {loadProfile, PART_LABELS, PROFILE_FILES, profileCard, saveProfile, type Part, type Profile} from './profile'
 import type {Store} from './store'
 
@@ -90,8 +91,7 @@ export function ProfileCard(props: {
   const {name, id, card, store, chatId, files, own, onClose} = props
   useEscape(onClose)
   return (
-    <div class="sheet-backdrop" onClick={onClose}>
-      <section class="sheet profile" role="dialog" aria-label={own ? 'Your profile' : `${name}'s profile`} onClick={event => event.stopPropagation()}>
+    <Sheet class="profile" label={own ? 'Your profile' : `${name}'s profile`} title={own ? 'Your profile in this chat' : 'Profile'} onClose={onClose}>
         {card?.photo && <Photo store={store} chatId={chatId} photo={card.photo} held={files.has(card.photo.hash)} />}
         <div class="who">
           <Avatar card={card} name={name} id={id} large />
@@ -108,22 +108,21 @@ export function ProfileCard(props: {
               <legend>Show in this chat</legend>
               {own.parts.map(({part, everywhere, shown}) => (
                 <label key={part}>
-                  <input type="checkbox" checked={shown} disabled={everywhere} onChange={event => own.onShow(part, event.currentTarget.checked)} />{' '}
+                  <input type="checkbox" checked={shown} onChange={event => own.onShow(part, event.currentTarget.checked)} />{' '}
                   {PART_LABELS[part]}
-                  {everywhere && <span class="everywhere"> · shown in every chat</span>}
+                  {everywhere && <span class="everywhere"> · {shown ? 'shown in every chat' : 'shown in every chat but this one'}</span>}
                 </label>
               ))}
               <p class="note">
                 {own.parts.some(({shown}) => shown) ? 'Above is what people in this chat see.' : 'People in this chat see only your name.'} Unticking
-                stops showing something, but anyone who has already seen it may have kept it. What is shown in every chat is set from the front page.
+                stops showing something here, but anyone who has already seen it may have kept it. This changes only this chat; what is shown in every chat is set from the front page.
               </p>
             </fieldset>
           ))}
         <button type="button" onClick={onClose}>
           Done
         </button>
-      </section>
-    </div>
+    </Sheet>
   )
 }
 
@@ -219,17 +218,16 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
   const card = profileCard(profile)
   return (
     <>
-    <div class="sheet-backdrop" onClick={() => (picking ? setPicking(false) : onClose())}>
-      <section class="sheet profile-editor" role="dialog" aria-label="Your profile" onClick={event => event.stopPropagation()}>
+    <Sheet class="profile-editor" label="Your profile" title="Your profile" onClose={onClose} onBackdrop={() => (picking ? setPicking(false) : onClose())}>
        <form onSubmit={save}>
-        <h2>Your profile</h2>
         <label>
           Name
           <input value={name} onInput={event => setName(event.currentTarget.value)} maxLength={MAX_NAME_LENGTH} required autocomplete="off" />
         </label>
         <p class="note">
           Everything below is optional, and each part is shown only where you choose: in every chat, or just in the chats where you turn it on. To do
-          that, open your own profile inside the chat, from the menu on one of your messages. Your name is always shown.
+          that, or to hide in one chat what is shown in every chat, open your own profile inside the chat, from the menu on one of your messages. Your
+          name is always shown.
         </p>
 
         <fieldset>
@@ -359,8 +357,7 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
           </button>
         </div>
        </form>
-      </section>
-    </div>
+    </Sheet>
       {/* Beside the sheet, not inside it: a tap in the picker must not count as a tap on what is behind. */}
       {picking && (
         <div class="over-sheet">

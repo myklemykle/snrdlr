@@ -16,7 +16,7 @@ export type Profile = {
   photo?: PictureRef
   contact?: {kind: ContactKind; value: string}
   color?: string
-  /** For each part, where it is shown: in every chat, or only in the chats listed. */
+  /** For each part, where it is shown: in every chat but those it is hidden in, or only in the chats listed. */
   show: Record<Part, Showing>
 }
 
@@ -24,9 +24,9 @@ export type Profile = {
 export const PARTS = ['icon', 'color', 'contact', 'photo'] as const
 export type Part = (typeof PARTS)[number]
 export const PART_LABELS: Record<Part, string> = {icon: 'Icon', color: 'Colour', contact: 'Contact', photo: 'Photo'}
-export type Showing = {everywhere: boolean; chats: string[]}
+export type Showing = {everywhere: boolean; chats: string[]; hidden: string[]}
 
-const nowhere = (): Showing => ({everywhere: false, chats: []})
+const nowhere = (): Showing => ({everywhere: false, chats: [], hidden: []})
 const showNowhere = (): Record<Part, Showing> => ({icon: nowhere(), color: nowhere(), contact: nowhere(), photo: nowhere()})
 
 /** Whether the profile has anything in this part to show. */
@@ -47,11 +47,12 @@ export function loadProfile(): Profile {
     const stored = JSON.parse(localStorage.getItem(SETTING) ?? 'null') as Stored | null
     if (stored && typeof stored === 'object') {
       const {shareAll, chats, show, ...rest} = stored
-      const whole: Showing = {everywhere: shareAll === true, chats: Array.isArray(chats) ? chats : []}
+      const whole: Showing = {everywhere: shareAll === true, chats: Array.isArray(chats) ? chats : [], hidden: []}
       const showing = showNowhere()
       for (const part of PARTS) {
         const kept = show?.[part]
-        showing[part] = kept ? {everywhere: kept.everywhere === true, chats: Array.isArray(kept.chats) ? kept.chats : []} : {...whole}
+        const list = (value: unknown) => (Array.isArray(value) ? (value as string[]) : [])
+        showing[part] = kept ? {everywhere: kept.everywhere === true, chats: list(kept.chats), hidden: list(kept.hidden)} : {...whole}
       }
       return {
         ...rest,
@@ -92,15 +93,25 @@ export function profileCard(profile: Profile, chatId?: string): CardContent {
   }
 }
 
-export const showsIn = (profile: Profile, part: Part, chatId: string) => profile.show[part].everywhere || profile.show[part].chats.includes(chatId)
+export const showsIn = (profile: Profile, part: Part, chatId: string) => {
+  const showing = profile.show[part]
+  return showing.everywhere ? !showing.hidden.includes(chatId) : showing.chats.includes(chatId)
+}
 
-/** Turns one part of the profile on or off for one chat. */
+/**
+ * Turns one part of the profile on or off for one chat. A part shown in every chat is hidden in just
+ * this one; a part shown only where turned on is turned on here.
+ */
 export function setShownIn(chatId: string, part: Part, shown: boolean): Profile {
   const profile = loadProfile()
-  const chats = profile.show[part].chats.filter(id => id !== chatId)
-  const next = {...profile, show: {...profile.show, [part]: {...profile.show[part], chats: shown ? [...chats, chatId] : chats}}}
-  saveProfile(next)
-  return next
+  const showing = profile.show[part]
+  const without = (list: string[]) => list.filter(id => id !== chatId)
+  const next: Showing = showing.everywhere
+    ? {...showing, hidden: shown ? without(showing.hidden) : [...without(showing.hidden), chatId]}
+    : {...showing, chats: shown ? [...without(showing.chats), chatId] : without(showing.chats)}
+  const updated = {...profile, show: {...profile.show, [part]: next}}
+  saveProfile(updated)
+  return updated
 }
 
 /** What to show in a chat: the card and its photo's file, or null if the profile is not shown there. */
