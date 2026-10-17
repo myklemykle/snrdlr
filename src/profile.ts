@@ -1,4 +1,4 @@
-// The person's own profile, beyond their name: kept on this device, and shown in a chat only as a card
+// The person's own profile, beyond their name: kept on each of their devices, the same on all (devices.ts), and shown in a chat only as a card
 // (see cards.ts) where they have chosen to show it.
 import {fromHex, toHex} from './bytes'
 import {cardIsEmpty, type ContactKind} from './cards'
@@ -34,6 +34,8 @@ export const hasPart = (profile: Profile, part: Part) =>
   part === 'icon' ? !!(profile.icon || profile.avatar) : part === 'contact' ? !!profile.contact?.value.trim() : !!profile[part]
 
 type Stored = Omit<Profile, 'avatar' | 'photo' | 'show'> & {
+  /** When it was last changed on any of the person's devices; missing until changed since this was kept. */
+  updatedAt?: number
   avatar?: string
   photo?: Omit<PictureRef, 'key' | 'preview'> & {key: string; preview: string}
   show?: Partial<Record<Part, Partial<Showing>>>
@@ -67,9 +69,11 @@ export function loadProfile(): Profile {
   return {show: showNowhere()}
 }
 
-export function saveProfile(profile: Profile): void {
+/** Saves a change made here, or (with `at`) one that arrived from another of the person's devices. */
+export function saveProfile(profile: Profile, at = Date.now()): void {
   const stored: Stored = {
     ...profile,
+    updatedAt: at,
     avatar: profile.avatar ? toHex(profile.avatar) : undefined,
     photo: profile.photo ? {...profile.photo, key: toHex(profile.photo.key), preview: toHex(profile.photo.preview)} : undefined
   }
@@ -78,6 +82,41 @@ export function saveProfile(profile: Profile): void {
   } catch {
     // Then it lasts until the page is closed.
   }
+}
+
+/** When the profile was last changed, here or on another of the person's devices; 0 if never since this was kept. */
+export function profileUpdatedAt(): number {
+  try {
+    const at = (JSON.parse(localStorage.getItem(SETTING) ?? 'null') as Stored | null)?.updatedAt
+    return typeof at === 'number' && Number.isFinite(at) ? at : 0
+  } catch {
+    return 0
+  }
+}
+
+/** The profile as the person's other devices are told it (devices.ts): as it is kept, with their name. */
+export function profileNote(name: string): string {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTING) ?? '{}') as Stored
+    delete stored.updatedAt
+    return JSON.stringify({...stored, name})
+  } catch {
+    return JSON.stringify({name})
+  }
+}
+
+/** Takes up the profile another device told of, as written at `at`. Returns the name it gave. */
+export function takeProfileNote(text: string, at: number): string | null {
+  const {name, ...stored} = JSON.parse(text) as Stored & {name?: unknown}
+  if (typeof stored !== 'object' || stored === null) throw new Error('not a profile')
+  try {
+    localStorage.setItem(SETTING, JSON.stringify({...stored, updatedAt: at}))
+  } catch {
+    // Then this device keeps what it had.
+  }
+  // Read back through loadProfile, which mends anything malformed, and saved again in its form.
+  saveProfile(loadProfile(), at)
+  return typeof name === 'string' ? name : null
 }
 
 /** The profile as a card: all of it, or with `chatId` only the parts shown in that chat. */

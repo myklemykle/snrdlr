@@ -50,6 +50,10 @@ export type Content =
   | {type: 'chat-left'; id: string}
   /** Only in a person's own hidden chat: how far one of their devices has shown this chat's messages. */
   | ChatReadContent
+  /** Only in a person's own hidden chat: their profile as one of their devices last saved it (profile.ts). */
+  | {type: 'profile-held'; profile: string}
+  /** Only in a person's own hidden chat: one piece of a file too big for one message, such as their profile photo. */
+  | FilePartContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
 
@@ -123,6 +127,11 @@ export type ChatHeldContent = {
 /** For each writer's device in a chat (as streamOf names it), the number of the latest of its messages shown. */
 export type ReadMarks = Record<string, number>
 export type ChatReadContent = {type: 'chat-read'; id: string; seen: ReadMarks}
+export type FilePartContent = {type: 'file-part'; hash: string; index: number; count: number; data: Uint8Array}
+/** A saved profile, as text, and one piece of a file: each small enough for one message left with the relay. */
+export const MAX_PROFILE_TEXT = 40_000
+export const FILE_PART_BYTES = 32_000
+const MAX_FILE_PARTS = 64
 const MAX_READ_MARKS = 1024
 const isStream = (value: string) => /^[0-9a-f]{1,128}(\.[0-9a-f]{16})?$/.test(value)
 
@@ -263,6 +272,10 @@ function encodeContent(content: Content): [string, unknown] {
       return ['chat-left', fromHex(content.id)]
     case 'chat-read':
       return ['chat-read', {i: fromHex(content.id), s: content.seen}]
+    case 'profile-held':
+      return ['profile-held', content.profile]
+    case 'file-part':
+      return ['file-part', {h: fromHex(content.hash), i: content.index, n: content.count, d: content.data}]
     case 'edit':
       return ['edit', {s: content.target.seq, t: content.text, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}]
     case 'unknown':
@@ -332,6 +345,16 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'chat-left') {
     if (!(body instanceof Uint8Array) || body.length !== 32) throw new Error('bad chat body')
     return {type, id: toHex(body)}
+  }
+  if (type === 'profile-held') {
+    if (typeof body !== 'string' || body.length > MAX_PROFILE_TEXT) throw new Error('bad profile body')
+    return {type, profile: body}
+  }
+  if (type === 'file-part') {
+    const {h, i, n, d} = (body ?? {}) as Record<string, unknown>
+    if (!(h instanceof Uint8Array) || h.length !== 32 || !isCount(n) || n < 1 || n > MAX_FILE_PARTS || !isCount(i) || i >= n) throw new Error('bad file part')
+    if (!(d instanceof Uint8Array) || d.length > FILE_PART_BYTES) throw new Error('bad file part')
+    return {type, hash: toHex(h), index: i, count: n, data: new Uint8Array(d)}
   }
   if (type === 'chat-read') {
     const {i, s} = (body ?? {}) as Record<string, unknown>

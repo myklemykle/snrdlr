@@ -126,7 +126,7 @@ export function ProfileCard(props: {
   )
 }
 
-/** The person's own profile, from the front page. Nothing here leaves the device until it is shown in a chat. */
+/** The person's own profile, from the front page. It goes to their other devices; to nobody else until shown in a chat. */
 export function ProfileEditor(props: {store: Store; identity: Identity; onIdentity: (identity: Identity) => void; onClose: () => void}) {
   const {store, identity, onIdentity, onClose} = props
   const [profile, setProfile] = useState<Profile>(loadProfile)

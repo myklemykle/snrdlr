@@ -2,7 +2,7 @@ import type {ComponentChildren} from 'preact'
 import {clearNotifications, keepPushRegistered, keepRelayToldWhileUsed} from './push'
 import {NotificationSettings} from './push-view'
 import {useEffect, useRef, useState} from 'preact/hooks'
-import {acknowledgeDevice, onChatsChanged, onNewDevices, startSelfSync, type NewDevice} from './devices'
+import {acknowledgeDevice, onChatsChanged, onNewDevices, onProfileTakenUp, startSelfSync, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, directAnswerer, newGroupChat} from './chats'
@@ -351,7 +351,14 @@ function Main(props: {
     // Every device of the person listens and none announces, so they keep in step through the relay's
     // store alone, which is how they do it whenever they are not online together anyway.
     const stop = startSelfSync({store, identity, connectFor: listenFor, mailbox: mailboxes})
-    return () => void stop()
+    // A profile saved on another of the person's devices can bring a new name with it.
+    const stopProfile = onProfileTakenUp(() => {
+      void store.getIdentity().then(secrets => secrets && onIdentity(loadIdentity(secrets)))
+    })
+    return () => {
+      stopProfile()
+      void stop()
+    }
   }, [named])
 
   // Keeps the relay told which chats to wake this device for, if notifications are on.

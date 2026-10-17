@@ -2156,3 +2156,58 @@ test('an added device that changes the name keeps its own tag, so its messages s
   expect(await tag()).toBe(before)
   expect(bob).toBeTruthy()
 })
+
+test("a person's profile, name and photo included, is the same on all their devices", async ({browser}) => {
+  const {anne, bob} = await anneAndBob(browser)
+  await openSettings(anne)
+  await anne.getByRole('button', {name: 'Add a device'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const computer = await newStranger(browser)
+  await computer.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await anne.locator('.device-code').getByRole('button', {name: 'Done'}).click()
+  await closeSettings(anne)
+  await expect(computer.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+
+  // On the computer: a new name, a colour, and a photo big enough to travel in pieces.
+  await computer.getByRole('button', {name: 'Your profile'}).click()
+  const editor = computer.getByRole('dialog', {name: 'Your profile'})
+  await editor.getByLabel('Name').fill('Annie')
+  await editor.getByRole('button', {name: 'Teal'}).click()
+  // Noise, which squeezes badly, so the photo is several pieces' worth.
+  const noisy = await computer.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 800
+    canvas.height = 600
+    const context = canvas.getContext('2d')!
+    const pixels = context.createImageData(800, 600)
+    for (let i = 0; i < pixels.data.length; i++) pixels.data[i] = i % 4 === 3 ? 255 : Math.floor(Math.random() * 256)
+    context.putImageData(pixels, 0, 0)
+    return canvas.toDataURL('image/jpeg', 0.9).split(',')[1]
+  })
+  await editor.getByLabel('Profile photo').setInputFiles({name: 'noise.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(noisy, 'base64')})
+  await expect(editor.getByRole('img', {name: 'Your profile photo'})).toBeVisible()
+  await editor.getByRole('button', {name: 'Save'}).click()
+  await expect(computer.locator('.greeting')).toContainText('Hello, Annie.')
+  const photoBytes = await computer.evaluate(
+    () =>
+      new Promise<number>(resolve => {
+        const request = indexedDB.open('snrdlr')
+        request.onsuccess = () => {
+          const all = request.result.transaction('files').objectStore('files').getAll()
+          all.onsuccess = () => resolve(Math.max(0, ...all.result.filter(file => file.chatId === '~profile').map(file => file.data.length)))
+        }
+      })
+  )
+  expect(photoBytes).toBeGreaterThan(32_000 * 2)
+
+  // The phone takes it all up.
+  await expect(anne.locator('.greeting')).toContainText('Hello, Annie.', {timeout: 30_000})
+  await anne.getByRole('button', {name: 'Your profile'}).click()
+  const there = anne.getByRole('dialog', {name: 'Your profile'})
+  await expect(there.getByLabel('Name')).toHaveValue('Annie')
+  await expect(there.getByRole('button', {name: 'Teal'})).toHaveAttribute('aria-pressed', 'true')
+  await expect(there.getByRole('img', {name: 'Your profile photo'})).toBeVisible({timeout: 30_000})
+  expect(bob).toBeTruthy()
+})

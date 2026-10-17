@@ -38,7 +38,7 @@ Things noted along the way that are not part of the current phase. The phased pl
   - No line in the chat when someone changes their name; the "joined" line keeps the old one.
   - **Own messages in your own colour** (requested 14 October 2026; built 16 October). In a chat where you show your colour, your own messages are in it, darkened only as far as white words need (contrast 4.5:1): red and purple stay as they are; yellow becomes a dark olive.
   - The tiny photo is cut from the middle of the picture; no cropping tool.
-  - The profile is per device, like everything else.
+  - The profile, name and photo included, is the same on all of a person's devices since 16 October 2026: the one saved last on any of them is taken up by the others, through the hidden chat; the photo goes in 32 KB pieces. A profile saved before then travels once it is next saved.
 - **Biometric lock.** Touch ID, Face ID or the phone's own biometrics to open the app, so someone holding the unlocked phone cannot read the chats. See "How a biometric lock would work" below.
 
 ### How a biometric lock would work
@@ -142,7 +142,7 @@ Open:
 - A lost device cannot be removed: it holds the keys. The only remedy is a new identity. Removing a device needs separate device keys signed by a personal key.
 - In the device-showing-the-code direction (`#device1.n.`), someone who sees the code could hand the new device keys of their own; the new device would become them. It cannot steal anything, but is confusing. Could be closed by having the new device check the existing device's signature.
 - A device added later gets each chat's history from the members or the relay store (30 days), not from the person's other devices' stores in bulk.
-- Sounds, profile settings and the profile photo are per device. (Unread counts are shared since 14 October 2026: each device says in the hidden chat, per writer's device, the latest message it has shown, and the others stop counting those. A chat newly taken up from another device no longer counts its history as unread.)
+- Sounds are per device. (The profile is shared since 16 October 2026, through the hidden chat.) (Unread counts are shared since 14 October 2026: each device says in the hidden chat, per writer's device, the latest message it has shown, and the others stop counting those. A chat newly taken up from another device no longer counts its history as unread.)
 - Where a chat was scrolled to is still per device.
 - A chat left on one device while it is open on another's screen is let go when that screen is closed.
 

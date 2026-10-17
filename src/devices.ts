@@ -10,7 +10,9 @@ import {sha256} from '@noble/hashes/sha2.js'
 import {claimChat, isOnScreen, unclaimChat, type ConnectFor} from './background'
 import {bytesEqual, concatBytes, utf8} from './bytes'
 import {dmContext} from './chats'
-import {streamOf, writtenAfter, type ChatHeldContent, type ChatReadContent, type ReadMarks} from './envelope'
+import {FILE_PART_BYTES, MAX_PROFILE_TEXT, streamOf, writtenAfter, type ChatHeldContent, type ChatReadContent, type FilePartContent, type ReadMarks} from './envelope'
+import {fileHash} from './files'
+import {loadProfile, PROFILE_FILES, profileNote, profileUpdatedAt, takeProfileNote} from './profile'
 import type {Identity} from './identity'
 import {deriveChatKeys} from './keys'
 import type {OpenMailbox} from './mailbox'
@@ -23,7 +25,7 @@ import {mergeMarks, type ChatRecord, type MessageRecord, type Store} from './sto
 const REFRESH_MS = 20 * 24 * 3600_000
 const POLL_MS = 4000
 
-type Note = ChatHeldContent | ChatReadContent | {type: 'chat-left'; id: string}
+type Note = ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string}
 
 /** The person's own hidden chat. Every device of theirs works out the same one from the keys they share. */
 export function selfChat(identity: Identity): ChatRecord {
@@ -148,7 +150,71 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
     }
     if (mergeMarks(there, here) !== there) await say({type: 'chat-read', id: chat.id, seen: mergeMarks(there, here)})
   }
+  await tendProfile(store, identity, messages, say, now)
   return changed
+}
+
+const profileListeners = new Set<() => void>()
+
+/** Calls back whenever this device took up the profile, or name, saved on another of the person's. */
+export function onProfileTakenUp(listener: () => void): () => void {
+  profileListeners.add(listener)
+  return () => profileListeners.delete(listener)
+}
+
+/**
+ * Keeps the person's profile, and their name, the same on all their devices: the one saved last on any
+ * of them is taken up by the others. Its photo is too big for one message, so it goes in pieces, once.
+ */
+async function tendProfile(store: Store, identity: Identity, messages: MessageRecord[], say: (note: Note) => Promise<void>, now: number) {
+  const ours = messages.filter(message => message.author === identity.id)
+  type ProfileNote = MessageRecord & {content: {type: 'profile-held'; profile: string}}
+  let latest: ProfileNote | null = null
+  for (const message of ours) {
+    if (message.content.type === 'profile-held' && (!latest || writtenAfter(message, latest))) latest = message as ProfileNote
+  }
+  const here = profileUpdatedAt()
+  if (latest && latest.device !== identity.device && latest.sentAt > here) {
+    let name: string | null = null
+    try {
+      name = takeProfileNote(latest.content.profile, latest.sentAt)
+    } catch {
+      return
+    }
+    const secrets = await store.getIdentity()
+    if (secrets && name && name !== secrets.name) await store.saveIdentity({...secrets, name})
+    profileListeners.forEach(listener => listener())
+  } else if (here > 0 && (!latest || here > latest.sentAt || now - latest.sentAt > REFRESH_MS)) {
+    const text = profileNote((await store.getIdentity())?.name ?? identity.name)
+    if (text.length <= MAX_PROFILE_TEXT) await say({type: 'profile-held', profile: text})
+  }
+
+  const {photo} = loadProfile()
+  if (!photo) return
+  const held = await store.getFile(PROFILE_FILES, photo.hash)
+  const parts = ours.filter((message): message is MessageRecord & {content: FilePartContent} => message.content.type === 'file-part' && message.content.hash === photo.hash)
+  if (held) {
+    // Said once, and again before the relay forgets it, so a device added later can have it too.
+    if (parts.length > 0 && now - Math.max(...parts.map(part => part.sentAt)) < REFRESH_MS) return
+    const count = Math.ceil(held.length / FILE_PART_BYTES)
+    for (let index = 0; index < count; index++) {
+      await say({type: 'file-part', hash: photo.hash, index, count, data: held.slice(index * FILE_PART_BYTES, (index + 1) * FILE_PART_BYTES)})
+    }
+    return
+  }
+  // Put together here once every piece has arrived, and kept only if it is the very file named.
+  const pieces = new Map(parts.map(({content}) => [content.index, content]))
+  const count = parts[0]?.content.count
+  if (!count || pieces.size < count) return
+  const whole = new Uint8Array([...pieces.values()].reduce((sum, piece) => sum + piece.data.length, 0))
+  let at = 0
+  for (let index = 0; index < count; index++) {
+    const piece = pieces.get(index)
+    if (!piece) return
+    whole.set(piece.data, at)
+    at += piece.data.length
+  }
+  if ((await fileHash(whole)) === photo.hash) await store.putFile(PROFILE_FILES, photo.hash, whole)
 }
 
 // Which of the person's devices this one has already told them about, so that a device added by someone

@@ -8,7 +8,7 @@
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
 import {latestCards, sameCard} from './cards'
-import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type ChatHeldContent, type ChatReadContent, type Content, type ImageContent, type Message, type MessageRef} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type ChatHeldContent, type ChatReadContent, type Content, type FilePartContent, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import {memberId, type Identity} from './identity'
 import {openAsMember, sealForMembers, type Recipient} from './store-seal'
@@ -91,7 +91,7 @@ export type Session = {
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
   react: (target: MessageRef, emoji: string) => Promise<void>
   /** In the person's own hidden chat: tells their other devices about a chat held, left or read here. */
-  note: (content: ChatHeldContent | ChatReadContent | {type: 'chat-left'; id: string}) => Promise<void>
+  note: (content: ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string}) => Promise<void>
   /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
   postImage: (image: ImageContent, file: Uint8Array) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
