@@ -2123,3 +2123,36 @@ test('what was typed and not sent is still there on coming back, separately for 
   await chatEntry(anne, 'Second').click()
   await expect(box).toHaveValue('something else')
 })
+
+test('an added device that changes the name keeps its own tag, so its messages stay apart from the first device\'s', async ({browser}) => {
+  const {anne, bob} = await anneAndBob(browser)
+  await openSettings(anne)
+  await anne.getByRole('button', {name: 'Add a device'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  const computer = await newStranger(browser)
+  await computer.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(computer.locator('.check')).toHaveText(/^\d{3} \d{3}$/)
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await expect(computer.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+  const tag = () =>
+    computer.evaluate(
+      () =>
+        new Promise<string | undefined>(resolve => {
+          const request = indexedDB.open('snrdlr')
+          request.onsuccess = () => {
+            const get = request.result.transaction('identity').objectStore('identity').get('self')
+            get.onsuccess = () => resolve(get.result?.device)
+          }
+        })
+    )
+  const before = await tag()
+  expect(before).toMatch(/^[0-9a-f]{16}$/)
+  await computer.getByRole('button', {name: 'Your profile'}).click()
+  await computer.getByRole('dialog', {name: 'Your profile'}).getByLabel('Name').fill('Annie')
+  await computer.getByRole('dialog', {name: 'Your profile'}).getByRole('button', {name: 'Save'}).click()
+  await expect(computer.locator('.greeting')).toContainText('Hello, Annie.')
+  expect(await tag()).toBe(before)
+  await computer.reload()
+  expect(await tag()).toBe(before)
+  expect(bob).toBeTruthy()
+})

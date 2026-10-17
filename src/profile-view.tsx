@@ -193,7 +193,8 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
       if (profile.photo && newPhoto) await store.putFile(PROFILE_FILES, profile.photo.hash, newPhoto.file)
       saveProfile(profile)
       if (called !== identity.name) {
-        const secrets = {name: called, signSecret: identity.signSecret, dhSecret: identity.dhSecret}
+        // The device's tag stays: without it this device would number its messages like the person's first.
+        const secrets = {name: called, signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
         await store.saveIdentity(secrets)
         onIdentity(loadIdentity(secrets))
       }

@@ -492,7 +492,7 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
   const [name, setName] = useState('')
   const create = async (event: Event) => {
     event.preventDefault()
-    const secrets = {name: cleanName(name), signSecret: identity.signSecret, dhSecret: identity.dhSecret}
+    const secrets = {name: cleanName(name), signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
     await store.saveIdentity(secrets)
     // Asks the browser not to evict our data under storage pressure; it may say no.
     void navigator.storage?.persist?.()
