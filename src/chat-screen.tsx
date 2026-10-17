@@ -2,6 +2,7 @@ import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hook
 import {claimChat, heardNews, unclaimChat} from './background'
 import {behindWhiteText, latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
+import {loadDraft, saveDraft} from './drafts'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
 import {findLinks} from './links'
@@ -79,7 +80,7 @@ export function ChatScreen(props: {
   const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen && !direct ? createInvite(identity) : null))
   const [inviteNote, setInviteNote] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => loadDraft(chat.id))
   const session = useRef<Session | null>(null)
   const heard = useRef<((messages: MessageRecord[]) => boolean) | null>(null)
   // Which pictures' files are on this device.
@@ -426,6 +427,11 @@ export function ChatScreen(props: {
   // One of our own messages being reworded in the message box. What was being typed is set aside meanwhile.
   const [editing, setEditing] = useState<MessageRecord | null>(null)
   const setAside = useRef('')
+  // Unsent words are kept for when we come back. While a message is being edited, the box holds its
+  // words instead, and the draft waits, set aside, unchanged.
+  useEffect(() => {
+    if (!editing) saveDraft(chat.id, draft)
+  }, [draft, editing])
   const startEditing = (message: MessageRecord) => {
     setMenu(null)
     setReplyingTo(null)

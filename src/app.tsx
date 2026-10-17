@@ -20,6 +20,7 @@ import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
 import {DeviceCode, OpenedDeviceLink} from './link-view'
 import {JoinByCode} from './scanner'
 import {Avatar, ProfileEditor} from './profile-view'
+import {saveDraft} from './drafts'
 import {latestCards} from './cards'
 import type {CardContent} from './envelope'
 import {openStore, type ChatRecord, type Store} from './store'
@@ -745,6 +746,7 @@ function Home(props: {
     await claimChat(id)
     await store.deleteChat(id, identity)
     unclaimChat(id)
+    saveDraft(id, '')
     setLeaving(null)
     await refresh()
   }
