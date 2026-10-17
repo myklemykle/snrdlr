@@ -2277,3 +2277,50 @@ test('in one chat, your profile can show something other than your usual', async
   await expect(icon.getByText('None yet')).toBeVisible()
   await expect(icon.getByRole('button', {name: 'Add one for this chat'})).toBeVisible()
 })
+
+test('a voice message is recorded, listened to, sent, and played by the other person', async ({browser}) => {
+  const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write', 'microphone']})
+  await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
+  const anne = await context.newPage()
+  const bob = await newPerson(browser)
+  const invite = await startChat(anne, 'Anne', 'Voices')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  // With nothing typed, the button records; typing turns it back into Send.
+  const mic = anne.getByRole('button', {name: 'Record your voice'})
+  await expect(mic).toBeVisible()
+  await anne.getByLabel('Message').fill('x')
+  await expect(mic).toHaveCount(0)
+  await anne.getByLabel('Message').fill('')
+  await mic.click()
+  await expect(anne.getByRole('status', {name: 'Recording your voice'})).toBeVisible()
+  await anne.waitForTimeout(2200)
+  await anne.getByRole('button', {name: 'Stop', exact: true}).click()
+  // Listened to before sending.
+  const review = anne.locator('.review')
+  await expect(review.getByRole('button', {name: 'Play'})).toBeEnabled()
+  await expect(review.locator('.time')).toHaveText(/^0:0[2-3]$/)
+  await review.getByRole('button', {name: 'Send'}).click()
+  await expect(review).toHaveCount(0)
+
+  // Bob gets it, and can play it.
+  const voice = bob.locator('.theirs .voice')
+  await expect(voice).toBeVisible({timeout: 15_000})
+  await expect(voice.getByRole('button', {name: 'Play'})).toBeEnabled({timeout: 15_000})
+  await voice.getByRole('button', {name: 'Play'}).click()
+  await expect(voice.getByRole('button', {name: 'Pause'})).toBeVisible()
+  await voice.getByRole('button', {name: 'Speed 1×'}).click()
+  await expect(voice.getByRole('button', {name: 'Speed 1.5×'})).toBeVisible()
+  // It counts as news, like words.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByRole('button', {name: 'Record your voice'}).click()
+  await anne.waitForTimeout(1200)
+  await anne.getByRole('button', {name: 'Stop', exact: true}).click()
+  await anne.locator('.review').getByRole('button', {name: 'Send'}).click()
+  await expect(anne.locator('.mine .voice')).toHaveCount(2)
+  // The chat list catches up when the app is opened again.
+  await bob.reload()
+  await expect(chatEntry(bob, 'Voices').getByLabel('1 unread')).toBeVisible({timeout: 20_000})
+})

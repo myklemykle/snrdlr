@@ -11,7 +11,7 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 ## What it does
 
 - **Meet to connect.** "Chat with one person" or "Start a group" shows a QR code (and a link to copy) that only works while it is on screen. Scanning it, with the app or the phone's camera, joins the chat. Several people can join through one code while it shows.
-- **Chats.** Text (several lines; web addresses can be tapped; what you type and leave unsent waits in each chat's box until you come back), pictures (several at once, with a caption), replies, editing your own messages (up arrow in an empty box edits the last one), one emoji reaction per person per message (quick set plus a full picker), renaming a group, leaving a chat. "Add someone" in a direct chat starts a new group.
+- **Chats.** Text (several lines; web addresses can be tapped; what you type and leave unsent waits in each chat's box until you come back), voice messages (up to five minutes; the Send button records while the box is empty; listened to before sending; played at 1×, 1.5× or 2×), pictures (several at once, with a caption), replies, editing your own messages (up arrow in an empty box edits the last one), one emoji reaction per person per message (quick set plus a full picker), renaming a group, leaving a chat. "Add someone" in a direct chat starts a new group.
 - **Profiles.** A name, plus optional icon, photo, contact and colour, each shown only in the chats you choose (`src/profile.ts`, `src/cards.ts`). Where you show your colour, your own messages are in it too, darkened as far as white words need. In a chat, your own profile lets you hide there what you show everywhere, or show something else there instead (another icon, colour or contact).
 - **One person, several devices.** Settings → Your devices → Add a device: one device shows a code, the other scans or opens it, both show the same six-digit number, and the new device becomes you, with your chats. Your devices keep each other's chat lists, read positions and your profile in step through a hidden chat of your own; the others show a notice when a device they did not add appears (`src/devices.ts`, `src/link-device.ts`).
 - **Offline delivery.** Every message is also left, sealed, with our relay for 30 days, so members who were away get it when they next open the app, even if nobody else is online.
@@ -53,7 +53,7 @@ The app is invite-only: a device gets in by joining a chat through someone's inv
 | `src/mailbox.ts`, `src/store-seal.ts` | Messages left with and fetched from the relay |
 | `src/push*.ts`, `src/push-view.tsx`, `public/sw.js` | Notifications and the service worker |
 | `src/store.ts` | IndexedDB storage, unread counts |
-| `src/profile*.ts*`, `src/cards.ts`, `src/edits.ts`, `src/reactions.ts`, `src/image*.ts*`, `src/files.ts`, `src/emoji*` | Profiles, edits, reactions, pictures, emoji |
+| `src/profile*.ts*`, `src/cards.ts`, `src/edits.ts`, `src/reactions.ts`, `src/image*.ts*`, `src/files.ts`, `src/file-store.ts`, `src/recorder.ts`, `src/voice-view.tsx`, `src/emoji*` | Profiles, edits, reactions, pictures, files left with the relay, voice messages, emoji |
 | `src/sound.ts`, `src/sounds/` | Message sounds |
 | `src/update.ts`, `src/install.ts`, `src/gate.ts`, `src/standing-invite.ts` | Self-updating tabs, installing, the invite-only gate, testing aids |
 | `src/transport.ts`, `src/relays.ts`, `src/turn.ts`, `src/route.ts` | Finding peers, the relay list, TURN, the route indicator |

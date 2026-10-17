@@ -1589,3 +1589,96 @@ button:disabled {
   border: 1px solid var(--accent);
   border-radius: 0.6rem;
 }
+
+/* Voice messages (voice-view.tsx): the player, in a message and before sending. */
+.voice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: min(15rem, 60vw);
+}
+
+.voice button {
+  flex: none;
+  padding: 0.3rem 0.45rem;
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+  color: inherit;
+}
+
+.voice .play {
+  display: flex;
+  border-radius: 50%;
+  padding: 0.4rem;
+}
+
+.voice .speed {
+  font-size: 0.8rem;
+  min-width: 2.6rem;
+}
+
+.voice .position {
+  flex: 1;
+  min-width: 3rem;
+  accent-color: currentColor;
+}
+
+.voice .time {
+  flex: none;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The composer while recording, and with a recording waiting to be sent. */
+.recording,
+.review {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.recording .time {
+  font-variant-numeric: tabular-nums;
+}
+
+.recording .what {
+  flex: 1;
+  color: var(--muted);
+}
+
+/* Listening back to one's own recording needs no change of speed, and the room is better spent. */
+.review .speed {
+  display: none;
+}
+
+.recording .dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #d1453b;
+  animation: recording 1s ease-in-out infinite alternate;
+}
+
+@keyframes recording {
+  to {
+    opacity: 0.3;
+  }
+}
+
+.recording .stop,
+.review .send-voice {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.review .voice {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer .mic {
+  display: flex;
+  padding: 0.55rem 0.7rem;
+}

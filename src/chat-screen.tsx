@@ -7,9 +7,12 @@ import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
 import {findLinks} from './links'
 import {EmojiPicker} from './emoji-picker'
-import {IMAGE_MIME, MAX_TEXT_LENGTH, type ImageContent, type MessageRef} from './envelope'
+import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
+import {MAX_FILE_BYTES, sealFile} from './files'
 import {prepareImage, type PreparedImage} from './image'
+import {canRecord, startRecording, type Recorder, type Recording} from './recorder'
+import {RecordingBar, VoiceMessage, VoicePlayer} from './voice-view'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {mailboxes} from './mailbox'
@@ -230,7 +233,7 @@ export function ChatScreen(props: {
       (messages ?? []).filter(message => {
         const {type} = message.content
         if (type === 'profile') return message.author !== identity.id && firstProfiles.has(message)
-        return type === 'text' || type === 'image' || type === 'group-invite' || type === 'rename'
+        return type === 'text' || type === 'image' || type === 'audio' || type === 'group-invite' || type === 'rename'
       }),
     [messages]
   )
@@ -397,7 +400,7 @@ export function ChatScreen(props: {
   const byKey = useMemo(() => {
     const found = new Map<string, MessageRecord>()
     for (const message of messages ?? []) {
-      if (message.content.type === 'text' || message.content.type === 'image') found.set(messageKey(message), message)
+      if (message.content.type === 'text' || message.content.type === 'image' || message.content.type === 'audio') found.set(messageKey(message), message)
     }
     return found
   }, [messages])
@@ -407,6 +410,7 @@ export function ChatScreen(props: {
     const who = message.author === identity.id ? 'You' : nameOf(message.author)
     const words = wordsOf(message).slice(0, 200)
     if (content.type === 'image') return {who, text: words ? `Picture: ${words}` : 'Picture', shown: words || 'Picture', image: content}
+    if (content.type === 'audio') return {who, text: 'Voice message', shown: 'Voice message', image: null}
     return {who, text: words, shown: words, image: null}
   }
   const quoteBody = (quote: ReturnType<typeof quoteOf>, who = quote.who) => (
@@ -459,6 +463,46 @@ export function ChatScreen(props: {
     if (last) startEditing(last)
     return !!last
   }
+
+  // A voice message: being recorded, or recorded and waiting to be listened to and sent or thrown away.
+  const [recorder, setRecorder] = useState<Recorder | null>(null)
+  const [recorded, setRecorded] = useState<{recording: Recording; url: string} | null>(null)
+  const recordable = useMemo(canRecord, [])
+  const stopVoice = async (which: Recorder) => {
+    const recording = await which.stop()
+    setRecorder(null)
+    setRecorded({recording, url: URL.createObjectURL(recording.blob)})
+  }
+  const startVoice = async () => {
+    setError(null)
+    try {
+      const started: Recorder = await startRecording(() => void stopVoice(started))
+      setRecorder(started)
+    } catch {
+      setError("snrdlr couldn't use the microphone. Allow it for this site in the browser's settings, then try again.")
+    }
+  }
+  const discardVoice = () => {
+    if (recorded) URL.revokeObjectURL(recorded.url)
+    setRecorded(null)
+  }
+  const sendVoice = async () => {
+    if (!recorded || !session.current) return
+    const {recording} = recorded
+    const plain = new Uint8Array(await recording.blob.arrayBuffer())
+    if (plain.length + 64 > MAX_FILE_BYTES) return setError('That recording is too big to send.')
+    const sealed = await sealFile(plain)
+    const replyTo: MessageRef | undefined = replyingTo ? {author: replyingTo.author, device: replyingTo.device, seq: replyingTo.seq} : undefined
+    const audio: AudioContent = {type: 'audio', hash: sealed.hash, key: sealed.key, size: sealed.data.length, mime: recording.mime, duration: recording.duration, ...(replyTo ? {replyTo} : {})}
+    discardVoice()
+    setReplyingTo(null)
+    playSound()
+    await session.current.postAudio(audio, sealed.data).catch(() => setError('Voice message could not be sent.'))
+  }
+  // Leaving the chat while recording stops the microphone.
+  const recorderNow = useRef<Recorder | null>(null)
+  recorderNow.current = recorder
+  useEffect(() => () => recorderNow.current?.cancel(), [])
 
   const send = async (event: Event) => {
     event.preventDefault()
@@ -809,11 +853,12 @@ export function ChatScreen(props: {
               </li>
             ]
           }
-          if (message.content.type !== 'text' && message.content.type !== 'image') return separator
+          if (message.content.type !== 'text' && message.content.type !== 'image' && message.content.type !== 'audio') return separator
           const image = message.content.type === 'image' ? message.content : null
+          const audio = message.content.type === 'audio' ? message.content : null
           const text = wordsOf(message)
           const edited = edits.has(key)
-          const size = image ? null : emojiSize(text)
+          const size = image || audio ? null : emojiSize(text)
           const tallies = reactions.get(key)
           const own = ownReaction(message)
           const open = menu === key
@@ -856,6 +901,7 @@ export function ChatScreen(props: {
                 ) : (
                   <span class="quote gone">A message that isn't on this device</span>
                 ))}
+              {audio && <VoiceMessage store={store} chatId={chat.id} audio={audio} held={files.has(audio.hash)} />}
               {image && (
                 <ImageView
                   store={store}
@@ -1002,58 +1048,91 @@ export function ChatScreen(props: {
       )}
 
       <form class="composer" onSubmit={send}>
-        <input
-          ref={filePicker}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          aria-label="Pictures to add"
-          onChange={event => {
-            void attach(imagesIn(event.currentTarget.files))
-            // So that choosing the same picture again is noticed.
-            event.currentTarget.value = ''
-          }}
-        />
-        <button type="button" class="attach" aria-label="Add a picture" disabled={!messages || editing !== null} onClick={() => filePicker.current?.click()}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
-            <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
-            <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <textarea
-          ref={messageBox}
-          rows={1}
-          value={draft}
-          onInput={event => setDraft(event.currentTarget.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.isComposing) {
-              event.preventDefault()
-              event.currentTarget.form?.requestSubmit()
-            } else if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)
-            // As in other chat apps: the up arrow in an empty box rewords the last thing we said.
-            else if (event.key === 'ArrowUp' && !editing && draft === '' && attached.length === 0 && editLast()) event.preventDefault()
-          }}
-          onPaste={event => {
-            const pasted = imagesIn(event.clipboardData?.files)
-            if (pasted.length === 0) return
-            event.preventDefault()
-            void attach(pasted)
-          }}
-          placeholder={editing ? (editing.content.type === 'image' ? 'Caption (leave empty for none)' : 'Message') : attached.length > 0 ? 'Add a caption (optional)' : connected ? 'Message' : 'Message (delivered when you are both here)'}
-          maxLength={MAX_TEXT_LENGTH}
-          aria-label="Message"
-          autocomplete="off"
-        />
-        {editing ? (
-          <button type="submit" disabled={!draft.trim() && editing.content.type !== 'image'}>
-            Save
-          </button>
+        {recorder ? (
+          <RecordingBar
+            startedAt={recorder.startedAt}
+            onStop={() => void stopVoice(recorder)}
+            onCancel={() => {
+              recorder.cancel()
+              setRecorder(null)
+            }}
+          />
+        ) : recorded ? (
+          <div class="review">
+            <VoicePlayer url={recorded.url} duration={recorded.recording.duration} />
+            <button type="button" onClick={discardVoice}>
+              Delete
+            </button>
+            <button type="button" class="send-voice" onClick={() => void sendVoice()}>
+              Send
+            </button>
+          </div>
         ) : (
-          <button type="submit" disabled={!messages || preparing > 0 || (!draft.trim() && attached.length === 0)}>
-            Send
+          <>
+          <input
+            ref={filePicker}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            aria-label="Pictures to add"
+            onChange={event => {
+              void attach(imagesIn(event.currentTarget.files))
+              // So that choosing the same picture again is noticed.
+              event.currentTarget.value = ''
+            }}
+          />
+          <button type="button" class="attach" aria-label="Add a picture" disabled={!messages || editing !== null} onClick={() => filePicker.current?.click()}>
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
+              <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+            </svg>
           </button>
+          <textarea
+            ref={messageBox}
+            rows={1}
+            value={draft}
+            onInput={event => setDraft(event.currentTarget.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.isComposing) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              } else if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)
+              // As in other chat apps: the up arrow in an empty box rewords the last thing we said.
+              else if (event.key === 'ArrowUp' && !editing && draft === '' && attached.length === 0 && editLast()) event.preventDefault()
+            }}
+            onPaste={event => {
+              const pasted = imagesIn(event.clipboardData?.files)
+              if (pasted.length === 0) return
+              event.preventDefault()
+              void attach(pasted)
+            }}
+            placeholder={editing ? (editing.content.type === 'image' ? 'Caption (leave empty for none)' : 'Message') : attached.length > 0 ? 'Add a caption (optional)' : 'Message'}
+            maxLength={MAX_TEXT_LENGTH}
+            aria-label="Message"
+            autocomplete="off"
+          />
+          {editing ? (
+            <button type="submit" disabled={!draft.trim() && editing.content.type !== 'image'}>
+              Save
+            </button>
+          ) : (
+            // With nothing typed or attached, the button records a voice message instead.
+            recordable && messages && preparing === 0 && !draft.trim() && attached.length === 0 ? (
+              <button type="button" class="mic" aria-label="Record your voice" onClick={() => void startVoice()}>
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8" />
+                  <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                </svg>
+              </button>
+            ) : (
+              <button type="submit" disabled={!messages || preparing > 0 || (!draft.trim() && attached.length === 0)}>
+                Send
+              </button>
+            )
+          )}
+          </>
         )}
       </form>
     </main>

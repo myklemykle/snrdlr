@@ -227,6 +227,15 @@ const newMessages = (page, chatId, since) =>
         else if (content.type === 'edit') {
           const target = all.find(m => m.author === other && m.device === content.target.device && m.seq === content.target.seq)
           out.push({...base, text: content.text, edited: target?.content.text ?? target?.content.caption ?? ''})
+        } else if (content.type === 'audio') {
+          const file = await get('files', [chatId, content.hash])
+          let picture = null
+          if (file) {
+            const key = await crypto.subtle.importKey('raw', content.key, 'AES-GCM', false, ['decrypt'])
+            const plain = await crypto.subtle.decrypt({name: 'AES-GCM', iv: file.data.slice(0, 12)}, key, file.data.slice(12))
+            picture = btoa(Array.from(new Uint8Array(plain), byte => String.fromCharCode(byte)).join(''))
+          }
+          out.push({...base, text: `(a voice message, ${Math.round(content.duration / 1000)} s)`, picture, extension: content.mime === 'audio/mp4' ? 'm4a' : content.mime.split('/')[1], replyTo: quote(content.replyTo)})
         } else if (content.type === 'image') {
           const file = await get('files', [chatId, content.hash])
           let picture = null
@@ -292,7 +301,7 @@ async function listen(wanted) {
         printed.add(key)
         const pictures = []
         if (message.picture) {
-          const path = join(INBOX, `${message.at.replace(/[:.]/g, '-')}-${message.seq}.jpg`)
+          const path = join(INBOX, `${message.at.replace(/[:.]/g, '-')}-${message.seq}.${message.extension ?? 'jpg'}`)
           writeFileSync(path, Buffer.from(message.picture, 'base64'))
           pictures.push(path)
         }

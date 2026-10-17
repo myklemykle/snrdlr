@@ -227,7 +227,7 @@ function wrap(db: IDBPDatabase<Schema>) {
           message.author !== selfId &&
           message.sentAt >= history &&
           message.seq > (marks[streamOf(message)] ?? 0) &&
-          (message.content.type === 'text' || message.content.type === 'image')
+          (message.content.type === 'text' || message.content.type === 'image' || message.content.type === 'audio')
       ).length
     },
 

@@ -92,6 +92,16 @@ Still open:
 - **A device that never gets the file** keeps asking every half minute while connected. Fine for now; a file nobody has any more should eventually show as gone.
 - **Sending is all-at-once per picture**; a connection that drops midway starts that picture again.
 
+### Voice messages: built 17 October 2026
+
+Recorded in the composer (the Send button is a microphone while the box is empty), listened to and then sent or deleted, up to five minutes. AAC in MP4 where the browser can record it (Safari, recent Chrome) so iPhones can play everything; Opus in WebM or Ogg otherwise (Firefox). The sealed recording travels like a picture's file, and is left with the relay for members who are away. Played with play/pause, a position that can be dragged, and 1×/1.5×/2×.
+
+Still open:
+
+- Safari asks for the microphone through the system before the first recording; smooth that out (Mykle, 17 October 2026).
+- A waveform picture; hold-to-talk as a shortcut; playing one message after another.
+- A recording in a format this device cannot play says nothing useful yet.
+
 ### Audio: to do
 
 - Audio formats: iPhones and Android/desktop browsers record differently; test on real devices that each can play the other's.

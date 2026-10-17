@@ -83,7 +83,7 @@ export function heardNews(selfId: string, held: Counted[]): (messages: Counted[]
       if (seen.has(key)) continue
       seen.add(key)
       const {author, sentAt, content} = message
-      if (author !== selfId && (content.type === 'text' || content.type === 'image') && Date.now() - sentAt < FRESH_MS) news = true
+      if (author !== selfId && (content.type === 'text' || content.type === 'image' || content.type === 'audio') && Date.now() - sentAt < FRESH_MS) news = true
     }
     return news
   }

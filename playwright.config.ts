@@ -13,7 +13,8 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${APP_PORT}`,
     // Without mDNS, two browsers on one machine can always find each other's local address, CI included.
-    launchOptions: {args: ['--disable-features=WebRtcHideLocalIpsWithMdns']}
+    // A fake microphone, which plays a tone, for voice messages.
+    launchOptions: {args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']}
   },
   webServer: [
     {

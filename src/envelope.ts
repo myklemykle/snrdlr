@@ -35,6 +35,8 @@ export type Content =
    * separately (see files.ts), and a tiny preview to show until it arrives.
    */
   | ImageContent
+  /** A voice message: its sealed recording travels like a picture's (files.ts), and is played here. */
+  | AudioContent
   /**
    * The author's new words for one of their own earlier messages, written on any of their devices and
    * named by that device and its number: a message in words, or a picture's caption. Their latest edit
@@ -127,6 +129,13 @@ export type ChatHeldContent = {
 /** For each writer's device in a chat (as streamOf names it), the number of the latest of its messages shown. */
 export type ReadMarks = Record<string, number>
 export type ChatReadContent = {type: 'chat-read'; id: string; seen: ReadMarks}
+
+/** The kinds of recording a voice message may be: what browsers record, and every supported one plays. */
+export const AUDIO_TYPES = ['audio/mp4', 'audio/webm', 'audio/ogg'] as const
+export type AudioType = (typeof AUDIO_TYPES)[number]
+/** The longest voice message, in milliseconds. */
+export const MAX_AUDIO_MS = 5 * 60_000
+export type AudioContent = {type: 'audio'; hash: string; key: Uint8Array; size: number; mime: AudioType; duration: number; replyTo?: MessageRef}
 export type FilePartContent = {type: 'file-part'; hash: string; index: number; count: number; data: Uint8Array}
 /** A saved profile, as text, and one piece of a file: each small enough for one message left with the relay. */
 export const MAX_PROFILE_TEXT = 40_000
@@ -243,6 +252,8 @@ function encodeContent(content: Content): [string, unknown] {
           ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})
         }
       ]
+    case 'audio':
+      return ['audio', {m: content.mime, h: fromHex(content.hash), k: content.key, z: content.size, d: content.duration, ...(content.replyTo ? {r: encodeRef(content.replyTo)} : {})}]
     case 'rename':
       return ['rename', content.name]
     case 'card':
@@ -419,6 +430,15 @@ function decodeContent(type: unknown, body: unknown): Content {
       ...(c ? {caption: c as string} : {}),
       ...(r !== undefined ? {replyTo: decodeRef(r)} : {})
     }
+  }
+  if (type === 'audio') {
+    const {m, h, k, z, d, r} = (body ?? {}) as Record<string, unknown>
+    // A kind of recording a newer version sends: kept for when this device can play it.
+    if (typeof m === 'string' && !(AUDIO_TYPES as readonly string[]).includes(m) && m.length <= 64) return {type: 'unknown', kind: 'audio'}
+    const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
+    if (!isBytes(h, 32) || !isBytes(k, FILE_KEY_BYTES) || !isCount(z) || z === 0 || z > MAX_FILE_BYTES) throw new Error('bad audio body')
+    if (!isCount(d) || d > MAX_AUDIO_MS) throw new Error('bad audio body')
+    return {type, mime: m as AudioType, hash: toHex(h), key: new Uint8Array(k), size: z, duration: d, ...(r !== undefined ? {replyTo: decodeRef(r)} : {})}
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
   if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}

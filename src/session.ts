@@ -8,7 +8,7 @@
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
 import {latestCards, sameCard} from './cards'
-import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type ChatHeldContent, type ChatReadContent, type Content, type FilePartContent, type ImageContent, type Message, type MessageRef} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type AudioContent, type ChatHeldContent, type ChatReadContent, type Content, type FilePartContent, type ImageContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import {memberId, type Identity} from './identity'
 import {openAsMember, sealForMembers, type Recipient} from './store-seal'
@@ -98,6 +98,8 @@ export type Session = {
   note: (content: ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string}) => Promise<void>
   /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
   postImage: (image: ImageContent, file: Uint8Array) => Promise<void>
+  /** Sends a voice message, the same way. */
+  postAudio: (audio: AudioContent, file: Uint8Array) => Promise<void>
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -256,7 +258,7 @@ export async function openSession(options: {
   const publishFiles = () => handlers.onFiles?.(new Set(heldFiles))
   const missingFiles = () => {
     const missing = new Map<string, {size: number}>()
-    for (const {content} of messages) if (content.type === 'image' && !heldFiles.has(content.hash)) missing.set(content.hash, content)
+    for (const {content} of messages) if ((content.type === 'image' || content.type === 'audio') && !heldFiles.has(content.hash)) missing.set(content.hash, content)
     // Profile photos too, but only the one each person is showing now.
     for (const {photo} of latestCards(messages).values()) if (photo && !heldFiles.has(photo.hash)) missing.set(photo.hash, photo)
     return missing
@@ -461,7 +463,7 @@ export async function openSession(options: {
       const own = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')
       if (own) shelve(own)
     }
-    if (record.content.type === 'image' || record.content.type === 'card') fetchFiles()
+    if (record.content.type === 'image' || record.content.type === 'audio' || record.content.type === 'card') fetchFiles()
   }
 
   /** Takes in a message from the network. Returns its stream, or null if it was not a genuine message. */
@@ -629,6 +631,13 @@ export async function openSession(options: {
       publishFiles()
       await post(image)
       leaveForAway(image.hash, file)
+    },
+    async postAudio(audio, file) {
+      await store.putFile(chat.id, audio.hash, file)
+      heldFiles.add(audio.hash)
+      publishFiles()
+      await post(audio)
+      leaveForAway(audio.hash, file)
     },
     async resume(awayMs) {
       if (closed || reconnecting || !wire) return

@@ -18,4 +18,4 @@ export const pushTag = (chat: Pick<ChatRecord, 'secret'>, identity: Pick<Identit
 
 /** Whether a message is something a person would want to be woken for: words or a picture, just written. */
 export const worthNotifying = (record: Pick<MessageRecord, 'content' | 'sentAt'>, now = Date.now()) =>
-  (record.content.type === 'text' || record.content.type === 'image') && now - record.sentAt < NEWS_MS
+  (record.content.type === 'text' || record.content.type === 'image' || record.content.type === 'audio') && now - record.sentAt < NEWS_MS

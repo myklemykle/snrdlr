@@ -192,6 +192,18 @@ describe('envelope', () => {
     }
   })
 
+  it('round-trips a voice message, keeps one of a kind it does not know, and refuses one too long', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const audio = {type: 'audio', mime: 'audio/mp4', hash: 'ab'.repeat(32), key: new Uint8Array(32).fill(3), size: 12_345, duration: 4_200} as const
+    const voice = {...hello, seq: 2, content: audio}
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, voice))).toEqual({...voice, author: anne.id})
+    const later = {...hello, seq: 3, content: {...audio, mime: 'audio/flac'}} as unknown as typeof voice
+    expect((await openEnvelope(chat, await sealEnvelope(chat, anne, later))).content).toEqual({type: 'unknown', kind: 'audio'})
+    const long = {...hello, seq: 4, content: {...audio, duration: 5 * 60_000 + 1}}
+    await expect(openEnvelope(chat, await sealEnvelope(chat, anne, long))).rejects.toThrow('bad audio body')
+  })
+
   it('round-trips a profile card, full and empty, and refuses one with a part that is not what it should be', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
