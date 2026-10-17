@@ -1412,6 +1412,10 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.own-here .label {
+  font-weight: 600;
+}
+
 .own-here .note {
   text-align: left;
 }

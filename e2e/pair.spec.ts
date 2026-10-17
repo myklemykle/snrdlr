@@ -2261,4 +2261,19 @@ test('in one chat, your profile can show something other than your usual', async
   own = await openOwn()
   await own.locator('.part', {hasText: 'Colour'}).getByRole('button', {name: 'Back to my usual'}).click()
   await expect(hers).toHaveAttribute('style', /#8a56d6/, {timeout: 15_000})
+
+  // Another name, just here; then the usual again.
+  const naming = own.locator('.part', {hasText: 'Name'})
+  await naming.getByRole('button', {name: 'Use another name here'}).click()
+  await naming.getByLabel('Name here').fill('Annie of the tea room')
+  await naming.getByRole('button', {name: 'Use here'}).click()
+  await expect(hers.locator('.author')).toContainText('Annie of the tea room', {timeout: 15_000})
+  await expect(anne.locator('.greeting')).toHaveCount(0)
+  await naming.getByRole('button', {name: 'Back to my usual'}).click()
+  await expect(hers.locator('.author')).toHaveText(/^.?Anne$/, {timeout: 15_000})
+
+  // Something her usual profile does not have at all: an icon, for this chat only.
+  const icon = own.locator('.part', {hasText: 'Icon'})
+  await expect(icon.getByText('None yet')).toBeVisible()
+  await expect(icon.getByRole('button', {name: 'Add one for this chat'})).toBeVisible()
 })

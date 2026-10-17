@@ -83,20 +83,27 @@ function OwnHere(props: {
   chatId: string
   name: string
   id: string
+  /** Our usual name. */
+  usualName: string
   onShow: (part: Part, shown: boolean) => void
   onInstead: (part: Alterable, value: Instead | null) => void
+  onName: (name: string | null) => void
   onPickEmoji: () => void
 }) {
-  const {profile, chatId, name, id, onShow, onInstead, onPickEmoji} = props
+  const {profile, chatId, name, id, usualName, onShow, onInstead, onName, onPickEmoji} = props
+  const [naming, setNaming] = useState(false)
+  const [nameHere, setNameHere] = useState(profile.instead?.[chatId]?.name ?? '')
   // The part whose something-else is being chosen, before anything is chosen.
   const [choosing, setChoosing] = useState<Alterable | null>(null)
   const here = asIn(profile, chatId)
   const alterable = (part: Part): part is Alterable => (ALTERABLE as readonly string[]).includes(part)
-  const parts = PARTS.filter(part => hasPart(profile, part) || (alterable(part) && isInstead(profile, part, chatId)))
-  if (parts.length === 0) return <p class="note">Your profile is empty. Fill it in from the front page, with the button beside Settings.</p>
+  // Anything that can be something else here is offered, even where the usual profile has none: a phone
+  // number, say, only for someone in particular. The photo is offered once there is one.
+  const parts = PARTS.filter(part => alterable(part) || hasPart(profile, part))
+  const named = !!profile.instead?.[chatId]?.name
   const colourName = (value?: string) => COLORS.find(([, color]) => color === value)?.[0] ?? 'your colour'
   const usualOf = (part: Part) =>
-    part === 'icon' ? (profile.icon ?? (profile.avatar ? 'your tiny photo' : 'none')) : part === 'color' ? colourName(profile.color) : part === 'contact' ? (profile.contact?.value ?? 'none') : ''
+    part === 'icon' ? (profile.icon ?? (profile.avatar ? 'your tiny photo' : 'none')) : part === 'color' ? (profile.color ? colourName(profile.color) : 'none') : part === 'contact' ? (profile.contact?.value ?? 'none') : ''
   const status = (part: Part, shown: boolean) => {
     const {everywhere} = profile.show[part]
     if (!shown) return everywhere ? 'Shown in every chat but this one' : 'Not shown here'
@@ -104,7 +111,51 @@ function OwnHere(props: {
   }
   return (
     <div class="own-here">
+      <div class="part">
+        <span class="label">
+          Name{named && <span class="here"> just here</span>}
+        </span>
+        <p class="note">{named ? `Your usual is ${usualName}` : 'Always shown'}</p>
+        {!naming && !named && (
+          <div class="row value">
+            <span>{name}</span>
+            <button type="button" class="link" onClick={() => setNaming(true)}>
+              Use another name here
+            </button>
+          </div>
+        )}
+        {(naming || named) && (
+          <form
+            class="row value"
+            onSubmit={event => {
+              event.preventDefault()
+              const wanted = cleanName(nameHere)
+              if (wanted) onName(wanted === usualName ? null : wanted)
+              setNaming(false)
+            }}
+          >
+            <input value={nameHere} onInput={event => setNameHere(event.currentTarget.value)} maxLength={MAX_NAME_LENGTH} aria-label="Name here" autocomplete="off" />
+            <button type="submit" disabled={!cleanName(nameHere)}>
+              Use here
+            </button>
+          </form>
+        )}
+        {(naming || named) && (
+          <button
+            type="button"
+            class="link"
+            onClick={() => {
+              setNaming(false)
+              setNameHere('')
+              if (named) onName(null)
+            }}
+          >
+            {named ? 'Back to my usual' : 'Keep my usual'}
+          </button>
+        )}
+      </div>
       {parts.map(part => {
+        const has = hasPart(asIn(profile, chatId), part)
         const shown = showsIn(profile, part, chatId)
         const instead = alterable(part) && isInstead(profile, part, chatId)
         const open = alterable(part) && (instead || choosing === part)
@@ -114,14 +165,14 @@ function OwnHere(props: {
               <input type="checkbox" checked={shown} onChange={event => onShow(part, event.currentTarget.checked)} /> {PART_LABELS[part]}
               {instead && <span class="here"> just here</span>}
             </label>
-            <p class="note">{instead ? `Your usual is ${usualOf(part)}` : status(part, shown)}</p>
+            <p class="note">{instead ? `Your usual is ${usualOf(part)}` : has ? status(part, shown) : 'None yet'}</p>
             {!open && part !== 'photo' && (
               <div class="row value">
                 {part === 'icon' && <Avatar card={profileCard(here)} name={name} id={id} />}
                 {part === 'color' && here.color && <span class="swatch" style={{background: here.color}} aria-hidden="true" />}
                 {part === 'contact' && here.contact && <span>{here.contact.value}</span>}
                 <button type="button" class="link" onClick={() => setChoosing(part as Alterable)}>
-                  Use something else here
+                  {has ? 'Use something else here' : 'Add one for this chat'}
                 </button>
               </div>
             )}
@@ -212,7 +263,13 @@ export function ProfileCard(props: {
   chatId: string
   files: ReadonlySet<string>
   /** Set when the profile is our own. */
-  own?: {profile: Profile; onShow: (part: Part, shown: boolean) => void; onInstead: (part: Alterable, value: Instead | null) => void}
+  own?: {
+    profile: Profile
+    usualName: string
+    onShow: (part: Part, shown: boolean) => void
+    onInstead: (part: Alterable, value: Instead | null) => void
+    onName: (name: string | null) => void
+  }
   onClose: () => void
 }) {
   const {name, id, card, store, chatId, files, own, onClose} = props
@@ -232,7 +289,19 @@ export function ProfileCard(props: {
         </div>
         {card?.contact && <Contact contact={card.contact} />}
         {!card && !own && <p class="note">{name} isn't showing a profile in this chat.</p>}
-        {own && <OwnHere profile={own.profile} chatId={chatId} name={name} id={id} onShow={own.onShow} onInstead={own.onInstead} onPickEmoji={() => setPicking(true)} />}
+        {own && (
+          <OwnHere
+            profile={own.profile}
+            chatId={chatId}
+            name={name}
+            id={id}
+            usualName={own.usualName}
+            onShow={own.onShow}
+            onInstead={own.onInstead}
+            onName={own.onName}
+            onPickEmoji={() => setPicking(true)}
+          />
+        )}
         <button type="button" onClick={onClose}>
           Done
         </button>

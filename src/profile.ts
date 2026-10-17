@@ -25,7 +25,7 @@ export type Profile = {
 /** The parts that can be something else in one chat. The photo is the same everywhere. */
 export const ALTERABLE = ['icon', 'color', 'contact'] as const
 export type Alterable = (typeof ALTERABLE)[number]
-export type Instead = {icon?: string; avatar?: Uint8Array; color?: string; contact?: {kind: ContactKind; value: string}}
+export type Instead = {icon?: string; avatar?: Uint8Array; color?: string; contact?: {kind: ContactKind; value: string}; name?: string}
 
 /** The parts of a profile that can each be shown or kept back. The icon is the emoji or the tiny photo. */
 export const PARTS = ['icon', 'color', 'contact', 'photo'] as const
@@ -164,6 +164,22 @@ export function asIn(profile: Profile, chatId: string): Profile {
     ...(isInstead(profile, 'color', chatId) ? {color: here.color} : {}),
     ...(isInstead(profile, 'contact', chatId) ? {contact: here.contact} : {})
   }
+}
+
+/** What we are called in this chat: a name of its own, if given one, or else the usual. */
+export const nameIn = (profile: Profile, chatId: string, usual: string) => profile.instead?.[chatId]?.name || usual
+
+/** Gives us another name in one chat, or with null takes it back to the usual. */
+export function setNameHere(chatId: string, name: string | null): Profile {
+  const profile = loadProfile()
+  const here: Instead = {...profile.instead?.[chatId]}
+  if (name) here.name = name
+  else delete here.name
+  const instead = {...profile.instead}
+  if (Object.keys(here).length > 0) instead[chatId] = here
+  else delete instead[chatId]
+  saveProfile({...profile, instead})
+  return loadProfile()
 }
 
 /**

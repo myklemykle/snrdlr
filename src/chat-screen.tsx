@@ -15,7 +15,7 @@ import {createInvite, inviteToFragment, type Invite} from './invite'
 import {mailboxes} from './mailbox'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
-import {cardFor, loadProfile, setInstead, setShownIn, type Alterable, type Instead, type Part} from './profile'
+import {cardFor, loadProfile, nameIn, setInstead, setNameHere, setShownIn, type Alterable, type Instead, type Part} from './profile'
 import {Avatar, ProfileCard} from './profile-view'
 import {QrCode} from './qr'
 import {messageKey, QUICK_REACTIONS, tallyReactions} from './reactions'
@@ -246,6 +246,11 @@ export function ChatScreen(props: {
   const showOwnProfile = async (part: Part, shown: boolean) => {
     setOwnProfile(setShownIn(chat.id, part, shown))
     await session.current?.shareCard(await cardFor(chat.id, store)).catch(() => setError('Your profile could not be sent.'))
+  }
+  const nameHere = async (name: string | null) => {
+    const profile = setNameHere(chat.id, name)
+    setOwnProfile(profile)
+    await session.current?.callMe(nameIn(profile, chat.id, identity.name)).catch(() => setError('Your name could not be sent.'))
   }
   const insteadHere = async (part: Alterable, value: Instead | null) => {
     setOwnProfile(setInstead(chat.id, part, value))
@@ -958,7 +963,7 @@ export function ChatScreen(props: {
           files={files}
           own={
             profileOf === identity.id
-              ? {profile: ownProfile, onShow: showOwnProfile, onInstead: insteadHere}
+              ? {profile: ownProfile, usualName: identity.name, onShow: showOwnProfile, onInstead: insteadHere, onName: nameHere}
               : undefined
           }
           onClose={() => setProfileOf(null)}

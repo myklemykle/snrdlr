@@ -16,6 +16,7 @@ import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
 import {KEEP_SECONDS, type Mailbox, type OpenMailbox} from './mailbox'
 import {pushTag, worthNotifying} from './push-tag'
+import {loadProfile, nameIn} from './profile'
 import {makeRoster} from './membership'
 import type {Route} from './route'
 import type {ChatRecord, MessageRecord, Store} from './store'
@@ -90,6 +91,8 @@ export type Session = {
   edit: (target: {device: string; seq: number}, text: string) => Promise<void>
   /** Sets our reaction to a message, replacing any earlier one; an empty emoji removes it. */
   react: (target: MessageRef, emoji: string) => Promise<void>
+  /** Tells the chat what we are called in it now, if that has changed. */
+  callMe: (name: string) => Promise<void>
   /** In the person's own hidden chat: tells their other devices about a chat held, left or read here. */
   note: (content: ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string}) => Promise<void>
   /** Sends a picture: stores its encrypted file, then posts the message that refers to it. */
@@ -544,11 +547,15 @@ export async function openSession(options: {
     ({author, content}) =>
       author === identity.id && content.type === 'profile' && (chat.chain.length === 0 || (content.chain?.length ?? 0) > 0)
   )
-  // And again if we have changed our name since: each member's latest is what they are called.
-  const called = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')?.content
-  if (!introduced || (called?.type === 'profile' && identity.name !== '' && called.name !== identity.name)) {
-    await post({type: 'profile', name: identity.name, dh: identity.dhPublic, ...(chat.chain.length > 0 ? {chain: chat.chain} : {})})
+  // And again if we have changed our name since: each member's latest is what they are called. A chat
+  // can have a name of our own for it (profile.ts), whichever part of the app opened it.
+  const callMe = async (name: string) => {
+    const called = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')?.content
+    if (!introduced || (called?.type === 'profile' && name !== '' && called.name !== name)) {
+      await post({type: 'profile', name, dh: identity.dhPublic, ...(chat.chain.length > 0 ? {chain: chat.chain} : {})})
+    }
   }
+  await callMe(nameIn(loadProfile(), chat.id, identity.name))
 
   /** Makes the card we show in this chat match what is wanted; null means show none. */
   async function shareCard(wanted: CardToShare | null) {
@@ -581,6 +588,7 @@ export async function openSession(options: {
     edit: (target, text) => post({type: 'edit', target: {device: target.device, seq: target.seq}, text}),
     react: (target, emoji) => post({type: 'reaction', target, emoji}),
     note: content => post(content),
+    callMe: name => callMe(name),
     async postImage(image, file) {
       await store.putFile(chat.id, image.hash, file)
       heldFiles.add(image.hash)

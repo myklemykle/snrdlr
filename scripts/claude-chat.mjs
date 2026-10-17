@@ -30,6 +30,8 @@ const MAX_TEXT_LENGTH = 4000
 const OUTBOX = join(PROFILE, 'outbox')
 const INBOX = join(PROFILE, 'inbox')
 const LISTENING = join(PROFILE, 'listen.json')
+// How many rounds (about 1.5 s each) to wait for a picture's file to arrive from another device.
+const PICTURE_ROUNDS = 200
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -282,7 +284,7 @@ async function listen(wanted) {
       for (const message of messages) {
         const key = `${message.device}.${message.seq}`
         if (printed.has(key)) continue
-        if (message.picture === null && (waiting.get(key) ?? 0) < 20) {
+        if (message.picture === null && (waiting.get(key) ?? 0) < PICTURE_ROUNDS) {
           waiting.set(key, (waiting.get(key) ?? 0) + 1)
           continue
         }
