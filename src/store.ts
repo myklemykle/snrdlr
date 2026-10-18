@@ -211,7 +211,13 @@ function wrap(db: IDBPDatabase<Schema>) {
       }
       await tx.done
     },
+    /** How much this device holds: messages, and pictures and voice messages, across its chats. */
+    async held(): Promise<{messages: number; files: number}> {
+      const [messages, files] = await Promise.all([db.count('messages'), db.count('files')])
+      return {messages, files}
+    },
     /** Which of a chat's files are held, by hash. */
+
     listFiles: async (chatId: string) => (await db.getAllKeys('files', IDBKeyRange.bound([chatId], [chatId, []]))).map(([, hash]) => hash),
     getFile: async (chatId: string, hash: string) => (await db.get('files', [chatId, hash]))?.data,
     putFile: (chatId: string, hash: string, data: Uint8Array) => db.put('files', {chatId, hash, data, addedAt: Date.now()}).then(() => undefined),

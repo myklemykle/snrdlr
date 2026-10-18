@@ -1835,6 +1835,7 @@ test('settings say which build is running', async ({browser}) => {
   await introduce(anne, 'Anne')
   await openSettings(anne)
   await expect(anne.getByText(/^Version \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · [0-9a-f]{7,}$/)).toBeVisible()
+  await expect(anne.getByText(/^On this device: \d+ messages in 0 chats, 0 pictures and voice messages/)).toBeVisible()
 })
 
 test('settings keep their title and close button in view while the rest scrolls', async ({browser}) => {

@@ -543,6 +543,23 @@ function AddThisBrowser(props: {store: Store; identity: Identity}) {
   )
 }
 
+/** What this copy of snrdlr holds, and whether the browser has promised to keep it. */
+function HeldHere(props: {store: Store; chats: number}) {
+  const [held, setHeld] = useState<{messages: number; files: number; kept: boolean | null} | null>(null)
+  useEffect(() => {
+    void Promise.all([props.store.held(), navigator.storage?.persisted?.().catch(() => null) ?? Promise.resolve(null)]).then(([counts, kept]) =>
+      setHeld({...counts, kept})
+    )
+  }, [])
+  if (!held) return null
+  return (
+    <p class="build">
+      On this device: {held.messages} messages in {props.chats} chats, {held.files} pictures and voice messages
+      {held.kept === true ? '. The browser has promised to keep them.' : held.kept === false ? ". The browser hasn't promised to keep them." : '.'}
+    </p>
+  )
+}
+
 /** Whether pictures that messages link to are shown, and what that costs in privacy. */
 function LinkPicturesSetting() {
   const [on, setOn] = useState(showsLinkPictures)
@@ -863,6 +880,7 @@ function Home(props: {
               </p>
             </section>
           )}
+          <HeldHere store={store} chats={chats?.length ?? 0} />
           <p class="build">
             Version {__BUILD__}
             {devMode() && ' · developer mode'}
