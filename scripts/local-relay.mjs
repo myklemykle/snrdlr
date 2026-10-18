@@ -1,8 +1,10 @@
 // A minimal in-memory Nostr relay for local testing, so test runs don't lean on public relays.
 // It forwards live events to matching subscriptions, with no signature checks and no limits. Like
 // our real relay (worker-relay/), it keeps one kind of event, the sealed chat message, and hands
-// those over to whoever asks for their topic later; everything else is forgotten once passed on.
+// those over to whoever asks for their topic later, until they expire or are taken back (FORGET);
+// everything else is forgotten once passed on.
 // Do not expose it to a network.
+import {createHash} from 'node:crypto'
 import {WebSocketServer} from 'ws'
 
 const port = Number(process.env.RELAY_PORT ?? 7777)
@@ -14,6 +16,12 @@ const subscriptions = new Map()
 const STORED_KIND = 7467
 /** @type {Map<string, object>} */
 const stored = new Map()
+
+const tag = (event, name) => event.tags.find(entry => entry[0] === name)?.[1]
+const expired = event => {
+  const expiration = Number(tag(event, 'expiration'))
+  return Number.isFinite(expiration) && expiration <= Date.now() / 1000
+}
 
 const matches = (filter, event) =>
   Object.entries(filter).every(([key, wanted]) => {
@@ -43,9 +51,21 @@ server.on('connection', socket => {
       subs.set(subId, filters)
       const wanted = filters.filter(filter => Array.isArray(filter.kinds) && filter.kinds.includes(STORED_KIND))
       for (const event of stored.values()) {
+        if (expired(event)) continue
         if (wanted.some(filter => matches(filter, event))) socket.send(JSON.stringify(['EVENT', subId, event]))
       }
       socket.send(JSON.stringify(['EOSE', subId]))
+    } else if (type === 'FORGET') {
+      const [topic, key] = rest
+      const hash = createHash('sha256').update(Buffer.from(String(key), 'hex')).digest('hex')
+      let count = 0
+      for (const [id, event] of stored) {
+        if (tag(event, 'x') === topic && event.tags.some(entry => entry[0] === 'f' && entry[1] === hash)) {
+          stored.delete(id)
+          count++
+        }
+      }
+      socket.send(JSON.stringify(['FORGOT', topic, count, '']))
     } else if (type === 'CLOSE') {
       subs.delete(rest[0])
     } else if (type === 'EVENT') {

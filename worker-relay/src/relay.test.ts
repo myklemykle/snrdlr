@@ -128,6 +128,36 @@ describe('Relay', () => {
     expect(bob.events('gone')).toEqual([])
   })
 
+  it('deletes a stored message early for whoever shows the key its tag was made from, and nobody else', async () => {
+    const store = memoryStore()
+    const relay = new Relay(() => 1_790_000_000_000, store)
+    const anne = join(relay)
+    const hex = (bytes: Uint8Array) => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+    const key = hex(crypto.getRandomValues(new Uint8Array(32)))
+    const fromHex = (text: string) => new Uint8Array(text.match(/../g)!.map(pair => parseInt(pair, 16)))
+    const pubkey = hex(schnorr.getPublicKey(secretKey))
+    const tagged = (content: string, tags: string[][]) => {
+      const id = sha256(new TextEncoder().encode(JSON.stringify([0, pubkey, 1_790_000_000, STORED_KIND, tags, content])))
+      return {kind: STORED_KIND, tags, created_at: 1_790_000_000, content, pubkey, id: hex(id), sig: hex(schnorr.sign(id, secretKey))}
+    }
+    const invite = tagged('invite', [['x', TOPIC], ['f', hex(sha256(fromHex(key)))]])
+    const other = tagged('other', [['x', TOPIC]])
+    await anne.say('EVENT', invite)
+    await anne.say('EVENT', other)
+
+    // A wrong key deletes nothing.
+    await anne.say('FORGET', TOPIC, hex(crypto.getRandomValues(new Uint8Array(32))))
+    expect(anne.got.at(-1)).toEqual(['FORGOT', TOPIC, 0, ''])
+    await anne.say('FORGET', TOPIC, key)
+    expect(anne.got.at(-1)).toEqual(['FORGOT', TOPIC, 1, ''])
+    const bob = join(relay)
+    await bob.say('REQ', 'left', {'#x': [TOPIC], kinds: [STORED_KIND]})
+    expect(bob.events('left')).toEqual([other])
+
+    await anne.say('FORGET', TOPIC, 'not a key')
+    expect(anne.got.at(-1)).toEqual(['NOTICE', 'invalid: key'])
+  })
+
   it('without a store, refuses sealed messages like anything else that would have to be kept', async () => {
     const relay = new Relay()
     const anne = join(relay)

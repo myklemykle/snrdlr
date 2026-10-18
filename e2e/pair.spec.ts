@@ -1260,13 +1260,24 @@ test('each sound set plays its own files, and every file in every set can be dec
   expect(broken).toEqual([])
 })
 
-test('developer mode: a standing link lets someone join later, with the inviter gone', async ({browser}) => {
+/** Makes an invite from afar in the Invites sheet (developer mode) and returns its link. */
+async function makeRemoteInvite(page: Page, target?: string): Promise<string> {
+  const sheet = page.getByRole('dialog', {name: 'Invites'})
+  if ((await sheet.count()) === 0) await page.getByRole('button', {name: 'Invites'}).click()
+  if (target) await sheet.getByLabel('Invite to').selectOption({label: target})
+  await sheet.getByRole('button', {name: 'Make and copy link'}).click()
+  await expect(sheet.getByRole('button', {name: 'Copied'})).toBeVisible({timeout: 15_000})
+  return page.evaluate(() => navigator.clipboard.readText())
+}
+
+test('developer mode: invites from afar let people join with the inviter gone, until cancelled', async ({browser}) => {
   const [anne, bob, cindy] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
 
   // Not offered unless developer mode has been turned on.
   const invite = await startChat(anne, 'Anne', 'Plain')
-  await expect(anne.getByRole('button', {name: 'Copy standing link (testing)'})).toHaveCount(0)
   expect(invite).toContain('#i=')
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.getByRole('button', {name: 'Invites'})).toHaveCount(0)
 
   // Turned on from the address, which is then tidied; the home screen says so.
   await anne.goto('/?dev=1')
@@ -1282,43 +1293,72 @@ test('developer mode: a standing link lets someone join later, with the inviter 
   await expect(anne.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await send(anne, 'welcome to the demo')
   await expect(cindy.locator('.theirs', {hasText: 'welcome to the demo'})).toBeVisible()
-
-  await anne.getByRole('button', {name: 'Copy standing link (testing)'}).click()
-  const standing = await anne.evaluate(() => navigator.clipboard.readText())
-  expect(standing).toContain('#s=')
   await anne.getByRole('button', {name: 'Stop inviting'}).click()
+
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  const link = await makeRemoteInvite(anne, 'Demo')
+  expect(link).toContain('#r=')
+  const sheet = anne.getByRole('dialog', {name: 'Invites'})
+  await expect(sheet.getByRole('list', {name: 'Open invites'}).getByRole('listitem')).toHaveCount(1)
+  await expect(sheet.getByRole('listitem')).toContainText('Demo')
+  await expect(sheet.getByRole('listitem')).toContainText(/ends in (23 h 59 min|1 d),/)
 
   // Anne closes the app altogether. Bob opens the link later and is let in by Cindy's device alone.
   await anne.goto('about:blank')
   await expect(cindy.locator('.status')).toHaveText('Nobody else is here right now', {timeout: 30_000})
-  await bob.goto(standing)
+  await bob.goto(link)
   await introduce(bob, 'Bob')
-  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible()
-  expect(bob.url()).not.toContain('#s=')
+  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible({timeout: 30_000})
+  expect(bob.url()).not.toContain('#r=')
   await expect(bob.locator('.status')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await expect(bob.locator('.theirs', {hasText: 'welcome to the demo'})).toContainText('Anne')
   await send(bob, 'hello from far away')
   await expect(cindy.locator('.theirs', {hasText: 'hello from far away'})).toContainText('Bob')
-  await expect(cindy.getByText('Bob joined · by a standing link from Anne')).toBeVisible()
+  await expect(cindy.getByText('Bob joined · by an invite link from Anne')).toBeVisible()
 
-  // Anne comes back and accepts him too. Bob is not offered the button: his copy is not in developer mode.
-  await anne.goto('/')
-  await chatEntry(anne, 'Demo').click()
-  await expect(anne.locator('.theirs', {hasText: 'hello from far away'})).toContainText('Bob', {timeout: 30_000})
-  await expect(anne.getByText('Bob joined · by a standing link from you')).toBeVisible()
-  await bob.getByRole('button', {name: 'Invite', exact: true}).click()
-  await expect(bob.getByRole('button', {name: 'Copy invite link'})).toBeVisible()
-  await expect(bob.getByRole('button', {name: 'Copy standing link (testing)'})).toHaveCount(0)
-
-  // The link keeps working, and opening it again changes nothing for someone already in.
-  await bob.goto(standing)
-  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible()
+  // Opening it again changes nothing for someone already in.
+  await bob.goto(link)
+  await expect(bob.getByRole('heading', {name: 'Demo'})).toBeVisible({timeout: 30_000})
   await expect(bob.locator('.mine', {hasText: 'hello from far away'})).toBeVisible()
+
+  // Anne comes back and cancels it; then it opens nothing, even for someone new to the app.
+  await anne.goto('/')
+  await anne.getByRole('button', {name: 'Invites'}).click()
+  await sheet.getByRole('button', {name: 'Cancel'}).click()
+  await expect(sheet.getByText('None right now.')).toBeVisible()
+  const dave = await newStranger(browser)
+  await dave.goto(link)
+  await expect(dave.getByText('That invite has expired or was cancelled.')).toBeVisible({timeout: 30_000})
+
+  // A direct-chat link: Erin, new to the app, opens it while Anne is away, and gets a chat with her.
+  const direct = await makeRemoteInvite(anne)
+  await expect(sheet.getByRole('listitem')).toContainText('Works once')
+  await anne.goto('about:blank')
+  const erin = await newStranger(browser)
+  await erin.goto(direct)
+  await introduce(erin, 'Erin')
+  await expect(erin.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 30_000})
+  await send(erin, 'hi Anne, found you')
+  await expect(erin.locator('.mine', {hasText: 'hi Anne, found you'})).toBeVisible()
+
+  // When Anne is back, her device sees the answer, makes the same chat, and the link is used up.
+  await anne.goto('/')
+  await expect(chatEntry(anne, 'Erin')).toBeVisible({timeout: 60_000})
+  await chatEntry(anne, 'Erin').click()
+  await expect(anne.locator('.theirs', {hasText: 'hi Anne, found you'})).toBeVisible({timeout: 30_000})
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByRole('button', {name: 'Invites'}).click()
+  await expect(sheet.getByText('None right now.')).toBeVisible()
+  const fay = await newStranger(browser)
+  await fay.goto(direct)
+  await expect(fay.getByText(/already used that invite|expired or was cancelled/)).toBeVisible({timeout: 30_000})
 
   // Developer mode is turned off the same way.
   await anne.goto('/?dev=0')
   await openSettings(anne)
   await expect(anne.locator('.build:not(.held)')).not.toContainText('developer mode')
+  await closeSettings(anne)
+  await expect(anne.getByRole('button', {name: 'Invites'})).toHaveCount(0)
 })
 
 test('the app is invite-only: a stranger cannot set up, and gets in by joining through an invite', async ({browser}) => {
@@ -1376,7 +1416,7 @@ test('someone invited who closes the app before giving a name is still in when t
   await expect(chatEntry(stranger, 'Club')).toBeVisible()
 })
 
-test('a "chat with me" code and a standing link both let a stranger in; developer mode skips the gate', async ({browser}) => {
+test('a "chat with me" code and an invite from afar both let a stranger in; developer mode skips the gate', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/?dev=1')
   await introduce(anne, 'Anne')
@@ -1393,11 +1433,11 @@ test('a "chat with me" code and a standing link both let a stranger in; develope
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await anne.getByLabel('Chat name').fill('Demo')
   await anne.getByRole('button', {name: 'Start a group'}).click()
-  await anne.getByRole('button', {name: 'Copy standing link (testing)'}).click()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
   const viaLink = await newStranger(browser)
-  await viaLink.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await viaLink.goto(await makeRemoteInvite(anne, 'Demo'))
   await introduce(viaLink, 'Linked')
-  await expect(viaLink.getByRole('heading', {name: 'Demo'})).toBeVisible()
+  await expect(viaLink.getByRole('heading', {name: 'Demo'})).toBeVisible({timeout: 15_000})
   await viaLink.goto('/')
   await expect(viaLink.getByRole('button', {name: 'Start a group'})).toBeVisible()
 
@@ -1750,6 +1790,32 @@ test('a computer with no camera shows its code, and the phone adds it: same pers
   await computer.getByRole('button', {name: 'Start a group'}).click()
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(chatEntry(anne, 'Dinner')).toBeVisible({timeout: 30_000})
+})
+
+test("developer mode: invites from afar are on all of a person's devices, and cancelled on any", async ({browser}) => {
+  const anne = await newPerson(browser)
+  await anne.goto('/?dev=1')
+  await introduce(anne, 'Anne')
+  await makeRemoteInvite(anne)
+
+  const computer = await newStranger(browser)
+  await computer.goto('/?dev=1')
+  await computer.getByRole('button', {name: 'Add this browser to my snrdlr'}).click()
+  await computer.getByRole('button', {name: 'Copy link'}).click()
+  await anne.goto(await computer.evaluate(() => navigator.clipboard.readText()))
+  const check = (await computer.locator('.check').textContent())!
+  await expect(anne.locator('.check')).toHaveText(check, {timeout: 30_000})
+  await anne.getByRole('button', {name: 'Add it'}).click()
+  await anne.getByRole('button', {name: 'Close'}).click()
+  await expect(computer.locator('.greeting')).toContainText('Hello, Anne.', {timeout: 30_000})
+
+  await computer.getByRole('button', {name: 'Invites'}).click()
+  const there = computer.getByRole('dialog', {name: 'Invites'})
+  await expect(there.getByRole('listitem')).toContainText('Direct chat with me', {timeout: 30_000})
+  await there.getByRole('button', {name: 'Cancel'}).click()
+  await expect(there.getByText('None right now.')).toBeVisible()
+  await anne.getByRole('button', {name: 'Invites'}).click()
+  await expect(anne.getByRole('dialog', {name: 'Invites'}).getByText('None right now.')).toBeVisible({timeout: 30_000})
 })
 
 test('the phone shows its code, and a new device that opens it is added once the numbers match', async ({browser}) => {

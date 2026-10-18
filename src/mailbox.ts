@@ -33,24 +33,31 @@ export type Mailbox = {
    * Leaves an envelope with the relay. True once the relay has it; false if that could not be done for
    * now. `notify`, the author's tag in this chat (push.ts), asks the relay to wake members' devices.
    */
-  post: (envelope: Uint8Array, sentAt: number, notify?: string) => Promise<boolean>
+  post: (envelope: Uint8Array, sentAt: number, notify?: string, options?: PostOptions) => Promise<boolean>
   close: () => void
 }
 
 /** Opens a chat's mailbox, asking for what was stored since `collectedAt` (when we last caught up), if ever. */
 export type OpenMailbox = (topic: string, collectedAt: number | undefined, handlers: MailboxHandlers) => Mailbox
 
+/**
+ * For what is kept differently from a chat message: until `expiresAt` rather than for KEEP_SECONDS,
+ * and, with `forget` (the SHA-256 of a key, in hex), deleted early by whoever shows that key (FORGET).
+ */
+export type PostOptions = {expiresAt?: number; forget?: string}
+
 export type NostrEvent = {id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string}
 
 /** Wraps a sealed envelope as an event for the relay to keep. */
-export function wrapEnvelope(topic: string, envelope: Uint8Array, sentAt: number, notify?: string): NostrEvent {
+export function wrapEnvelope(topic: string, envelope: Uint8Array, sentAt: number, notify?: string, options: PostOptions = {}): NostrEvent {
   const secretKey = schnorr.utils.randomSecretKey()
   const pubkey = toHex(schnorr.getPublicKey(secretKey))
   const created_at = Math.floor(sentAt / 1000)
   const tags = [
     ['x', topic],
-    ['expiration', String(created_at + KEEP_SECONDS)],
-    ...(notify ? [['n', notify]] : [])
+    ['expiration', String(options.expiresAt === undefined ? created_at + KEEP_SECONDS : Math.floor(options.expiresAt / 1000))],
+    ...(notify ? [['n', notify]] : []),
+    ...(options.forget ? [['f', options.forget]] : [])
   ]
   const content = toBase64Url(envelope)
   const id = sha256(utf8(JSON.stringify([0, pubkey, created_at, STORED_KIND, tags, content])))
@@ -198,10 +205,10 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
     if (socket?.readyState === WebSocket.OPEN) ask(sub)
     else connect()
     return {
-      post: (envelope, sentAt, notify) =>
+      post: (envelope, sentAt, notify, options) =>
         new Promise<boolean>(resolve => {
           if (!subs.has(sub.id) || waiting.size >= MAX_WAITING) return resolve(false)
-          const event = wrapEnvelope(topic, envelope, sentAt, notify)
+          const event = wrapEnvelope(topic, envelope, sentAt, notify, options)
           waiting.set(event.id, {json: JSON.stringify(event), done: resolve})
           if (socket?.readyState === WebSocket.OPEN) send(event.id)
           else {

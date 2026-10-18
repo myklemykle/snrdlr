@@ -26,7 +26,7 @@ import {describeRoutes, type Route} from './route'
 import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
 import {playSound} from './sound'
-import {devMode, makeStandingInvite} from './standing-invite'
+import {devMode} from './standing-invite'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
@@ -341,11 +341,11 @@ export function ChatScreen(props: {
     return found
   }, [messages])
   const founderId = chat.kind === 'group' ? memberId(chat.context) : null
-  // Someone who came in by a standing link was admitted by a throwaway member, which has no name of its
-  // own; say whose link it was.
+  // Someone who came in by an invite link from afar was admitted by a throwaway member, which has no name
+  // of its own; say whose link it was.
   const invitedLine = (inviter: string) => {
     const linkMaker = inviter !== identity.id && !names.has(inviter) ? invitedBy.get(inviter) : undefined
-    return linkMaker ? `by a standing link from ${nameOf(linkMaker)}` : `invited by ${nameOf(inviter)}`
+    return linkMaker ? `by an invite link from ${nameOf(linkMaker)}` : `invited by ${nameOf(inviter)}`
   }
 
   // Pictures chosen but not yet sent, shown above the message box. What is typed there becomes the caption.
@@ -689,17 +689,6 @@ export function ChatScreen(props: {
     }
   }
 
-  const [standingCopied, setStandingCopied] = useState(false)
-  const copyStanding = async () => {
-    try {
-      await navigator.clipboard.writeText(location.origin + location.pathname + makeStandingInvite(chat, identity, Date.now()))
-      setStandingCopied(true)
-      setTimeout(() => setStandingCopied(false), 2000)
-    } catch {
-      setError("Couldn't copy the link.")
-    }
-  }
-
   const copyInvite = async () => {
     try {
       await navigator.clipboard.writeText(inviteUrl)
@@ -802,15 +791,7 @@ export function ChatScreen(props: {
             {copied ? 'Copied' : 'Copy invite link'}
           </button>
           {devMode() && (
-            <div class="standing">
-              <button type="button" onClick={copyStanding}>
-                {standingCopied ? 'Copied' : 'Copy standing link (testing)'}
-              </button>
-              <p class="note">
-                For showing the app to someone far away. Anyone this link ever reaches can join this chat and read all of it, at any time. It never
-                expires and cannot be cancelled, so use it only for chats made for testing.
-              </p>
-            </div>
+            <p class="note standing">For someone far away, make a link that lasts as long as you choose from Invites, on the front page.</p>
           )}
         </section>
       )}

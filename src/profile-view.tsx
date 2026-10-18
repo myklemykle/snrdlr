@@ -3,6 +3,7 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {COLORS, CONTACT_KINDS, CONTACT_LABELS, contactLink, fallbackHue, type ContactKind} from './cards'
 import {EmojiPicker} from './emoji-picker'
+import {onProfileTakenUp} from './devices'
 import {IMAGE_MIME, MAX_CONTACT_LENGTH, type CardContent, type PictureRef} from './envelope'
 import {cleanName, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {openImage, prepareAvatar, prepareImage} from './image'
@@ -372,11 +373,21 @@ export function ProfileEditor(props: {store: Store; identity: Identity; onIdenti
       setPhotoUrl(made)
     }
     const {photo} = profile
+    // Taken up from another device, the photo may come in after the rest; it is looked for again then.
+    const load = () => {
+      if (!photo || made) return
+      void store.getFile(PROFILE_FILES, photo.hash).then(file => (file && !made ? openImage(file, photo).then(show) : undefined), () => {})
+    }
+    let stop = () => {}
     if (!photo) setPhotoUrl(null)
     else if (newPhoto) show(newPhoto.shown)
-    else void store.getFile(PROFILE_FILES, photo.hash).then(file => file && openImage(file, photo).then(show), () => {})
+    else {
+      load()
+      stop = onProfileTakenUp(load)
+    }
     return () => {
       cancelled = true
+      stop()
       if (made) URL.revokeObjectURL(made)
     }
   }, [profile.photo?.hash])

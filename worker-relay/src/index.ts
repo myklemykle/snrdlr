@@ -135,6 +135,9 @@ function sqlStore(sql: Sql, stats: RelayStats): MessageStore {
       // Oldest first, a tenth at a time, so a full topic is not trimmed on every message.
       sql.exec('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE topic = ? ORDER BY rowid LIMIT ?)', topic, Math.max(1, Math.ceil(count / 10)))
     },
+    remove(ids) {
+      for (const id of ids) sql.exec('DELETE FROM events WHERE id = ?', id)
+    },
     size: () => sql.databaseSize
   }
 }
@@ -143,7 +146,7 @@ declare const WebSocketPair: new () => {0: unknown; 1: HeldSocket}
 const INFO = {
   name: 'snrdlr relay',
   description:
-    `Passes short-lived events (kinds 20000 to 29999) between devices connected at the same moment, so they can find each other, and keeps sealed messages of kind ${STORED_KIND} for up to ${LIMITS.keepSeconds / 86400} days. Nothing else is accepted. Subscriptions must name their topics with an #x filter.`,
+    `Passes short-lived events (kinds 20000 to 29999) between devices connected at the same moment, so they can find each other, and keeps sealed messages of kind ${STORED_KIND} for up to ${LIMITS.keepSeconds / 86400} days; one stored with an f tag is deleted early by FORGET with the key it names. Nothing else is accepted. Subscriptions must name their topics with an #x filter.`,
   software: 'https://github.com/myklemykle/snrdlr',
   supported_nips: [1, 11, 40],
   limitation: {

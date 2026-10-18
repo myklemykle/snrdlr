@@ -1,25 +1,24 @@
-// A standing invite: a link that lets whoever holds it join a group at any time, with nobody waiting
-// at the other end. FOR TESTING. It exists so the app can be shown to people who are far away; the
-// app's real invites only work face to face, while the inviter is showing the code.
+// A standing invite: what lets whoever holds it join a group at any time, with nobody waiting at the
+// other end. FOR TESTING. It exists so the app can be shown to people who are far away; the app's real
+// invites only work face to face, while the inviter is showing the code. It travels sealed inside an
+// invite left on the relay (remote-invite.ts), which expires and can be cancelled.
 //
 // How it works: the inviter makes a throwaway member, admits it with a certificate like any other,
 // and puts that member's signing key in the link along with the chat's secret. Whoever opens the link
 // uses the throwaway key to admit themselves. Their chain of certificates is then an ordinary one,
 // founder to inviter to throwaway member to them, so no other device needs to know about any of this.
 //
-// What that means: the link is a permanent key to the chat. Anyone it reaches can join and read
-// everything, it never expires, and it cannot be cancelled. Only people who turned on developer mode
-// are offered the button that makes one; any copy of the app can open one.
+// What that means: whoever opens one holds a permanent key to the chat. They can join and read
+// everything, and nothing here can take that back. Only people who turned on developer mode are offered
+// the way to make one; any copy of the app can open one.
 import {ed25519} from '@noble/curves/ed25519.js'
 import {decode, encode} from 'cbor-x'
-import {fromBase64Url, toBase64Url} from './bytes'
 import {createIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
 import {deriveChatKeys} from './keys'
 import {issueCert, MAX_CHAIN_LENGTH, verifyChain} from './membership'
 import type {ChatRecord} from './store'
 
 const VERSION = 1
-const FRAGMENT_PREFIX = '#s='
 const DEV_SETTING = 'snrdlr.dev'
 
 export type StandingInvite = {
@@ -32,20 +31,18 @@ export type StandingInvite = {
   chain: Uint8Array[]
 }
 
-/** Makes a link into a group we belong to. Each call makes a new throwaway member. */
-export function makeStandingInvite(chat: ChatRecord, identity: Identity, now: number): string {
+/** Makes a way into a group we belong to. Each call makes a new throwaway member. */
+export function makeStandingInvite(chat: ChatRecord, identity: Identity, now: number): Uint8Array {
   if (chat.kind !== 'group') throw new Error('only groups have standing invites')
   const throwaway = createIdentity()
   const chain = [...chat.chain, issueCert(chat.id, identity, throwaway, now)]
-  return FRAGMENT_PREFIX + toBase64Url(encode({v: VERSION, g: chat.secret, f: chat.context, n: chat.name, k: throwaway.signSecret, c: chain}))
+  return new Uint8Array(encode({v: VERSION, g: chat.secret, f: chat.context, n: chat.name, k: throwaway.signSecret, c: chain}))
 }
 
-export const isStandingFragment = (fragment: string) => fragment.startsWith(FRAGMENT_PREFIX)
-
-export function standingFromFragment(fragment: string): StandingInvite | null {
-  if (!isStandingFragment(fragment)) return null
+export function openStandingInvite(bytes: Uint8Array): StandingInvite | null {
   try {
-    const raw = decode(fromBase64Url(fragment.slice(FRAGMENT_PREFIX.length))) as Record<string, unknown> | null
+    // Decoded from a copy: the decoder leaves a property behind on the array it is given.
+    const raw = decode(new Uint8Array(bytes)) as Record<string, unknown> | null
     if (typeof raw !== 'object' || raw === null || raw.v !== VERSION) return null
     const {g, f, n, k, c} = raw
     const isKey = (value: unknown): value is Uint8Array => value instanceof Uint8Array && value.length === 32

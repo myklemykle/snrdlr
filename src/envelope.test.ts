@@ -192,6 +192,15 @@ describe('envelope', () => {
     }
   })
 
+  it("round-trips a person's open invites, and refuses a list too long", async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const held = {...hello, seq: 2, content: {type: 'invites-held', invites: '[]'}} as const
+    expect(await openEnvelope(chat, await sealEnvelope(chat, anne, held))).toEqual({...held, author: anne.id})
+    const long = {...hello, seq: 2, content: {type: 'invites-held', invites: 'x'.repeat(24_001)}} as const
+    await expect(openEnvelope(chat, await sealEnvelope(chat, anne, long))).rejects.toThrow('bad invites body')
+  })
+
   it('round-trips a voice message, keeps one of a kind it does not know, and refuses one too long', async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')

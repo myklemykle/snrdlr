@@ -2,10 +2,10 @@ import type {ComponentChildren} from 'preact'
 import {clearNotifications, keepPushRegistered, keepRelayToldWhileUsed} from './push'
 import {NotificationSettings} from './push-view'
 import {useEffect, useRef, useState} from 'preact/hooks'
-import {acknowledgeDevice, onChatsChanged, onNewDevices, onProfileTakenUp, startSelfSync, type NewDevice} from './devices'
+import {acknowledgeDevice, onChatsChanged, onNewDevices, onProfileTakenUp, startSelfSync, tellChatsChanged, type NewDevice} from './devices'
 import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, type ConnectFor, type KeepStatus} from './background'
 import {ChatScreen} from './chat-screen'
-import {authFor, chatFromGrant, directAnswerer, newGroupChat} from './chats'
+import {authFor, chatFromGrant, DEFAULT_DM_NAME, directAnswerer, directChat, newGroupChat} from './chats'
 import {admit, isAdmitted} from './gate'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
@@ -13,7 +13,22 @@ import {hostInvite, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
-import {chatFromStandingInvite, devMode, isStandingFragment, standingFromFragment} from './standing-invite'
+import {chatFromStandingInvite, devMode} from './standing-invite'
+import {
+  answerRemoteInvite,
+  closeInvite,
+  forgetRemoteInvite,
+  isOpen,
+  isRemoteFragment,
+  loadInvites,
+  onInvitesChanged,
+  openRemoteInvite,
+  seedFromFragment,
+  watchAnswers,
+  type Opened
+} from './remote-invite'
+import {InvitesSheet} from './invites-view'
+import {bytesEqual} from './bytes'
 import {installed, onIos, useInstall} from './install'
 import {mailboxes} from './mailbox'
 import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
@@ -59,9 +74,25 @@ function clearMovedOut(): void {
   }
 }
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
+const OVER_INVITE = 'That invite has expired or was cancelled. Ask the person who sent it for a new one.'
+const USED_INVITE = 'Someone else has already used that invite. Ask the person who sent it for a new one.'
+const OWN_INVITE = 'That is your own invite. Send it to the person you want to chat with.'
+const UNREACHABLE_INVITE = "That invite couldn't be opened just now. Check your connection and open the link again."
 
 /** Whether this tab is holding every chat connected: off, queued behind another tab, or doing it. */
 type Keep = null | 'waiting' | KeepStatus
+
+/** Answers a direct-chat invite from afar, trying again for a while if the relay cannot be reached. */
+async function answerUntilKept(seed: Uint8Array, opened: Opened & {kind: 'dm'}, identity: Identity) {
+  for (const wait of [0, 3000, 10_000, 30_000, 60_000]) {
+    await new Promise(resolve => setTimeout(resolve, wait))
+    if (await answerRemoteInvite(mailboxes, seed, opened, identity, Date.now()).catch(() => false)) return
+  }
+}
+
+/** The direct-chat invites still waiting for someone, by seed. */
+const answerable = (invites: ReturnType<typeof loadInvites>) =>
+  invites.filter(invite => invite.kind === 'dm' && isOpen(invite, Date.now())).map(invite => invite.seed)
 
 function storedStay(): boolean {
   try {
@@ -83,7 +114,12 @@ type Boot =
   | {status: 'ready'; store: Store; identity: Identity; admitted: boolean}
 
 /** Progress of redeeming the invite in the address bar, if there is one. */
-type Join = {status: 'idle'} | {status: 'joining'} | {status: 'failed'} | {status: 'joined'; chatId: string}
+type Join =
+  | {status: 'idle'}
+  | {status: 'joining'}
+  | {status: 'failed'; reason?: string}
+  // `answer`: a direct-chat invite from afar, to be answered once we have a name to give.
+  | {status: 'joined'; chatId: string; answer?: {seed: Uint8Array; opened: Opened & {kind: 'dm'}}}
 
 export function App() {
   const [boot, setBoot] = useState<Boot>({status: 'loading'})
@@ -198,20 +234,39 @@ function useJoin(store: Store, identity: Identity, hash: string): [Join, () => v
   const [join, setJoin] = useState<Join>({status: 'idle'})
 
   useEffect(() => {
-    // A standing invite (testing only) needs nobody at the other end: everything is in the link.
-    if (isStandingFragment(hash)) {
-      const standing = standingFromFragment(hash)
-      if (!standing) return setJoin({status: 'failed'})
+    // An invite from afar (developer mode) needs nobody at the other end: what it holds is on the relay.
+    if (isRemoteFragment(hash)) {
+      const seed = seedFromFragment(hash)
+      if (!seed) return setJoin({status: 'failed', reason: OVER_INVITE})
       let cancelled = false
+      const fail = (reason: string) => void (!cancelled && setJoin({status: 'failed', reason}))
       setJoin({status: 'joining'})
       void (async () => {
+        const now = Date.now()
+        let opened
         try {
-          const granted = chatFromStandingInvite(standing, identity, Date.now())
-          const others = (await store.listChats()).filter(chat => chat.id !== granted.id).map(chat => chat.name)
-          const chat = await store.saveChat({...granted, name: uniqueChatName(granted.name, others)})
-          if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
+          opened = await openRemoteInvite(mailboxes, seed, now)
         } catch {
-          if (!cancelled) setJoin({status: 'failed'})
+          return fail(UNREACHABLE_INVITE)
+        }
+        if (!opened) return fail(OVER_INVITE)
+        try {
+          const chats = await store.listChats()
+          let granted: ChatRecord
+          if (opened.kind === 'group') granted = chatFromStandingInvite(opened.standing, identity, now)
+          else {
+            if (bytesEqual(opened.inviter.signPublic, identity.signPublic)) return fail(OWN_INVITE)
+            granted = directChat(identity, opened.inviter, opened.name || DEFAULT_DM_NAME, now)
+            // Opening it again, having already joined, changes nothing.
+            if (opened.used && !chats.some(chat => chat.id === granted.id)) return fail(USED_INVITE)
+          }
+          const held = chats.find(chat => chat.id === granted.id)
+          const others = chats.filter(chat => chat.id !== granted.id).map(chat => chat.name)
+          const chat = held ?? (await store.saveChat({...granted, name: uniqueChatName(granted.name, others)}))
+          const answer = opened.kind === 'dm' && !held ? {seed, opened} : undefined
+          if (!cancelled) setJoin({status: 'joined', chatId: chat.id, answer})
+        } catch {
+          fail(OVER_INVITE)
         }
       })()
       return () => {
@@ -388,6 +443,29 @@ function Main(props: {
   // A sound for messages arriving in chats that are not on screen.
   useEffect(() => onBackgroundActivity((_chatId, incoming) => incoming && playSound()), [])
 
+  // Someone who opens one of our direct-chat invites from afar makes the chat on their side and leaves
+  // an answer; seeing it, we make the same chat here, and the invite has done its job.
+  const [watching, setWatching] = useState(() => answerable(loadInvites()))
+  useEffect(() => onInvitesChanged(() => setWatching(answerable(loadInvites()))), [])
+  useEffect(() => {
+    const invites = loadInvites().filter(invite => watching.includes(invite.seed))
+    const stops = invites.map(invite =>
+      watchAnswers(mailboxes, invite, identity, answer =>
+        void (async () => {
+          const chats = await store.listChats()
+          const chat = directChat(identity, answer, answer.name || DEFAULT_DM_NAME, Date.now())
+          if (!chats.some(held => held.id === chat.id)) {
+            await store.saveChat({...chat, name: uniqueChatName(chat.name, chats.map(held => held.name))})
+            tellChatsChanged()
+          }
+          closeInvite(invite.seed)
+          void forgetRemoteInvite(mailboxes, invite)
+        })().catch(() => {})
+      )
+    )
+    return () => stops.forEach(stop => stop())
+  }, [watching.join()])
+
   // Joining a chat by invite is what lets a device into the app.
   useEffect(() => {
     if (join.status !== 'joined' || admitted) return
@@ -400,10 +478,12 @@ function Main(props: {
   useEffect(() => {
     if (join.status === 'failed' && (named || !admitted)) {
       clearJoin()
-      setNotice(STALE_INVITE)
+      setNotice(join.reason ?? STALE_INVITE)
       goHome(true)
     } else if (join.status === 'joined' && named) {
       clearJoin()
+      // Answered with our name, which the inviter's side of the chat is called by.
+      if (join.answer) void answerUntilKept(join.answer.seed, join.answer.opened, identity)
       openChat(join.chatId, true)
     }
   }, [join, named])
@@ -429,7 +509,7 @@ function Main(props: {
     if (link) return <OpenedDeviceLink key={hash} link={link} store={store} identity={identity} onClose={() => goHome(true)} />
   }
 
-  const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isStandingFragment(hash)
+  const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isRemoteFragment(hash)
   if (!admitted && !redeeming) {
     return (
       <main class="home">
@@ -449,7 +529,7 @@ function Main(props: {
       <main class="home">
         <h1>snrdlr</h1>
         <p>Joining the chat…</p>
-        <p class="note">This only works while the person inviting you still has their code on screen.</p>
+        {!isRemoteFragment(hash) && <p class="note">This only works while the person inviting you still has their code on screen.</p>}
       </main>
     )
   }
@@ -690,6 +770,7 @@ function Home(props: {
   const [leaving, setLeaving] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [invitesOpen, setInvitesOpen] = useState(false)
   const install = useInstall()
   useUpdateHold(profileOpen)
   const update = useUpdateState()
@@ -809,6 +890,14 @@ function Home(props: {
             <path d="M4 21c.6-4.2 3.8-6.5 8-6.5s7.400 2.300 8 6.500" />
           </svg>
         </button>
+        {devMode() && (
+          <button type="button" class="gear" aria-label="Invites" onClick={() => setInvitesOpen(true)}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+              <rect x="3" y="5.5" width="18" height="13" rx="2" />
+              <path d="M3.5 7l8.5 6.5L20.5 7" />
+            </svg>
+          </button>
+        )}
         <button type="button" class="gear" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3.2" />
@@ -893,6 +982,7 @@ function Home(props: {
           )}
         </Settings>
       )}
+      {invitesOpen && <InvitesSheet identity={identity} chats={chats ?? []} onClose={() => setInvitesOpen(false)} />}
       {profileOpen && <ProfileEditor store={store} identity={identity} onIdentity={onIdentity} onClose={() => setProfileOpen(false)} />}
       {notice && <p class="error">{notice}</p>}
       {deviceNews.map(device => (

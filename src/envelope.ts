@@ -54,6 +54,7 @@ export type Content =
   | ChatReadContent
   /** Only in a person's own hidden chat: their profile as one of their devices last saved it (profile.ts). */
   | {type: 'profile-held'; profile: string}
+  | InvitesHeldContent
   /** Only in a person's own hidden chat: one piece of a file too big for one message, such as their profile photo. */
   | FilePartContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
@@ -141,6 +142,9 @@ export type AudioContent = {type: 'audio'; hash: string; key: Uint8Array; size: 
 export type FilePartContent = {type: 'file-part'; hash: string; index: number; count: number; data: Uint8Array}
 /** A saved profile, as text, and one piece of a file: each small enough for one message left with the relay. */
 export const MAX_PROFILE_TEXT = 40_000
+/** The person's open invites, said in their hidden chat (remote-invite.ts), as JSON. */
+export type InvitesHeldContent = {type: 'invites-held'; invites: string}
+export const MAX_INVITES_TEXT = 24_000
 export const FILE_PART_BYTES = 32_000
 const MAX_FILE_PARTS = 64
 const MAX_READ_MARKS = 1024
@@ -288,6 +292,8 @@ function encodeContent(content: Content): [string, unknown] {
       return ['chat-read', {i: fromHex(content.id), s: content.seen}]
     case 'profile-held':
       return ['profile-held', content.profile]
+    case 'invites-held':
+      return ['invites-held', content.invites]
     case 'file-part':
       return ['file-part', {h: fromHex(content.hash), i: content.index, n: content.count, d: content.data}]
     case 'edit':
@@ -363,6 +369,10 @@ function decodeContent(type: unknown, body: unknown): Content {
   if (type === 'profile-held') {
     if (typeof body !== 'string' || body.length > MAX_PROFILE_TEXT) throw new Error('bad profile body')
     return {type, profile: body}
+  }
+  if (type === 'invites-held') {
+    if (typeof body !== 'string' || body.length > MAX_INVITES_TEXT) throw new Error('bad invites body')
+    return {type, invites: body}
   }
   if (type === 'file-part') {
     const {h, i, n, d} = (body ?? {}) as Record<string, unknown>

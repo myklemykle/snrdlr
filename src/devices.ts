@@ -10,7 +10,8 @@ import {sha256} from '@noble/hashes/sha2.js'
 import {claimChat, isOnScreen, unclaimChat, type ConnectFor} from './background'
 import {bytesEqual, concatBytes, utf8} from './bytes'
 import {dmContext} from './chats'
-import {FILE_PART_BYTES, MAX_PROFILE_TEXT, streamOf, writtenAfter, type ChatHeldContent, type ChatReadContent, type FilePartContent, type ReadMarks} from './envelope'
+import {FILE_PART_BYTES, MAX_INVITES_TEXT, MAX_PROFILE_TEXT, streamOf, writtenAfter, type ChatHeldContent, type ChatReadContent, type FilePartContent, type InvitesHeldContent, type ReadMarks} from './envelope'
+import {loadInvites, mergeInvites, parseInvites, sameInvites, saveInvites, type RemoteInvite} from './remote-invite'
 import {fileHash} from './files'
 import {loadProfile, PROFILE_FILES, profileNote, profileUpdatedAt, takeProfileNote} from './profile'
 import type {Identity} from './identity'
@@ -25,7 +26,7 @@ import {mergeMarks, type ChatRecord, type MessageRecord, type Store} from './sto
 const REFRESH_MS = 20 * 24 * 3600_000
 const POLL_MS = 4000
 
-type Note = ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string}
+type Note = ChatHeldContent | ChatReadContent | FilePartContent | {type: 'chat-left'; id: string} | {type: 'profile-held'; profile: string} | InvitesHeldContent
 
 /** The person's own hidden chat. Every device of theirs works out the same one from the keys they share. */
 export function selfChat(identity: Identity): ChatRecord {
@@ -150,13 +151,31 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
     }
     if (mergeMarks(there, here) !== there) await say({type: 'chat-read', id: chat.id, seen: mergeMarks(there, here)})
   }
+  await tendInvites(identity, messages, say, now)
   await tendProfile(store, identity, messages, say, now)
   return changed
 }
 
+/**
+ * Keeps the person's invites (remote-invite.ts) the same on all their devices: each takes up what the
+ * others have said, and says the whole list whenever it knows something they have not said.
+ */
+async function tendInvites(identity: Identity, messages: MessageRecord[], say: (note: Note) => Promise<void>, now: number) {
+  let heard: RemoteInvite[] = []
+  for (const message of messages) {
+    if (message.author === identity.id && message.content.type === 'invites-held') heard = mergeInvites(heard, parseInvites(message.content.invites), now)
+  }
+  const here = loadInvites()
+  const merged = mergeInvites(here, heard, now)
+  if (!sameInvites(merged, here)) saveInvites(merged)
+  if (sameInvites(merged, heard)) return
+  const text = JSON.stringify(merged)
+  if (text.length <= MAX_INVITES_TEXT) await say({type: 'invites-held', invites: text})
+}
+
 const profileListeners = new Set<() => void>()
 
-/** Calls back whenever this device took up the profile, or name, saved on another of the person's. */
+/** Calls back whenever this device took up the profile, name or photo saved on another of the person's. */
 export function onProfileTakenUp(listener: () => void): () => void {
   profileListeners.add(listener)
   return () => profileListeners.delete(listener)
@@ -214,7 +233,10 @@ async function tendProfile(store: Store, identity: Identity, messages: MessageRe
     whole.set(piece.data, at)
     at += piece.data.length
   }
-  if ((await fileHash(whole)) === photo.hash) await store.putFile(PROFILE_FILES, photo.hash, whole)
+  if ((await fileHash(whole)) !== photo.hash) return
+  await store.putFile(PROFILE_FILES, photo.hash, whole)
+  // The photo can arrive after the rest of the profile, while it is on screen.
+  profileListeners.forEach(listener => listener())
 }
 
 // Which of the person's devices this one has already told them about, so that a device added by someone
@@ -288,6 +310,9 @@ function tellNews(news: NewDevice[]) {
 }
 
 const listeners = new Set<() => void>()
+
+/** Tells whoever is listening that this device's chats changed, from somewhere other than the hidden chat. */
+export const tellChatsChanged = () => listeners.forEach(listener => listener())
 
 /** Calls back whenever chats were added or removed here because of something another device said. */
 export function onChatsChanged(listener: () => void): () => void {

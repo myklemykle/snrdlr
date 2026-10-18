@@ -25,9 +25,14 @@
 // The tag means nothing outside its topic, so it does not link one person's chats to each other.
 // While a person is using the app on any device, that device says so (AWAKE) with the same tags, and
 // none of their devices is woken for those chats until it stops saying so.
+//
+// A stored message can also be taken back early (FORGET). It must have been stored with an "f" tag, the
+// SHA-256 of a key that only its sender knows; whoever later shows that key has it deleted. The app uses
+// this for invites that can be cancelled. Everyone who can read a topic sees the tag, but only the
+// sender has the key.
 
 /** What a device said, in the few kinds worth counting apart. */
-export type IncomingKind = 'in_announce' | 'in_store' | 'in_event_other' | 'in_req' | 'in_close' | 'in_push' | 'in_unpush' | 'in_awake' | 'in_other'
+export type IncomingKind = 'in_announce' | 'in_store' | 'in_event_other' | 'in_req' | 'in_close' | 'in_push' | 'in_unpush' | 'in_awake' | 'in_forget' | 'in_other'
 
 export function incomingKind(type: unknown, first: unknown): IncomingKind {
   if (type === 'EVENT') {
@@ -36,7 +41,7 @@ export function incomingKind(type: unknown, first: unknown): IncomingKind {
     if (typeof kind === 'number' && kind >= FIRST_KIND && kind <= LAST_KIND) return 'in_announce'
     return kind === STORED_KIND ? 'in_store' : 'in_event_other'
   }
-  const known: Record<string, IncomingKind> = {REQ: 'in_req', CLOSE: 'in_close', PUSH: 'in_push', UNPUSH: 'in_unpush', AWAKE: 'in_awake'}
+  const known: Record<string, IncomingKind> = {REQ: 'in_req', CLOSE: 'in_close', PUSH: 'in_push', UNPUSH: 'in_unpush', AWAKE: 'in_awake', FORGET: 'in_forget'}
   return (typeof type === 'string' && known[type]) || 'in_other'
 }
 
@@ -132,6 +137,8 @@ export type MessageStore = {
   query: (topic: string, since: number, now: number, limit: number) => string[]
   /** Drops a topic's oldest events until it is within the limits. */
   trim: (topic: string, maxCount: number, maxBytes: number) => void
+  /** Deletes these events, if held. */
+  remove: (ids: string[]) => void
   /** Bytes in use, roughly. */
   size: () => number
 }
@@ -161,6 +168,9 @@ export function memoryStore(): MessageStore {
         bytes -= oldest.json.length
         held.delete(oldest.id)
       }
+    },
+    remove(ids) {
+      for (const id of ids) held.delete(id)
     },
     size: () => [...held.values()].reduce((sum, event) => sum + event.json.length, 0)
   }
@@ -208,10 +218,16 @@ function parseEvent(value: unknown): NostrEvent | null {
   return value as NostrEvent
 }
 
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const fromHexString = (hex: string) => new Uint8Array(hex.match(/../g)!.map(pair => parseInt(pair, 16)))
+
 async function eventId(event: NostrEvent): Promise<string> {
   const serialized = JSON.stringify([0, event.pubkey, event.created_at, event.kind, event.tags, event.content])
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized)))
-  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+  return sha256Hex(new TextEncoder().encode(serialized))
 }
 
 /** For each filter that asks for stored messages: which topics, and from when. */
@@ -385,11 +401,25 @@ export class Relay {
       if (typeof topics === 'string') return reply('PUSH', false, topics)
       if (!Number.isSafeInteger(seconds) || (seconds as number) < 0 || (seconds as number) > PUSH_LIMITS.awakeSeconds) return reply('PUSH', false, 'invalid: seconds')
       this.pushes.awake(topics, seconds as number)
+    } else if (type === 'FORGET' && this.store) {
+      const [topic, key] = rest
+      if (typeof topic !== 'string' || topic.length === 0 || topic.length > 128) return reply('NOTICE', 'invalid: topic')
+      if (typeof key !== 'string' || !HEX_64.test(key)) return reply('NOTICE', 'invalid: key')
+      if (!allowed) return reply('FORGOT', topic, 0, 'rate-limited: slow down')
+      const tag = await sha256Hex(fromHexString(key))
+      const now = Math.floor(this.now() / 1000)
+      const ids = this.store
+        .query(topic, 0, now, LIMITS.storedPerTopic)
+        .map(json => JSON.parse(json) as NostrEvent)
+        .filter(event => event.tags.some(entry => entry[0] === 'f' && entry[1] === tag))
+        .map(event => event.id)
+      this.store.remove(ids)
+      reply('FORGOT', topic, ids.length, '')
     } else if (type === 'UNPUSH' && this.pushes) {
       if (typeof rest[0] === 'string' && rest[0].length <= 1024) this.pushes.forget(rest[0])
       reply('PUSH', true, '')
     } else {
-      reply('NOTICE', 'unsupported: this relay understands EVENT, REQ and CLOSE')
+      reply('NOTICE', 'unsupported: this relay understands EVENT, REQ, CLOSE and FORGET')
     }
   }
 
