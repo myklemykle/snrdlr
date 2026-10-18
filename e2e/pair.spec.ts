@@ -562,6 +562,10 @@ test('people react to a message with an emoji, change it, and take it away', asy
   await expect(picker.getByRole('button', {name: 'grinning face', exact: true})).toBeVisible()
   // With a keyboard, the search box is ready to type in.
   await expect(picker.getByLabel('Search emoji')).toBeFocused()
+  // Everyday words find an emoji as well as its name does.
+  await bob.keyboard.type('haha')
+  await expect(picker.getByRole('button', {name: 'face with tears of joy'})).toBeVisible()
+  await picker.getByLabel('Search emoji').fill('')
   await bob.keyboard.type('party pop')
   await picker.getByRole('button', {name: 'party popper'}).click()
   await expect(picker).toHaveCount(0)

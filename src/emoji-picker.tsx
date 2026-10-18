@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {firstEmoji} from './emoji'
 
-type Entry = [emoji: string, name: string, version: number]
+type Entry = [emoji: string, name: string, version: number, words?: string]
 type Group = [name: string, emojis: Entry[]]
 
 const GROUP_ICONS: Record<string, string> = {
@@ -140,7 +140,13 @@ export function EmojiPicker(props: {onPick: (emoji: string) => void; onClose: ()
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const results = useMemo(() => {
     if (!groups || words.length === 0) return null
-    const found = groups.flatMap(([, emojis]) => emojis).filter(([, name]) => words.every(word => name.toLowerCase().includes(word)))
+    // Each word typed must be in the emoji's name or its everyday search words ("haha" finds 😂).
+    const found = groups
+      .flatMap(([, emojis]) => emojis)
+      .filter(([, name, , extra = '']) => {
+        const searched = `${name} ${extra}`.toLowerCase()
+        return words.every(word => searched.includes(word))
+      })
     // Something typed or pasted that is itself an emoji can be used, whether or not it is in the list.
     const typed = firstEmoji(query)
     const typedEntry: Entry[] = typed && !found.some(([emoji]) => emoji === typed) ? [[typed, names.get(typed) ?? typed, 0]] : []
