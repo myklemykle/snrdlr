@@ -1271,7 +1271,7 @@ test('developer mode: a standing link lets someone join later, with the inviter 
   // Turned on from the address, which is then tidied; the home screen says so.
   await anne.goto('/?dev=1')
   await openSettings(anne)
-  await expect(anne.locator('.build')).toContainText('developer mode')
+  await expect(anne.locator('.build:not(.held)')).toContainText('developer mode')
   await closeSettings(anne)
   expect(anne.url()).not.toContain('dev=')
   await anne.getByLabel('Chat name').fill('Demo')
@@ -1318,7 +1318,7 @@ test('developer mode: a standing link lets someone join later, with the inviter 
   // Developer mode is turned off the same way.
   await anne.goto('/?dev=0')
   await openSettings(anne)
-  await expect(anne.locator('.build')).not.toContainText('developer mode')
+  await expect(anne.locator('.build:not(.held)')).not.toContainText('developer mode')
 })
 
 test('the app is invite-only: a stranger cannot set up, and gets in by joining through an invite', async ({browser}) => {
@@ -1481,7 +1481,7 @@ test('the build publishes its own version, which matches the one on screen', asy
   await introduce(page, 'Anne')
   const {build} = await (await page.request.get('/version.json')).json()
   await openSettings(page)
-  await expect(page.locator('.build')).toContainText(`Version ${build}`)
+  await expect(page.locator('.build:not(.held)')).toContainText(`Version ${build}`)
   await expect(page.getByRole('button', {name: 'Reload to update'})).toHaveCount(0)
 })
 

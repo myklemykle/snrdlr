@@ -553,7 +553,7 @@ function HeldHere(props: {store: Store; chats: number}) {
   }, [])
   if (!held) return null
   return (
-    <p class="build">
+    <p class="build held">
       On this device: {held.messages} messages in {props.chats} chats, {held.files} pictures and voice messages
       {held.kept === true ? '. The browser has promised to keep them.' : held.kept === false ? ". The browser hasn't promised to keep them." : '.'}
     </p>
