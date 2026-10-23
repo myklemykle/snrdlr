@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {findLinks, pictureLink} from './links'
+import {findLinks, leadsHere, pictureLink} from './links'
 
 const links = (text: string) => findLinks(text).filter(piece => piece.href).map(piece => [piece.text, piece.href])
 
@@ -31,5 +31,16 @@ describe('links in messages', () => {
     expect(pictureLink('https://example.com/pic.jpg?size=large')).toBe('https://example.com/pic.jpg?size=large')
     expect(pictureLink('https://example.com/gallery')).toBeNull()
     expect(pictureLink('no links')).toBeNull()
+  })
+})
+
+describe('where a link opens', () => {
+  it('in this tab when it leads into the app, such as an invite; in a new one otherwise', () => {
+    const here = 'https://alpha.snrdlr.net/#chat=abc'
+    expect(leadsHere('https://alpha.snrdlr.net/#r=xyz', here)).toBe(true)
+    expect(leadsHere('https://alpha.snrdlr.net/', here)).toBe(true)
+    expect(leadsHere('https://snrdlr.net/', here)).toBe(false)
+    expect(leadsHere('http://alpha.snrdlr.net/', here)).toBe(false)
+    expect(leadsHere('https://example.com/menu', here)).toBe(false)
   })
 })

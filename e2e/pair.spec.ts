@@ -253,6 +253,11 @@ test('chats get distinct names, show in the page title, and can be left', async 
   }
   await expect(page).toHaveTitle('snrdlr')
   await expect(page.locator('.chats .open')).toHaveText(['Chat 2', 'Chat'])
+  // The chat with the latest message comes first.
+  await chatEntry(page, 'Chat').filter({hasNotText: 'Chat 2'}).click()
+  await send(page, 'Still here')
+  await page.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(page.locator('.chats .open')).toHaveText(['Chat', 'Chat 2'])
 
   // Leaving asks first, and cancelling keeps the chat.
   await page.getByRole('button', {name: 'Leave Chat 2'}).click()

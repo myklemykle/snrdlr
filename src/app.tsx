@@ -842,8 +842,10 @@ function Home(props: {
   }
 
   const refresh = async () => {
-    // Direct chats first, then groups, each newest first.
-    const stored = (await store.listChats()).sort((a, b) => Number(a.kind !== 'dm') - Number(b.kind !== 'dm'))
+    // Direct chats first, then groups, each with the latest message first.
+    const listed = await store.listChats()
+    const activity = new Map(await Promise.all(listed.map(async chat => [chat.id, await store.lastActivity(chat)] as const)))
+    const stored = listed.sort((a, b) => Number(a.kind !== 'dm') - Number(b.kind !== 'dm') || activity.get(b.id)! - activity.get(a.id)!)
     const counts = await Promise.all(stored.map(chat => store.unreadCount(chat, identity.id)))
     const shown = await Promise.all(
       stored.map(async chat => [chat.id, chat.kind === 'dm' && chat.peer ? latestCards(await store.listMessages(chat.id)).get(memberId(chat.peer.signPublic)) : undefined] as const)

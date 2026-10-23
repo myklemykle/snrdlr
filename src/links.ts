@@ -55,6 +55,9 @@ export function pictureLink(text: string): string | null {
   return null
 }
 
+/** Whether a link leads into the app itself, such as an invite, and so opens in this tab, where this device's chats are. */
+export const leadsHere = (href: string, here: string) => new URL(href, here).origin === new URL(here).origin
+
 const SETTING = 'snrdlr.linkPictures'
 
 /**

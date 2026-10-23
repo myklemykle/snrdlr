@@ -237,6 +237,17 @@ function wrap(db: IDBPDatabase<Schema>) {
       ).length
     },
 
+    /** When the chat's last message (words, a picture or a voice message) was written, or when the chat began if it has none. */
+    async lastActivity(chat: ChatRecord): Promise<number> {
+      // Walked back from the end of display order, so this is the message shown last.
+      let cursor = await db.transaction('messages').store.index('order').openCursor(IDBKeyRange.bound([chat.id], [chat.id, []]), 'prev')
+      for (; cursor; cursor = await cursor.continue()) {
+        const {type} = cursor.value.content
+        if (type === 'text' || type === 'image' || type === 'audio') return cursor.value.sentAt
+      }
+      return chat.createdAt
+    },
+
     /** A chat's messages in display order: by logical clock, then author. */
     listMessages: (chatId: string) =>
       // An array sorts after any number, so [chatId, []] is past every clock value.

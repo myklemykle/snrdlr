@@ -113,6 +113,18 @@ describe('store', () => {
     expect(await store.unreadCount((await store.getChat('chat-a'))!, 'me')).toBe(0)
   })
 
+  it("knows when a chat's last message was written, or when it began if nothing has been", async () => {
+    const store = await openStore(freshName())
+    const saved = await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 100}))
+    expect(await store.lastActivity(saved)).toBe(100)
+    await store.addMessage(message({seq: 1, lamport: 1, sentAt: 500}))
+    await store.addMessage(message({seq: 2, lamport: 2, sentAt: 700}))
+    // A reaction or a profile is not a message anyone reads, so it does not count.
+    await store.addMessage(message({seq: 3, lamport: 3, sentAt: 900, content: {type: 'profile', name: 'A', dh: new Uint8Array(32)}}))
+    await store.addMessage(message({chatId: 'chat-b', seq: 1, lamport: 9, sentAt: 990}))
+    expect(await store.lastActivity(saved)).toBe(700)
+  })
+
   it("does not count a chat's history as unread on a device it has just reached from another of the person's", async () => {
     const store = await openStore(freshName())
     const saved = await store.saveChat(chat({id: 'chat-a', name: 'A', createdAt: 1000, historyBefore: 1000}))

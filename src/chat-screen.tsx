@@ -5,7 +5,7 @@ import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {loadDraft, saveDraft} from './drafts'
 import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
-import {findLinks, pictureLink, showsLinkPictures} from './links'
+import {findLinks, leadsHere, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
@@ -625,7 +625,7 @@ export function ChatScreen(props: {
       return (
         <a
           href={piece.href}
-          target="_blank"
+          target={leadsHere(piece.href, location.href) ? undefined : '_blank'}
           rel="noopener noreferrer"
           // The tap that ends a long press opens the menu, not the link.
           onClick={event => (menu || Date.now() - menuOpenedAt.current <= 700) && event.preventDefault()}
