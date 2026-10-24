@@ -1033,6 +1033,24 @@ button:disabled {
   border: 0;
 }
 
+.diagnosis {
+  margin: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.diagnosis > button {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+}
+
+.diagnosis pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0 0 0.4rem;
+}
+
 .invite .standing {
   margin-top: 0.75rem;
   padding-top: 0.75rem;

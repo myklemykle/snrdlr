@@ -138,8 +138,8 @@ export async function makeRemoteInvite(
   }
 }
 
-/** Everything the relay holds under a topic: resolves once it has all come. */
-function collect(open: OpenMailbox, topic: string, timeoutMs: number): Promise<Uint8Array[] | null> {
+/** Everything the relay holds on a topic, or null if it did not answer in time. */
+export function collect(open: OpenMailbox, topic: string, timeoutMs: number): Promise<Uint8Array[] | null> {
   return new Promise(resolve => {
     const found: Uint8Array[] = []
     let done = false

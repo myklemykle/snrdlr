@@ -1285,6 +1285,7 @@ test('developer mode: invites from afar let people join with the inviter gone, u
   // Not offered unless developer mode has been turned on.
   const invite = await startChat(anne, 'Anne', 'Plain')
   expect(invite).toContain('#i=')
+  await expect(anne.getByRole('button', {name: "Check what's held"})).toHaveCount(0)
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.getByRole('button', {name: 'Invites'})).toHaveCount(0)
 
@@ -1296,6 +1297,10 @@ test('developer mode: invites from afar let people join with the inviter gone, u
   expect(anne.url()).not.toContain('dev=')
   await anne.getByLabel('Chat name').fill('Demo')
   await anne.getByRole('button', {name: 'Start a group'}).click()
+  // A chat can be checked for what this device and the relay hold.
+  await anne.getByRole('button', {name: "Check what's held"}).click()
+  await expect(anne.getByLabel("What's held")).toContainText(/On the relay: \d+ stored/, {timeout: 25_000})
+  await anne.getByRole('button', {name: 'Close', exact: true}).click()
   // Cindy joins the ordinary way, while the code is showing.
   await cindy.goto(await copyInvite(anne))
   await introduce(cindy, 'Cindy')
@@ -1919,8 +1924,11 @@ test('settings keep their title and close button in view while the rest scrolls'
   await anne.goto('/')
   await introduce(anne, 'Anne')
   const sheet = await openSettings(anne)
-  await sheet.locator('.sheet-body').evaluate(element => (element.scrollTop = element.scrollHeight))
-  await expect(sheet.getByRole('button', {name: 'Done'})).toBeInViewport()
+  // Some lines arrive after the sheet opens and push the end down, so scrolling is tried again until it holds.
+  await expect(async () => {
+    await sheet.locator('.sheet-body').evaluate(element => (element.scrollTop = element.scrollHeight))
+    await expect(sheet.getByRole('button', {name: 'Done'})).toBeInViewport({timeout: 500})
+  }).toPass()
   await expect(sheet.getByRole('heading', {name: 'Settings'})).toBeInViewport()
   const close = sheet.getByRole('button', {name: 'Close'})
   await expect(close).toBeInViewport()

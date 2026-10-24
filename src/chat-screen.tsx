@@ -27,6 +27,7 @@ import {uniqueChatName} from './names'
 import {openSession, type ConnectionStatus, type Session} from './session'
 import {playSound} from './sound'
 import {devMode} from './standing-invite'
+import {diagnoseChat} from './diagnose'
 import type {ChatRecord, MessageRecord, Store} from './store'
 import {dayKey, formatDay, formatTime} from './time'
 import {joinChat} from './transport'
@@ -80,6 +81,12 @@ export function ChatScreen(props: {
   const [routes, setRoutes] = useState<Route[]>([])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [error, setError] = useState<string | null>(null)
+  // Developer mode: a report on what this device and the relay hold for this chat (diagnose.ts).
+  const [report, setReport] = useState<string | null>(null)
+  const check = async () => {
+    setReport('Checking…')
+    setReport(await diagnoseChat(chat, identity, store, mailboxes).catch(error => `The check failed: ${error instanceof Error ? error.message : error}`))
+  }
   const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen && !direct ? createInvite(identity) : null))
   const [inviteNote, setInviteNote] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -779,6 +786,26 @@ export function ChatScreen(props: {
             ✕
           </button>
         </p>
+      )}
+
+      {devMode() && (
+        <section class="diagnosis">
+          {report === null ? (
+            <button type="button" onClick={check}>
+              Check what's held
+            </button>
+          ) : (
+            <>
+              <pre aria-label="What's held">{report}</pre>
+              <button type="button" disabled={report === 'Checking…'} onClick={() => void navigator.clipboard.writeText(report).catch(() => {})}>
+                Copy report
+              </button>{' '}
+              <button type="button" onClick={() => setReport(null)}>
+                Close
+              </button>
+            </>
+          )}
+        </section>
       )}
 
       {inviteNote && <p class="note">{inviteNote}</p>}
