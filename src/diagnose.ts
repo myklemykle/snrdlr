@@ -50,7 +50,7 @@ export async function diagnoseChat(shown: ChatRecord, identity: Identity, store:
 
   const lines = [
     `Chat ${chat.id.slice(0, 8)} (${chat.kind}), here since ${day(chat.createdAt)}${chat.historyBefore ? ', from another of my devices' : ''}`,
-    `Checked ${day(Date.now())} UTC; last collected from the relay ${chat.collectedAt ? day(chat.collectedAt) : 'never'}`,
+    `Checked ${day(Date.now())} UTC; last collected from the relay ${chat.caughtUpAt ? day(chat.caughtUpAt) : 'never'}`,
     '',
     `On this device: ${held.length} messages`
   ]

@@ -11,7 +11,7 @@ import type {OpenMailbox} from './mailbox'
 import {tallyReactions} from './reactions'
 import {pushTag, worthNotifying} from './push-tag'
 import {openSession, versionVector, type ConnectionStatus} from './session'
-import {openAsMember} from './store-seal'
+import {openAsMember, sealForMembers} from './store-seal'
 import {openStore, type ChatRecord, type MessageRecord, type Store} from './store'
 import {makeNetwork} from './test-network'
 
@@ -764,6 +764,55 @@ describe('session', () => {
 
     const anneAgain = await join(makeNetwork(), chat, anne.identity, anne.store, undefined, shelf.open)
     await vi.waitFor(() => expect(texts(anneAgain.view)).toEqual(['are you there?', 'I am going out', 'here now']))
+  })
+
+  it("passes on a member's proof that they belong, so another device that could not open it keeps their messages", async () => {
+    const shelf = makeShelf()
+    const chat = makeChat()
+    const anne = createIdentity('Anne')
+    const anneChat = admitted(chat, anne)
+    const [phone, desk] = [await openStore(`session-proof-${counter++}`), await openStore(`session-proof-${counter++}`)]
+    await phone.saveChat(anneChat)
+    await desk.saveChat(anneChat)
+    // Reed meets Anne's phone once, and writes while they are together.
+    const meeting = makeNetwork()
+    const first = await join(meeting, chat, anne, phone, anneChat)
+    const reed = await join(meeting, chat, createIdentity('Reed'))
+    await settle()
+    await reed.session.sendText('hello from Reed')
+    await vi.waitFor(() => expect(texts(first.view)).toEqual(['hello from Reed']))
+    await first.session.close()
+    await reed.session.close()
+    // What Reed left with the relay: their profile locked to themselves alone, as a joiner's could be,
+    // and their words locked to Anne as well.
+    const lockTo = (people: Identity[]) => people.map(({id, dhPublic}) => ({id, dhPublic}))
+    const reeds = await reed.store.listMessages(chat.id)
+    const profile = reeds.find(({author, content}) => author === reed.identity.id && content.type === 'profile')!
+    const words = reeds.find(({content}) => content.type === 'text')!
+    shelf.kept.set(chatKeys(chat).storeTopic, [
+      await sealForMembers(chat.id, profile.envelope, lockTo([reed.identity])),
+      await sealForMembers(chat.id, words.envelope, lockTo([reed.identity, anne]))
+    ])
+
+    // Anne's desktop can open Reed's words, but not the proof that Reed belongs, so it cannot keep them,
+    // and does not count the relay as caught up on.
+    const deskAnne = {...anne, device: '0123456789abcdef'} as Identity
+    const alone = await join(makeNetwork(), chat, deskAnne, desk, anneChat, shelf.open)
+    await settle()
+    expect(texts(alone.view)).toEqual([])
+    await alone.session.close()
+    expect((await desk.getChat(chat.id))!.caughtUpAt).toBeUndefined()
+
+    // Her phone, which has Reed's profile, leaves it again for everyone it knows of.
+    const before = shelf.kept.get(chatKeys(chat).storeTopic)!.length
+    const phoneAgain = await join(makeNetwork(), chat, anne, phone, anneChat, shelf.open)
+    await vi.waitFor(() => expect(shelf.kept.get(chatKeys(chat).storeTopic)!.length).toBeGreaterThan(before + 1))
+    await phoneAgain.session.close()
+
+    const deskAgain = await join(makeNetwork(), chat, deskAnne, desk, anneChat, shelf.open)
+    await vi.waitFor(() => expect(texts(deskAgain.view)).toEqual(['hello from Reed']))
+    await deskAgain.session.close()
+    await vi.waitFor(async () => expect((await desk.getChat(chat.id))!.caughtUpAt).toBeGreaterThan(0))
   })
 
   it('locks what it leaves with the relay to the members, so a copy of the chat secret is not enough to read it', async () => {

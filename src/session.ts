@@ -379,11 +379,15 @@ export async function openSession(options: {
     for (const {author, content} of messages) if (content.type === 'profile' && roster.has(author)) found.set(author, content.dh)
     return [...found].map(([id, dhPublic]) => ({id, dhPublic}))
   }
-  function shelve(record: MessageRecord) {
+  /**
+   * Leaves a message with the relay. `again` leaves another copy of one that may already be there, locked
+   * to everyone known now; it is never skipped for a copy still on its way, which was locked to fewer.
+   */
+  function shelve(record: MessageRecord, again = false) {
     const mailbox = box
     if (!mailbox) return
     // Only this device's messages are tracked; one written on another of ours is just left again.
-    const tracked = fromHere(record)
+    const tracked = fromHere(record) && !again
     if (tracked && shelving.has(record.seq)) return
     if (tracked) shelving.add(record.seq)
     // A message just written here wakes the other members' devices; anything else waits until they look.
@@ -416,18 +420,48 @@ export async function openSession(options: {
       }
     })
   }
+  // Proof of membership travels in each member's profile, which is locked to whoever its author knew of
+  // when leaving it. A member who came later might never be able to open it, and so could never keep
+  // that author's messages. So whenever someone new is known, everyone's latest profile is left again,
+  // for everyone. Anyone may pass a profile on: it is signed by its author.
+  let proofsFor = chat.proofsFor ?? ''
+  function shareProofs() {
+    if (!box || chat.kind !== 'group') return
+    const ids = recipients()
+      .map(({id}) => id)
+      .sort()
+      .join(',')
+    if (ids === proofsFor) return
+    proofsFor = ids
+    const latest = new Map<string, MessageRecord>()
+    for (const message of messages) if (message.content.type === 'profile' && roster.has(message.author)) latest.set(message.author, message)
+    for (const profile of latest.values()) shelve(profile, true)
+    void store.noteMailbox(chat.id, {proofsFor}).catch(() => {})
+  }
+
   function openMailbox() {
     if (!options.mailbox || closed) return
-    box = options.mailbox(keys.storeTopic, chat.collectedAt, {
+    // Taken in one at a time, in the order the relay sends them, so that once it is done we know whether
+    // anything had to wait for proof that its author is a member.
+    let opening = Promise.resolve()
+    box = options.mailbox(keys.storeTopic, chat.caughtUpAt, {
       // Only what was locked to us opens; then it is checked like anything a peer sends.
-      onEnvelope: stored =>
-        void openAsMember(chat.id, stored, identity).then(envelope => {
-          if (envelope && !closed) void receive(envelope)
-        }),
-      onCaughtUp: asOf => void store.noteMailbox(chat.id, {collectedAt: asOf}).catch(() => {})
+      onEnvelope: stored => {
+        opening = opening.then(async () => {
+          const envelope = await openAsMember(chat.id, stored, identity)
+          if (envelope && !closed) await receive(envelope)
+        })
+      },
+      // Something still waiting for its author's proof would not be asked for again from after this, so
+      // the relay is only marked as caught up when nothing is.
+      onCaughtUp: asOf =>
+        void opening.then(() => {
+          if (held.length === 0) void store.noteMailbox(chat.id, {caughtUpAt: asOf}).catch(() => {})
+        })
     })
     // Ours that the relay may not have, oldest first.
     for (const record of ownHeld()) if (record.seq > storedSeq && record.sentAt > freshFrom) shelve(record)
+    shareProofs()
   }
 
   /** Signs, stores, then sends a message of our own. Peers who are away get it by sync later. */
@@ -458,10 +492,12 @@ export async function openSession(options: {
     // stored it after we loaded the history. Without this it would stay hidden until a reload.
     if (!closed && (isNew || !holds(record))) insert(record)
     // Someone whose key we had not seen: leave our own introduction with the relay again, now locked to
-    // them as well, so that they can learn our key from it even if we are never online together.
+    // them as well, so that they can learn our key from it even if we are never online together. In a
+    // group, everyone else's too, so they can tell that the others belong (shareProofs).
     if (isNew && !closed && record.content.type === 'profile' && record.author !== identity.id) {
       const own = messages.findLast(({author, content}) => author === identity.id && content.type === 'profile')
-      if (own) shelve(own)
+      if (chat.kind === 'group') shareProofs()
+      else if (own) shelve(own, true)
     }
     if (record.content.type === 'image' || record.content.type === 'audio' || record.content.type === 'card') fetchFiles()
   }

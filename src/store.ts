@@ -38,8 +38,14 @@ export type ChatRecord = {
   ownSeqFloor?: number
   /** Our own messages up to this number are known to be with the relay that keeps them for members who are offline. */
   storedSeq?: number
-  /** When we last collected everything that relay held for this chat. */
-  collectedAt?: number
+  /**
+   * When we last collected everything that relay held for this chat, and could keep all of it. (Named
+   * afresh after an earlier field, `collectedAt`, which went forward even past messages that could not be
+   * kept yet; leaving that one behind makes each device collect everything once more.)
+   */
+  caughtUpAt?: number
+  /** Who could open the profiles we last left with the relay for everyone (session.ts), as their IDs. */
+  proofsFor?: string
 }
 
 export type MessageRecord = Message & {
@@ -165,13 +171,14 @@ function wrap(db: IDBPDatabase<Schema>) {
       await tx.done
     },
     /** Records how far this chat's dealings with the message-keeping relay have got. Only ever moves forward. */
-    async noteMailbox(id: string, progress: {storedSeq?: number; collectedAt?: number}): Promise<void> {
+    async noteMailbox(id: string, progress: {storedSeq?: number; caughtUpAt?: number; proofsFor?: string}): Promise<void> {
       const tx = db.transaction('chats', 'readwrite')
       const chat = await tx.store.get(id)
       if (chat) {
         const storedSeq = Math.max(chat.storedSeq ?? 0, progress.storedSeq ?? 0)
-        const collectedAt = Math.max(chat.collectedAt ?? 0, progress.collectedAt ?? 0)
-        await tx.store.put({...chat, ...(storedSeq ? {storedSeq} : {}), ...(collectedAt ? {collectedAt} : {})})
+        const caughtUpAt = Math.max(chat.caughtUpAt ?? 0, progress.caughtUpAt ?? 0)
+        const proofsFor = progress.proofsFor ?? chat.proofsFor
+        await tx.store.put({...chat, ...(storedSeq ? {storedSeq} : {}), ...(caughtUpAt ? {caughtUpAt} : {}), ...(proofsFor !== undefined ? {proofsFor} : {})})
       }
       await tx.done
     },
