@@ -1565,3 +1565,34 @@
 {"at":"2026-10-27T05:13:29.903Z","from":"github","url":"wss://relay.agentry.com","infoMs":111,"software":"strfry 1.1.0-4-ge53d8de","connectMs":77,"subscribeMs":37,"outcome":"ok","deliveryMs":86}
 {"at":"2026-10-27T05:13:29.909Z","from":"github","url":"wss://relay.routstr.com","infoMs":346,"software":"strfry 1.1.0-77-g6fe449f","connectMs":338,"subscribeMs":99,"outcome":"ok","deliveryMs":875}
 {"at":"2026-10-27T05:13:34.782Z","from":"github","url":"wss://relay.snort.social","infoMs":597,"software":"memlay 0.2.0","connectMs":219,"subscribeMs":73,"outcome":"not-delivered"}
+{"at":"2026-10-27T12:21:26.598Z","from":"github","url":"wss://nostr.red5d.dev","infoMs":380,"connectMs":171,"subscribeMs":39,"outcome":"ok","deliveryMs":45}
+{"at":"2026-10-27T12:21:26.768Z","from":"github","url":"wss://relay.nostr.blockhenge.com","infoMs":445,"software":"strfry v1-6fe449f","connectMs":194,"subscribeMs":31,"outcome":"ok","deliveryMs":159}
+{"at":"2026-10-27T12:21:27.054Z","from":"github","url":"wss://relay.primal.net","infoMs":393,"software":"strfry 1.1.3","connectMs":440,"subscribeMs":135,"outcome":"ok","deliveryMs":151}
+{"at":"2026-10-27T12:21:27.066Z","from":"github","url":"wss://relay.routstr.com","infoMs":654,"outcome":"unreachable","note":"handshake answered 502"}
+{"at":"2026-10-27T12:21:27.276Z","from":"github","url":"wss://relay.nostr.dev.br","infoMs":530,"software":"nostr-rs-relay 0.10.0","connectMs":567,"subscribeMs":124,"outcome":"ok","deliveryMs":117}
+{"at":"2026-10-27T12:21:27.449Z","from":"github","url":"wss://0x-nostr-relay.fly.dev","infoMs":230,"software":"nostr-rs-relay 0.9.0","connectMs":192,"subscribeMs":121,"outcome":"ok","deliveryMs":135}
+{"at":"2026-10-27T12:21:27.643Z","from":"github","url":"wss://nostr-pub.wellorder.net","infoMs":677,"software":"nostr-rs-relay 0.9.0","connectMs":274,"subscribeMs":45,"outcome":"ok","deliveryMs":47}
+{"at":"2026-10-27T12:21:27.670Z","from":"github","url":"wss://relay.hackshed.dev","infoMs":161,"connectMs":237,"subscribeMs":57,"outcome":"ok","deliveryMs":157}
+{"at":"2026-10-27T12:21:27.733Z","from":"github","url":"wss://nostr.christiansass.de","infoMs":1054,"software":"nostr-rs-relay 0.10.0","connectMs":475,"subscribeMs":145,"outcome":"ok","deliveryMs":146}
+{"at":"2026-10-27T12:21:27.925Z","from":"github","url":"wss://relay.agentry.com","infoMs":277,"software":"strfry 1.1.0-4-ge53d8de","connectMs":225,"subscribeMs":25,"outcome":"ok","deliveryMs":120}
+{"at":"2026-10-27T12:21:28.304Z","from":"github","url":"wss://nostrcity-club.fly.dev","infoMs":373,"software":"nostr-rs-relay 0.9.0","connectMs":172,"subscribeMs":41,"outcome":"ok","deliveryMs":44}
+{"at":"2026-10-27T12:21:28.584Z","from":"github","url":"wss://nostr.stakey.net","infoMs":592,"software":"strfry 1.1.0","connectMs":592,"subscribeMs":112,"outcome":"ok","deliveryMs":220}
+{"at":"2026-10-27T12:21:28.867Z","from":"github","url":"wss://offchain.pub","infoMs":344,"software":"strfry 1.1.0","connectMs":419,"subscribeMs":29,"outcome":"ok","deliveryMs":148}
+{"at":"2026-10-27T12:21:28.891Z","from":"github","url":"wss://nos.lol","infoMs":476,"software":"strfry 1.1.3","connectMs":459,"subscribeMs":133,"outcome":"ok","deliveryMs":178}
+{"at":"2026-10-27T12:21:29.241Z","from":"github","url":"wss://relay.piazza.today","infoMs":767,"software":"ditto-relay 0.1.0","connectMs":466,"subscribeMs":145,"outcome":"ok","deliveryMs":128}
+{"at":"2026-10-27T12:21:29.296Z","from":"github","url":"wss://nostr.mom","infoMs":680,"software":"strfry 1.1.3","connectMs":798,"subscribeMs":130,"outcome":"ok","deliveryMs":236}
+{"at":"2026-10-27T12:21:29.405Z","from":"github","url":"wss://snrdlr-relay.snrdlr.workers.dev","infoMs":215,"software":"snrdlr","connectMs":243,"subscribeMs":37,"outcome":"ok","deliveryMs":41}
+{"at":"2026-10-27T12:21:29.830Z","from":"github","url":"wss://relay.damus.io","infoMs":267,"software":"strfry 1.1.0-158-gb705403ddf49","outcome":"unreachable","note":"handshake answered 503"}
+{"at":"2026-10-27T12:21:29.909Z","from":"github","url":"wss://relay.nostrmap.net","infoMs":764,"software":"strfry 1.1.2-148-g4cd3cf6","connectMs":451,"subscribeMs":141,"outcome":"ok","deliveryMs":247}
+{"at":"2026-10-27T12:21:30.008Z","from":"github","url":"wss://nostr.oxtr.dev","infoMs":581,"software":"strfry 1.0.4","connectMs":485,"subscribeMs":123,"outcome":"ok","deliveryMs":232}
+{"at":"2026-10-27T12:21:30.110Z","from":"github","url":"wss://relay.novospes.com","infoMs":439,"software":"strfry 1.1.0-96-g7984f80","connectMs":420,"subscribeMs":121,"outcome":"ok","deliveryMs":237}
+{"at":"2026-10-27T12:21:30.351Z","from":"github","url":"wss://relay.aarpia.com","infoMs":200,"software":"nostr-rs-relay 0.9.0","connectMs":235,"subscribeMs":41,"outcome":"ok","deliveryMs":39}
+{"at":"2026-10-27T12:21:30.648Z","from":"github","url":"wss://nostr.rblb.it","infoMs":616,"software":"strfry 1.1.0-77-g6fe449f","connectMs":394,"subscribeMs":112,"outcome":"ok","deliveryMs":226}
+{"at":"2026-10-27T12:21:30.653Z","from":"github","url":"wss://relay.bullishbounty.com","infoMs":574,"software":"nostream 2.1.0","connectMs":527,"subscribeMs":157,"outcome":"ok","deliveryMs":151}
+{"at":"2026-10-27T12:21:30.819Z","from":"github","url":"wss://relay-dev.gulugulu.moe","infoMs":472,"software":"nostr development","connectMs":190,"subscribeMs":70,"outcome":"ok","deliveryMs":74,"note":"OK true: broadcasted to 39"}
+{"at":"2026-10-27T12:21:31.118Z","from":"github","url":"wss://relay.degmods.com","infoMs":437,"software":"strfry v236-c0dec7c","connectMs":416,"subscribeMs":125,"outcome":"ok","deliveryMs":229}
+{"at":"2026-10-27T12:21:31.146Z","from":"github","url":"wss://testr.nymble.world","infoMs":148,"software":"strfry 1.0.4","connectMs":162,"subscribeMs":42,"outcome":"ok","deliveryMs":143}
+{"at":"2026-10-27T12:21:31.309Z","from":"github","url":"wss://relay.layer.systems","infoMs":572,"software":"relay 0.1.1","connectMs":345,"subscribeMs":142,"outcome":"ok","deliveryMs":135,"note":"OK true: broadcasted to 1 listeners"}
+{"at":"2026-10-27T12:21:31.602Z","from":"github","url":"wss://relay.grigic.org","infoMs":144,"connectMs":508,"subscribeMs":137,"outcome":"ok","deliveryMs":156}
+{"at":"2026-10-27T12:21:31.951Z","from":"github","url":"wss://nostr.chaima.info","infoMs":479,"software":"nostr-rs-relay 0.9.0","connectMs":411,"subscribeMs":120,"outcome":"ok","deliveryMs":119}
+{"at":"2026-10-27T12:21:31.961Z","from":"github","url":"wss://relay.nostr.net","infoMs":649,"software":"strfry 1.1.2-148-g4cd3cf6","connectMs":570,"subscribeMs":136,"outcome":"ok","deliveryMs":253}
