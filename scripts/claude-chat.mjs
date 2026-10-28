@@ -67,6 +67,8 @@ async function chatNames(page) {
         await aside.click()
         await greeting.waitFor({timeout: 30_000})
       }
+      // The list is filled in a moment after the greeting shows; with no chats it never appears.
+      await page.locator('.chats').waitFor({timeout: 10_000}).catch(() => {})
       return await page.locator('.chats .open .name').allTextContents()
     } catch (error) {
       if (attempt >= 2) throw error
