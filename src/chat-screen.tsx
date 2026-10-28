@@ -749,7 +749,7 @@ export function ChatScreen(props: {
                 <Avatar card={cards.get(peerId)} name={chatName} id={peerId} />
               </button>
             )}
-            <h1>{chatName}</h1>
+            <h1 title={chatName}>{chatName}</h1>
             {!direct && (
               <button type="button" class="pencil" aria-label="Rename chat" disabled={!messages} onClick={() => setRenaming(chatName)}>
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">

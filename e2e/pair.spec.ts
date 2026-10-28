@@ -2489,3 +2489,20 @@ test('a link to a picture shows the picture below the message, once per message,
   await expect(bob.locator('.theirs', {hasText: 'two:'})).toBeVisible()
   await expect(bob.locator('.link-picture')).toHaveCount(0)
 })
+
+test('a long chat name and a long message leave the message box and Send in view above a keyboard', async ({browser}) => {
+  const page = await newPerson(browser)
+  // About what an iPhone SE shows above its keyboard.
+  await page.setViewportSize({width: 375, height: 330})
+  await page.goto('/')
+  await introduce(page, 'Me')
+  await page.getByLabel('Chat name').fill('Enrique the Cheerful Snerdle Dolphin')
+  await page.getByRole('button', {name: 'Start a group'}).click()
+  await page.getByRole('button', {name: 'Stop inviting'}).click()
+  await page.getByLabel('Message').fill(Array(40).fill('a long message that goes on').join(' '))
+  // The name takes one line, and the box stops growing and scrolls instead.
+  expect((await page.locator('.chat header').boundingBox())!.height).toBeLessThan(90)
+  await expect(page.getByRole('heading', {name: 'Enrique the Cheerful Snerdle Dolphin'})).toHaveAttribute('title', 'Enrique the Cheerful Snerdle Dolphin')
+  await expect(page.getByLabel('Message')).toBeInViewport({ratio: 1})
+  await expect(page.getByRole('button', {name: 'Send'})).toBeInViewport({ratio: 1})
+})

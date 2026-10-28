@@ -125,8 +125,16 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
-.chat header h1 {
-  overflow-wrap: anywhere;
+.chat header {
+  flex: none;
+}
+
+/* A long name takes one line and is cut short, so the header stays small; the full name is its title. */
+.chat header h1,
+.chat header .status {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .status {
@@ -210,6 +218,7 @@ button:disabled {
 }
 
 .composer {
+  flex: none;
   display: flex;
   gap: 0.5rem;
   padding: 0.75rem 0;
@@ -219,8 +228,9 @@ button:disabled {
 .composer textarea {
   flex: 1;
   min-width: 0;
-  /* Grows with what is typed (chat-screen.tsx), up to about six lines. */
-  max-height: 9.5rem;
+  /* Grows with what is typed (chat-screen.tsx), up to about six lines, or a quarter of what is visible
+     above an iPhone's keyboard if that is less. Past that it scrolls, however long the message. */
+  max-height: min(9.5rem, calc(var(--visible-height, 100dvh) * 0.25));
   resize: none;
   line-height: 1.35;
 }

@@ -9,6 +9,7 @@
 //   node scripts/claude-chat.mjs listen [--chat <name>]      stays in a direct chat: prints each new message
 //                                                           from the other person as a line of JSON, and
 //                                                           sends what `say` hands it meanwhile
+//   node scripts/claude-chat.mjs name <new name>            changes the name it goes by, in every chat
 //   node scripts/claude-chat.mjs chats                      lists its chats
 //
 // `listen` prints {"at", "text", "pictures": [paths], "edited"?, "replyTo"?} for each message, saving
@@ -139,6 +140,17 @@ async function send(page, name, text, picture) {
   }
 }
 
+/** Changes the name in the profile, from the front page, which leaves the page there. */
+async function rename(page, name) {
+  if (!name.trim()) throw new Error('No name given.')
+  await chatNames(page)
+  await page.getByRole('button', {name: 'Your profile'}).click()
+  const editor = page.getByRole('dialog', {name: 'Your profile'})
+  await editor.getByLabel('Name').fill(name)
+  await editor.getByRole('button', {name: 'Save'}).click()
+  await page.locator('.greeting').getByText(name, {exact: false}).waitFor({timeout: 30_000})
+}
+
 async function joinChat(invite) {
   const {context, page} = await open()
   try {
@@ -171,29 +183,42 @@ function listener() {
   }
 }
 
+/** Hands work to the listener, which has the profile open, and waits for its answer. */
+async function handOver(work) {
+  mkdirSync(OUTBOX, {recursive: true})
+  const id = `${Date.now()}-${process.pid}`
+  writeFileSync(join(OUTBOX, `${id}.tmp`), JSON.stringify(work))
+  renameSync(join(OUTBOX, `${id}.tmp`), join(OUTBOX, `${id}.json`))
+  const deadline = Date.now() + 5 * 60_000
+  while (Date.now() < deadline) {
+    for (const [ending, ok] of [['.sent', true], ['.failed', false]]) {
+      const done = join(OUTBOX, id + ending)
+      if (!existsSync(done)) continue
+      const answer = readFileSync(done, 'utf8')
+      rmSync(done)
+      if (!ok) throw new Error(answer)
+      return console.log(answer)
+    }
+    await sleep(300)
+  }
+  throw new Error('The listener did not do it within five minutes.')
+}
+
+async function renameAs(name) {
+  if (listener()) return handOver({name})
+  const {context, page} = await open()
+  try {
+    await rename(page, name)
+    console.log(`Now called "${name}".`)
+  } finally {
+    await context.close()
+  }
+}
+
 async function say(text, wanted, picture) {
   if (!text.trim() && !picture) throw new Error('Nothing to say.')
   if (picture && !existsSync(picture)) throw new Error(`No such picture: ${picture}`)
-  if (listener()) {
-    // Handed to the listener, which has the profile open.
-    mkdirSync(OUTBOX, {recursive: true})
-    const id = `${Date.now()}-${process.pid}`
-    writeFileSync(join(OUTBOX, `${id}.tmp`), JSON.stringify({text, chat: wanted, picture}))
-    renameSync(join(OUTBOX, `${id}.tmp`), join(OUTBOX, `${id}.json`))
-    const deadline = Date.now() + 5 * 60_000
-    while (Date.now() < deadline) {
-      for (const [ending, ok] of [['.sent', true], ['.failed', false]]) {
-        const done = join(OUTBOX, id + ending)
-        if (!existsSync(done)) continue
-        const answer = readFileSync(done, 'utf8')
-        rmSync(done)
-        if (!ok) throw new Error(answer)
-        return console.log(answer)
-      }
-      await sleep(300)
-    }
-    throw new Error('The listener did not send it within five minutes.')
-  }
+  if (listener()) return handOver({text, chat: wanted, picture})
   const {context, page} = await open()
   try {
     const name = pick(await chatNames(page), wanted)
@@ -315,10 +340,16 @@ async function listen(wanted) {
         const id = file.slice(0, -'.json'.length)
         let reply
         try {
-          const {text, chat: other, picture} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
-          if (other && other !== name) throw new Error(`Listening in "${name}", not "${other}".`)
-          await send(page, name, text, picture)
-          reply = [`${id}.sent`, `Said it in "${name}".`]
+          const {text, chat: other, picture, name: newName} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          if (newName !== undefined) {
+            // Renaming happens on the front page; the next round goes back into the chat.
+            await rename(page, newName)
+            reply = [`${id}.sent`, `Now called "${newName}".`]
+          } else {
+            if (other && other !== name) throw new Error(`Listening in "${name}", not "${other}".`)
+            await send(page, name, text, picture)
+            reply = [`${id}.sent`, `Said it in "${name}".`]
+          }
         } catch (error) {
           reply = [`${id}.failed`, error.message]
         }
@@ -343,7 +374,8 @@ try {
     const chat = option('--chat')
     const picture = option('--picture')
     await say(rest.join(' '), chat, picture && resolve(picture))
-  } else if (command === 'listen') await listen(option('--chat'))
+  } else if (command === 'name') await renameAs(rest.join(' '))
+  else if (command === 'listen') await listen(option('--chat'))
   else if (command === 'chats') {
     const {context, page} = await open()
     try {
@@ -352,7 +384,7 @@ try {
       await context.close()
     }
   } else {
-    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--chat <name>] | chats")
+    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--chat <name>] | name <new name> | chats")
     process.exitCode = 2
   }
 } catch (error) {
