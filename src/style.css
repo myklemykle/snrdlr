@@ -1043,6 +1043,32 @@ button:disabled {
   border: 0;
 }
 
+/* What to call a group started from a direct chat, asked before it is made. */
+.group-start {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.group-start label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.group-start .note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.group-start .actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .diagnosis {
   margin: 0.25rem 0.75rem;
   font-size: 0.8rem;

@@ -656,8 +656,16 @@ export function ChatScreen(props: {
     if (name !== chatName) session.current.rename(name).catch(() => setError('The name could not be changed.'))
   }
 
+  // "Add someone" first asks what to call the new group; nothing is made until it is started, so
+  // changing one's mind leaves nothing behind.
+  const [grouping, setGrouping] = useState<string | null>(null)
+  const groupNameBox = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (grouping !== null) groupNameBox.current?.select()
+  }, [grouping !== null])
+
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null || profileOf !== null)
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null || grouping !== null || profileOf !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -671,11 +679,13 @@ export function ChatScreen(props: {
 
   // "Add someone" in a direct chat: start a group that already includes the other person, tell them
   // through this chat, and go to the group with its invite code up for whoever is being added.
-  const addSomeone = async () => {
-    if (!session.current) return
+  const addSomeone = async (event: Event) => {
+    event.preventDefault()
+    const name = cleanName(grouping ?? '')
+    if (!name || !session.current) return
     try {
       const taken = (await store.listChats()).map(stored => stored.name)
-      const started = groupFromDirect(identity, chat, `Group with ${chatName}`, taken, Date.now())
+      const started = groupFromDirect(identity, chat, name, taken, Date.now())
       await store.saveChat(started.chat)
       await session.current.postGroupInvite(started.invite)
       onOpenChat(started.chat.id, true)
@@ -768,8 +778,8 @@ export function ChatScreen(props: {
           )}
         </div>
         )}
-        {renaming !== null ? null : direct ? (
-          <button type="button" onClick={addSomeone} disabled={!messages}>
+        {renaming !== null || grouping !== null ? null : direct ? (
+          <button type="button" onClick={() => setGrouping(`Group with ${chatName}`)} disabled={!messages}>
             Add someone
           </button>
         ) : (
@@ -778,6 +788,31 @@ export function ChatScreen(props: {
           </button>
         )}
       </header>
+
+      {grouping !== null && (
+        <form class="group-start" onSubmit={addSomeone}>
+          <label>
+            Name for the new group
+            <input
+              ref={groupNameBox}
+              value={grouping}
+              onInput={event => setGrouping(event.currentTarget.value)}
+              onKeyDown={event => event.key === 'Escape' && setGrouping(null)}
+              maxLength={MAX_NAME_LENGTH}
+              autocomplete="off"
+            />
+          </label>
+          <p class="note">{`${chatName} is invited to it here, and you can invite others with its code.`}</p>
+          <div class="actions">
+            <button type="submit" disabled={!cleanName(grouping)}>
+              Start group
+            </button>
+            <button type="button" onClick={() => setGrouping(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
 
       {error && (
         <p class="error dismissable">

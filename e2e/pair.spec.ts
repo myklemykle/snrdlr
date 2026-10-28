@@ -446,8 +446,19 @@ test('"add someone" in a direct chat starts a new group with both people, and a 
   await send(anne, 'private note')
   await expect(bob.locator('.theirs', {hasText: 'private note'})).toBeVisible()
 
+  // Adding someone asks what to call the group first. Cancelling makes nothing.
+  await anne.getByRole('button', {name: 'Add someone'}).click()
+  await expect(anne.getByLabel('Name for the new group')).toHaveValue('Group with Bob')
+  await anne.getByRole('button', {name: 'Cancel'}).click()
+  await expect(anne.getByLabel('Name for the new group')).toHaveCount(0)
+  await expect(anne.getByRole('heading', {name: 'Bob'})).toBeVisible()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(chatEntry(anne, 'Group with Bob')).toHaveCount(0)
+  await chatEntry(anne, 'Bob').click()
+
   // Anne adds someone: she lands in a new, empty group with its code showing for the newcomer.
   await anne.getByRole('button', {name: 'Add someone'}).click()
+  await anne.getByRole('button', {name: 'Start group'}).click()
   await expect(anne.getByRole('heading', {name: 'Group with Bob'})).toBeVisible()
   await expect(anne.getByRole('img', {name: 'Invite code for this chat'})).toBeVisible()
   const groupCode = await copyInvite(anne)
