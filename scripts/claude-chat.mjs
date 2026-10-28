@@ -9,6 +9,9 @@
 //   node scripts/claude-chat.mjs listen [--chat <name>]      stays in a direct chat: prints each new message
 //                                                           from the other person as a line of JSON, and
 //                                                           sends what `say` hands it meanwhile
+//   node scripts/claude-chat.mjs listen --group --chat <name>
+//                                                           the same in a group, printing everyone's messages
+//                                                           but its own, each with who wrote it
 //   node scripts/claude-chat.mjs name <new name>            changes the name it goes by, in every chat
 //   node scripts/claude-chat.mjs chats                      lists its chats
 //
@@ -18,7 +21,14 @@
 // the message to send through .claude-chat/outbox/, since two copies of the browser cannot share one
 // profile.
 //
+// In a group (--group), anyone a member lets in can write, so each line also says who wrote it:
+// "from" (the name they go by, which anyone can choose) and "author" (the start of their id, made from
+// the key that signs their messages, which nobody else can use). Only "author" tells people apart.
+// Run it with its own SNRDLR_PROFILE, as a separate someone, in a session that can change nothing.
+//
 // The profile is kept in .claude-chat/ (not in git), or SNRDLR_PROFILE. SNRDLR_URL picks another copy of the site.
+import {ed25519} from '@noble/curves/ed25519.js'
+import {sha256} from '@noble/hashes/sha2.js'
 import {chromium} from '@playwright/test'
 import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs'
 import {dirname, join, resolve} from 'node:path'
@@ -230,27 +240,39 @@ async function say(text, wanted, picture) {
   }
 }
 
-/** The other person's messages that arrived after `since`, with their pictures' files where held. */
-const newMessages = (page, chatId, since) =>
+/** This profile's own id, as the app makes it from the key that signs its messages. */
+async function selfId(page) {
+  const secret = await withDb(page, async get => Array.from((await get('identity', 'self')).signSecret))
+  return Buffer.from(sha256(ed25519.getPublicKey(Uint8Array.from(secret)))).toString('hex')
+}
+
+/**
+ * The messages that arrived after `since`, with their pictures' files where held: in a direct chat
+ * the other person's, in a group everyone's but our own, with who wrote each.
+ */
+const newMessages = (page, chatId, since, self) =>
   withDb(
     page,
-    async (get, {chatId, since}) => {
+    async (get, {chatId, since, self}) => {
       const chat = await get('chats', chatId)
-      const other = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', chat.peer.signPublic)), byte => byte.toString(16).padStart(2, '0')).join('')
+      const other = chat.kind === 'dm' ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', chat.peer.signPublic)), byte => byte.toString(16).padStart(2, '0')).join('') : null
       const arrived = await get('messages', IDBKeyRange.bound([chatId, since], [chatId, Infinity], true), 'received')
       const all = arrived.length ? await get('messages', IDBKeyRange.bound([chatId], [chatId, []]), 'order') : []
       const quote = ref => {
         const found = ref && all.find(message => message.author === ref.author && message.device === (ref.device ?? '') && message.seq === ref.seq)
         return found ? (found.content.text ?? found.content.caption ?? '(a picture)') : undefined
       }
+      const names = new Map()
+      for (const message of all) if (message.content.type === 'profile') names.set(message.author, message.content.name)
       const out = []
       for (const message of arrived) {
-        if (message.author !== other) continue
+        if (other ? message.author !== other : message.author === self) continue
         const {content} = message
         const base = {seq: message.seq, device: message.device, receivedAt: message.receivedAt, at: new Date(message.sentAt).toISOString()}
+        if (!other) Object.assign(base, {from: names.get(message.author) ?? '', author: message.author.slice(0, 12)})
         if (content.type === 'text') out.push({...base, text: content.text, replyTo: quote(content.replyTo)})
         else if (content.type === 'edit') {
-          const target = all.find(m => m.author === other && m.device === content.target.device && m.seq === content.target.seq)
+          const target = all.find(m => m.author === message.author && m.device === content.target.device && m.seq === content.target.seq)
           out.push({...base, text: content.text, edited: target?.content.text ?? target?.content.caption ?? ''})
         } else if (content.type === 'audio') {
           const file = await get('files', [chatId, content.hash])
@@ -274,10 +296,10 @@ const newMessages = (page, chatId, since) =>
       }
       return {messages: out, held: arrived.length ? Math.max(...arrived.map(message => message.receivedAt)) : since}
     },
-    {chatId, since}
+    {chatId, since, self}
   )
 
-async function listen(wanted) {
+async function listen(wanted, group) {
   if (listener()) throw new Error('Already listening.')
   mkdirSync(OUTBOX, {recursive: true})
   mkdirSync(INBOX, {recursive: true})
@@ -291,7 +313,9 @@ async function listen(wanted) {
   try {
     const name = pick(await chatNames(page), wanted)
     const chat = await withDb(page, async (get, name) => (await get('chats')).find(chat => chat.name === name), name)
-    if (chat.kind !== 'dm') throw new Error(`"${name}" is a group; listen only in a direct chat, where nobody else can join.`)
+    if (chat.kind !== 'dm' && !group) throw new Error(`"${name}" is a group, where anyone a member lets in can write. Listen there only with --group, as its own profile.`)
+    if (chat.kind === 'dm' && group) throw new Error(`"${name}" is a direct chat, not a group.`)
+    const self = await selfId(page)
     let since = Date.now()
     writeFileSync(LISTENING, JSON.stringify({pid: process.pid, chat: name}))
     await openChat(page, name)
@@ -314,9 +338,9 @@ async function listen(wanted) {
         await chatNames(page)
         await openChat(page, name)
       }
-      const {messages, held} = await newMessages(page, chat.id, since)
+      const {messages, held} = await newMessages(page, chat.id, since, self)
       for (const message of messages) {
-        const key = `${message.device}.${message.seq}`
+        const key = `${message.author ?? ''}.${message.device}.${message.seq}`
         if (printed.has(key)) continue
         if (message.picture === null && (waiting.get(key) ?? 0) < PICTURE_ROUNDS) {
           waiting.set(key, (waiting.get(key) ?? 0) + 1)
@@ -330,11 +354,11 @@ async function listen(wanted) {
           writeFileSync(path, Buffer.from(message.picture, 'base64'))
           pictures.push(path)
         }
-        const {at, text, edited, replyTo} = message
-        console.log(JSON.stringify({at, text, pictures, ...(message.picture === null ? {missing: 'a picture that did not arrive'} : {}), ...(edited !== undefined ? {edited} : {}), ...(replyTo ? {replyTo} : {})}))
+        const {at, from, author, text, edited, replyTo} = message
+        console.log(JSON.stringify({at, ...(author ? {from, author} : {}), text, pictures, ...(message.picture === null ? {missing: 'a picture that did not arrive'} : {}), ...(edited !== undefined ? {edited} : {}), ...(replyTo ? {replyTo} : {})}))
       }
       // Messages put off until their picture arrives are looked at again from where they started.
-      const putOff = messages.filter(message => waiting.has(`${message.device}.${message.seq}`)).map(message => message.receivedAt)
+      const putOff = messages.filter(message => waiting.has(`${message.author ?? ''}.${message.device}.${message.seq}`)).map(message => message.receivedAt)
       since = putOff.length ? Math.min(...putOff) - 1 : held
       for (const file of readdirSync(OUTBOX).filter(file => file.endsWith('.json')).sort()) {
         const id = file.slice(0, -'.json'.length)
@@ -375,7 +399,11 @@ try {
     const picture = option('--picture')
     await say(rest.join(' '), chat, picture && resolve(picture))
   } else if (command === 'name') await renameAs(rest.join(' '))
-  else if (command === 'listen') await listen(option('--chat'))
+  else if (command === 'listen') {
+    const group = rest.includes('--group')
+    if (group) rest.splice(rest.indexOf('--group'), 1)
+    await listen(option('--chat'), group)
+  }
   else if (command === 'chats') {
     const {context, page} = await open()
     try {
@@ -384,7 +412,7 @@ try {
       await context.close()
     }
   } else {
-    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--chat <name>] | name <new name> | chats")
+    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--group] [--chat <name>] | name <new name> | chats")
     process.exitCode = 2
   }
 } catch (error) {
