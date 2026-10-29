@@ -19,6 +19,8 @@ export const KEEP_SECONDS = 30 * 24 * 60 * 60
 const OVERLAP_SECONDS = 2 * 24 * 60 * 60
 const RECONNECT_MS = [1000, 3000, 10_000, 30_000, 60_000]
 const ANSWER_TIMEOUT_MS = 10_000
+// Out of sight this long, a phone has most likely let the connection die, so it is not worth asking first.
+const DOUBT_AFTER_MS = 30_000
 const MAX_WAITING = 500
 
 export type MailboxHandlers = {
@@ -78,7 +80,11 @@ export function unwrapEnvelope(event: unknown): Uint8Array | null {
 type Sub = {id: string; topic: string; collectedAt: number | undefined; handlers: MailboxHandlers; askedAt: number}
 
 /** Mailboxes on one relay, and a way to say something else to it on their connection while it is up. */
-export type RelayMailboxes = OpenMailbox & {say: (message: unknown[]) => boolean}
+export type RelayMailboxes = OpenMailbox & {
+  say: (message: unknown[]) => boolean
+  /** The app is back after `awayMs` out of sight, or the network has returned: make sure the connection works. */
+  wake: (awayMs: number) => void
+}
 
 /** Mailboxes on one relay, sharing a connection that is opened when first needed and kept up while any is open. */
 export function relayMailboxes(url: string, makeSocket: (url: string) => WebSocket = target => new WebSocket(target)): RelayMailboxes {
@@ -177,8 +183,10 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
   }
 
   // A phone drops connections while the app is out of sight without saying so. Coming back, or the
-  // network returning, is the moment to check: ask again, and start over if no answer comes.
-  const check = () => {
+  // network returning, is the moment to check: ask again, and start over if no answer comes. After a
+  // longer absence it starts over at once, since waiting for an answer that will not come costs seconds
+  // in which new messages do not arrive.
+  const check = (awayMs = 0) => {
     if (subs.size === 0) return
     if (!socket || socket.readyState > WebSocket.OPEN) {
       socket = null
@@ -186,6 +194,15 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
       return connect()
     }
     if (socket.readyState !== WebSocket.OPEN) return
+    if (awayMs >= DOUBT_AFTER_MS) {
+      // What was posted and not yet answered is sent again on the new connection.
+      const doubted = socket
+      socket = null
+      attempts = 0
+      connect()
+      doubted.close()
+      return
+    }
     const checked = socket
     const before = [...subs.values()].map(sub => sub.collectedAt)
     subs.forEach(ask)
@@ -195,8 +212,15 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
     }, ANSWER_TIMEOUT_MS)
   }
   if (typeof addEventListener === 'function' && typeof document !== 'undefined') {
-    addEventListener('online', check)
-    document.addEventListener('visibilitychange', () => !document.hidden && check())
+    let hiddenAt = document.hidden ? Date.now() : null
+    addEventListener('online', () => check(Infinity))
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) hiddenAt = Date.now()
+      else {
+        check(hiddenAt === null ? 0 : Date.now() - hiddenAt)
+        hiddenAt = null
+      }
+    })
   }
 
   const open: OpenMailbox = (topic, collectedAt, handlers) => {
@@ -237,7 +261,7 @@ export function relayMailboxes(url: string, makeSocket: (url: string) => WebSock
     socket.send(JSON.stringify(message))
     return true
   }
-  return Object.assign(open, {say})
+  return Object.assign(open, {say, wake: (awayMs: number) => check(awayMs)})
 }
 
 // Set for local testing against scripts/local-relay.mjs; unset, messages are left with our own relay.

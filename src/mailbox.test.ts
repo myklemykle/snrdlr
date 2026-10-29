@@ -127,4 +127,31 @@ describe('mailbox', () => {
       vi.useRealTimers()
     }
   })
+
+  it('back after a long absence, starts over at once rather than waiting on a connection that may be dead', async () => {
+    vi.useFakeTimers()
+    try {
+      const {makeSocket, sockets, silence} = makeRelay()
+      const open = relayMailboxes('wss://relay', makeSocket)
+      const got: number[] = []
+      const box = open(TOPIC, undefined, {onEnvelope: envelope => got.push(envelope[0])})
+      await vi.advanceTimersByTimeAsync(10)
+      silence(sockets[0] as unknown as {send: (text: string) => void})
+      // A short look away only checks the connection, which takes no new one.
+      open.wake(5_000)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(sockets.length).toBe(1)
+      // A long one starts over straight away, and what someone left meanwhile arrives within moments.
+      const other = relayMailboxes('wss://relay', makeSocket)(TOPIC, undefined, {onEnvelope: () => {}})
+      expect(await other.post(new Uint8Array([7]), Date.now())).toBe(true)
+      open.wake(60_000)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sockets.length).toBe(3)
+      expect(got).toContain(7)
+      box.close()
+      other.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
