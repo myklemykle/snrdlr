@@ -45,6 +45,9 @@ export function incomingKind(type: unknown, first: unknown): IncomingKind {
   return (typeof type === 'string' && known[type]) || 'in_other'
 }
 
+// How often a connection's last word is written down.
+const HEARD_EVERY_MS = 60_000
+
 export const LIMITS = {
   /** Bytes in one incoming message. A connection offer is a few kilobytes. */
   messageBytes: 64 * 1024,
@@ -192,6 +195,8 @@ export type ConnectionState = {
   subs: Record<string, string[]>
   /** When it connected; missing on connections from before this was kept, which count as oldest. */
   since?: number
+  /** When it last sent anything, to the nearest HEARD_EVERY_MS. A live app's room keeps announcing itself. */
+  heard?: number
 }
 
 export type Connection = {
@@ -302,6 +307,17 @@ export class Relay {
     }
   }
 
+  /**
+   * The connections held now: all of them, how many addresses they come from, and how many sent anything
+   * in the last `activeMs`. A phone that went to sleep often leaves its connections open, dead, for hours;
+   * those count in the first, not the last.
+   */
+  connectionCounts(activeMs: number): {open: number; addresses: number; active: number} {
+    const states = [...this.connections.values()].map(entry => entry.state)
+    const since = this.now() - activeMs
+    return {open: states.length, addresses: new Set(states.map(state => state.from)).size, active: states.filter(state => (state.heard ?? 0) >= since).length}
+  }
+
   /** Takes on a connection: a new one, or one that was open before the relay last went idle. */
   add(connection: Connection, state: ConnectionState): void {
     this.connections.set(state.id, {connection, state})
@@ -320,6 +336,12 @@ export class Relay {
     const entry = this.connections.get(id)
     if (!entry) return
     const {connection, state} = entry
+    // Saved only now and then, since each save is a write.
+    const now = this.now()
+    if (state.heard === undefined || now - state.heard >= HEARD_EVERY_MS) {
+      state.heard = now
+      connection.save(state)
+    }
     const reply = (...parts: unknown[]) => connection.send(JSON.stringify(parts))
 
     if (typeof raw !== 'string') return reply('NOTICE', 'invalid: text messages only')

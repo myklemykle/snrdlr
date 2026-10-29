@@ -33,6 +33,8 @@ type ObjectContext = {
 }
 
 const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000
+// A connection counts as active on the dashboard if it sent anything this recently.
+const ACTIVE_MS = 5 * 60_000
 /** Who the push services are told is sending, should they need to get in touch. */
 const PUSH_SUBJECT = 'https://alpha.snrdlr.net'
 /** A device that has not renewed its registration for this long is forgotten. Devices renew daily while used. */
@@ -230,7 +232,7 @@ export class RelayRoom {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + SWEEP_EVERY_MS)
     // Not an upgrade, so not from the relay's public face, which passes on nothing else: the dashboard.
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-      if (new URL(request.url).pathname === '/stats') return Response.json(this.stats.read(this.ctx.getWebSockets().length))
+      if (new URL(request.url).pathname === '/stats') return Response.json(this.stats.read(this.relay.connectionCounts(ACTIVE_MS)))
       return new Response('Not found', {status: 404})
     }
     const from = await shortHash(request.headers.get('CF-Connecting-IP') ?? 'unknown')

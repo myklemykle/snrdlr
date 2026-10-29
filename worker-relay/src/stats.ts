@@ -51,8 +51,12 @@ export type Stats = {
     storedBytes: number
     /** The whole database, as Cloudflare bills it. */
     databaseBytes: number
-    /** Devices connected at this moment. */
+    /** Connections open at this moment, live or not: each copy of the app holds two, a sleeping phone's linger. */
     connected: number
+    /** The addresses those come from: about one per household, network or phone on mobile data. */
+    addresses: number
+    /** Of those connections, how many sent anything in the last ACTIVE_MS: about one per app open now. */
+    active: number
     at: number
   }
 }
@@ -88,7 +92,7 @@ export function sqlStats(sql: Sql, now: () => number = Date.now) {
     trim() {
       sql.exec('DELETE FROM daily WHERE day < ?', day(now() - KEEP_DAYS * 86400_000))
     },
-    read(connected: number, sinceDays = 90): Stats {
+    read({open, addresses, active}: {open: number; addresses: number; active: number}, sinceDays = 90): Stats {
       flush()
       const days = sql
         .exec('SELECT day, counter, count FROM daily WHERE day >= ? ORDER BY day, counter', day(now() - sinceDays * 86400_000))
@@ -104,7 +108,9 @@ export function sqlStats(sql: Sql, now: () => number = Date.now) {
           chatsWithStoredMessages: events ? one('SELECT COUNT(DISTINCT topic) FROM events') : 0,
           storedBytes: events ? one('SELECT COALESCE(SUM(bytes), 0) FROM events') : 0,
           databaseBytes: sql.databaseSize,
-          connected,
+          connected: open,
+          addresses,
+          active,
           at: now()
         }
       }

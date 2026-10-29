@@ -29,6 +29,23 @@ function join(relay: Relay, from = 'address-a', id = `connection-${serial++}`) {
 }
 
 describe('Relay', () => {
+  it('counts its connections: all of them, the addresses they come from, and those heard from lately', async () => {
+    let now = 1_790_000_000_000
+    const relay = new Relay(() => now)
+    const [anne, annesTab, bob] = [join(relay, 'home'), join(relay, 'home'), join(relay, 'away')]
+    await anne.say('REQ', 'a', {'#x': [TOPIC]})
+    await bob.say('REQ', 'b', {'#x': [TOPIC]})
+    now += 4 * 60_000
+    await anne.say('EVENT', event())
+    expect(relay.connectionCounts(5 * 60_000)).toEqual({open: 3, addresses: 2, active: 2})
+    // What it last heard is kept with the connection, so it survives the relay going idle.
+    expect(anne.saved.heard).toBe(now)
+    // Bob's phone went to sleep without hanging up: still open, no longer active.
+    now += 2 * 60_000
+    expect(relay.connectionCounts(5 * 60_000)).toEqual({open: 3, addresses: 2, active: 1})
+    expect(annesTab.saved.heard).toBeUndefined()
+  })
+
   it('passes an event to everyone subscribed to its topic, and to nobody else', async () => {
     const relay = new Relay()
     const [anne, bob, carol] = [join(relay), join(relay), join(relay)]

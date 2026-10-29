@@ -32,17 +32,17 @@ describe('relay stats', () => {
     sql.exec('CREATE TABLE push_topics (topic TEXT, endpoint TEXT)')
     sql.exec("INSERT INTO push_targets VALUES ('a'), ('b')")
     sql.exec("INSERT INTO push_topics VALUES ('t1', 'a'), ('t1', 'b'), ('t2', 'a')")
-    const read = stats.read(3)
+    const read = stats.read({open: 3, addresses: 2, active: 1})
     expect(read.days).toEqual([
       {day: '2026-10-15', counter: 'connections', count: 2},
       {day: '2026-10-15', counter: 'stored_bytes', count: 1200},
       {day: '2026-10-16', counter: 'connections', count: 1}
     ])
-    expect(read.now).toMatchObject({devicesWithNotifications: 2, chatsWithNotifications: 2, storedMessages: 0, connected: 3})
+    expect(read.now).toMatchObject({devicesWithNotifications: 2, chatsWithNotifications: 2, storedMessages: 0, connected: 3, addresses: 2, active: 1})
     // Old totals are dropped.
     now += 400 * 86400_000
     stats.trim()
-    expect(stats.read(0, 1000).days).toEqual([{day: '2026-10-16', counter: 'connections', count: 1}])
+    expect(stats.read({open: 0, addresses: 0, active: 0}, 1000).days).toEqual([{day: '2026-10-16', counter: 'connections', count: 1}])
   })
 
   it('counts incoming messages by kind in memory, and writes them in batches', () => {
@@ -60,7 +60,7 @@ describe('relay stats', () => {
     // The 25th is a batch: one write per kind, not one per message.
     expect(writes).toBe(2)
     stats.tally('in_req')
-    expect(stats.read(0).days.map(({counter, count}) => [counter, count])).toEqual([['in_announce', 24], ['in_awake', 1], ['in_req', 1]])
+    expect(stats.read({open: 0, addresses: 0, active: 0}).days.map(({counter, count}) => [counter, count])).toEqual([['in_announce', 24], ['in_awake', 1], ['in_req', 1]])
   })
 
   it('tells the kinds of message apart', () => {
