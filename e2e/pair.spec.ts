@@ -42,6 +42,8 @@ test('two people pair by invite, chat, and keep their history across reloads', a
   const bob = await newPerson(browser)
 
   await anne.goto('/')
+  // Marked as a first name, so a phone can offer its owner's.
+  await expect(anne.getByLabel('Your name')).toHaveAttribute('autocomplete', 'given-name')
   await introduce(anne, 'Anne')
   await anne.getByLabel('Chat name').fill('Test chat')
   await anne.getByRole('button', {name: 'Start a group'}).click()

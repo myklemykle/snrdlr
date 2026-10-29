@@ -611,7 +611,10 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
           placeholder="Your name"
           maxLength={MAX_NAME_LENGTH}
           aria-label="Your name"
-          autocomplete="off"
+          // So a phone can offer the first name from its owner's contact card.
+          name="given-name"
+          autocomplete="given-name"
+          autocapitalize="words"
         />
         <button type="submit" disabled={!cleanName(name)}>
           Continue
