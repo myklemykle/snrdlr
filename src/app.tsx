@@ -9,7 +9,8 @@ import {authFor, chatFromGrant, DEFAULT_DM_NAME, directAnswerer, directChat, new
 import {admit, isAdmitted} from './gate'
 import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
-import {hostInvite, redeemInvite} from './invite-room'
+import {getRelaySockets} from 'trystero/nostr'
+import {hostInvite, InviteUnanswered, redeemInvite} from './invite-room'
 import {DEFAULT_CHAT_NAME, uniqueChatName} from './names'
 import {QrCode} from './qr'
 import {MAX_VOLUME, playSound, setSoundChoice, setSoundVolume, SILENT, SOUND_CHOICES, soundChoice, soundVolume} from './sound'
@@ -74,6 +75,8 @@ function clearMovedOut(): void {
   }
 }
 const STALE_INVITE = 'That invite is no longer active. Ask the person inviting you to show a fresh code.'
+// Nobody answering looks the same whether the code was closed or its device could not be reached.
+const UNREACHED_INVITER = "Couldn't reach the person inviting you. If their code is still on screen, ask them to keep snrdlr open and try again; if not, ask for a fresh one."
 const OVER_INVITE = 'That invite has expired or was cancelled. Ask the person who sent it for a new one.'
 const USED_INVITE = 'Someone else has already used that invite. Ask the person who sent it for a new one.'
 const OWN_INVITE = 'That is your own invite. Send it to the person you want to chat with.'
@@ -280,20 +283,31 @@ function useJoin(store: Store, identity: Identity, hash: string): [Join, () => v
     let cancelled = false
     setJoin({status: 'joining'})
     void (async () => {
+      const turnServers = await fetchTurnServers()
       try {
         const granted = await redeemInvite(
           invite,
           sealJoinRequest(identity, invite),
           sealed => chatFromGrant(invite, sealed, identity, Date.now()),
-          await fetchTurnServers(),
+          turnServers,
           JOIN_TIMEOUT_MS
         )
         // The name is ours to adjust: it only labels the chat on this device.
         const others = (await store.listChats()).filter(chat => chat.id !== granted.id).map(chat => chat.name)
         const chat = await store.saveChat({...granted, name: uniqueChatName(granted.name, others)})
         if (!cancelled) setJoin({status: 'joined', chatId: chat.id})
-      } catch {
-        if (!cancelled) setJoin({status: 'failed'})
+      } catch (error) {
+        if (cancelled) return
+        // Nobody met in the invite's room means the inviter was never reached, not that the code is old.
+        const unreached = error instanceof InviteUnanswered && error.seen === 0
+        let reason = unreached ? UNREACHED_INVITER : STALE_INVITE
+        // In developer mode, how far it got: what helps two devices find each other, and whom it met.
+        if (devMode()) {
+          const sockets = Object.values(getRelaySockets() as Record<string, WebSocket>)
+          const open = sockets.filter(socket => socket.readyState === WebSocket.OPEN).length
+          reason += ` (Relays connected: ${open} of ${sockets.length}. TURN servers: ${turnServers.length}. Met in the invite: ${error instanceof InviteUnanswered ? error.seen : '?'}.)`
+        }
+        setJoin({status: 'failed', reason})
       }
     })()
     return () => {

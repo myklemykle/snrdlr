@@ -127,6 +127,10 @@ async function copyInvite(page: Page): Promise<string> {
 }
 
 const STALE = 'That invite is no longer active.'
+// What a live code that nobody answers says: closed, or its device out of reach.
+const UNREACHED = "Couldn't reach the person inviting you."
+// A closed code says either, depending on whether its room has been left yet when someone arrives.
+const CLOSED = /That invite is no longer active\.|Couldn't reach the person inviting you\./
 
 test('several people can join through one code while it is showing', async ({browser}) => {
   const [anne, bob, cindy] = [await newPerson(browser), await newPerson(browser), await newPerson(browser)]
@@ -221,7 +225,7 @@ test('a code stops working once the inviter closes it, and a new showing gets a 
 
   await dave.goto(firstInvite)
   await introduce(dave, 'Dave')
-  await expect(dave.getByText(STALE)).toBeVisible({timeout: 15_000})
+  await expect(dave.getByText(CLOSED)).toBeVisible({timeout: 15_000})
   await expect(chatEntry(dave, 'Private')).toHaveCount(0)
   expect(dave.url()).not.toContain('#i=')
 
@@ -231,7 +235,7 @@ test('a code stops working once the inviter closes it, and a new showing gets a 
 
   // The old code stays dead even though the inviter is inviting again.
   await dave.goto(firstInvite)
-  await expect(dave.getByText(STALE)).toBeVisible({timeout: 15_000})
+  await expect(dave.getByText(CLOSED)).toBeVisible({timeout: 15_000})
 
   await bob.goto(secondInvite)
   await introduce(bob, 'Bob')
@@ -384,7 +388,7 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   const late = await newPerson(browser)
   await late.goto(code)
   await introduce(late, 'Late')
-  await expect(late.getByText('That invite is no longer active')).toBeVisible({timeout: 15_000})
+  await expect(late.getByText(CLOSED)).toBeVisible({timeout: 15_000})
 
   await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
   await send(anne, 'just us two')
@@ -1404,7 +1408,7 @@ test('the app is invite-only: a stranger cannot set up, and gets in by joining t
   await anne.getByRole('button', {name: 'Stop inviting'}).click()
   await stranger.goto(invite)
   await expect(stranger.getByLabel('Your name')).toBeVisible()
-  await expect(stranger.getByText('That invite is no longer active')).toBeVisible({timeout: 15_000})
+  await expect(stranger.getByText(CLOSED)).toBeVisible({timeout: 15_000})
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
   await expect(stranger.getByLabel('Your name')).toHaveCount(0)
   await stranger.reload()
@@ -1948,6 +1952,17 @@ test('settings keep their title and close button in view while the rest scrolls'
   expect(await anne.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), [box.x + box.width / 2, box.y + box.height / 2])).toBe('Close')
   await close.click()
   await expect(sheet).toHaveCount(0)
+})
+
+test('a code whose inviter cannot be reached says so, rather than that it is old', async ({browser}) => {
+  const anne = await newPerson(browser)
+  const invite = await startChat(anne, 'Anne', 'Gone')
+  // Anne's browser goes away with the code still showing, as a phone does when it sleeps.
+  await anne.context().close()
+  const bob = await newPerson(browser)
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+  await expect(bob.getByText(UNREACHED)).toBeVisible({timeout: 30_000})
 })
 
 test('a malformed or old-format invite link lands on the home screen with an explanation', async ({browser}) => {

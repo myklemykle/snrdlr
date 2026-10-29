@@ -48,9 +48,19 @@ export function hostInvite(
 }
 
 /**
+ * No acceptable answer came in time. `seen` is how many others were met in the invite's room: none
+ * means the inviter could not be reached at all; some means they were, but gave nothing that let us in,
+ * which is what a closed invite looks like.
+ */
+export class InviteUnanswered extends Error {
+  constructor(readonly seen: number) {
+    super(seen ? 'nobody here let us in' : 'nobody was reached')
+  }
+}
+
+/**
  * Joins the invite's room and sends `request` to whoever is there. Resolves with what `accept` makes of
- * the first answer it does not throw on. Rejects if no acceptable answer comes before the timeout, which
- * is what a closed or expired invite looks like.
+ * the first answer it does not throw on. Rejects with InviteUnanswered if none comes before the timeout.
  */
 export function redeemInvite<T>(
   invite: Invite,
@@ -72,9 +82,10 @@ export function redeemInvite<T>(
       settle()
     }
     let done = false
+    let seen = 0
     const timer = setTimeout(() => {
       done = true
-      finish(() => reject(new Error('invite is not active')))
+      finish(() => reject(new InviteUnanswered(seen)))
     }, timeoutMs)
 
     // Other people joining through the same code are in this room too; only the inviter can answer validly.
@@ -92,6 +103,9 @@ export function redeemInvite<T>(
           if (!done && attempt < ASK_AGAIN) setTimeout(() => !done && ask(peerId, attempt + 1), ASK_AGAIN_AFTER_MS)
         })
     }
-    room.onPeerJoin = peerId => ask(peerId, 0)
+    room.onPeerJoin = peerId => {
+      seen++
+      ask(peerId, 0)
+    }
   })
 }
