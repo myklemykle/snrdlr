@@ -1591,6 +1591,12 @@ test('people have profiles: shown in every chat or only where turned on, with an
   const hers = bob.locator('.theirs', {hasText: 'hello from anne'})
   await expect(hers).toHaveClass(/tinted/)
   await expect(hers.locator('.author .avatar')).toHaveText('🦊')
+  // A message of nothing but emoji is shown large; her icon beside it stays its usual size.
+  await send(anne, '🎉')
+  const solo = bob.locator('.theirs.solo')
+  const iconSize = (bubble: typeof hers) => bubble.locator('.author .avatar').evaluate(element => getComputedStyle(element).fontSize)
+  await expect(solo.locator('.emoji').last()).toHaveText('🎉')
+  expect(await iconSize(solo)).toBe(await iconSize(hers))
   await hers.hover()
   await hers.getByRole('button', {name: 'React or copy'}).click()
   await bob.getByRole('button', {name: "Anne's profile"}).click()

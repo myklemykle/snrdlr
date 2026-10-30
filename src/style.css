@@ -420,7 +420,7 @@ button:disabled {
   vertical-align: -0.1em;
 }
 
-.log .jumbo .emoji {
+.log .jumbo .emoji:not(.avatar) {
   font-size: 2.6em;
   line-height: 1.15;
   vertical-align: baseline;
@@ -432,7 +432,7 @@ button:disabled {
   color: var(--muted);
 }
 
-.log .solo .emoji {
+.log .solo .emoji:not(.avatar) {
   font-size: 4.5em;
   line-height: 1.15;
   vertical-align: baseline;
