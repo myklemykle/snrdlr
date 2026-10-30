@@ -2588,11 +2588,13 @@ test('if drawing a chat fails, the page says so and offers a way on, rather than
   await expect(anne.locator('.mine', {hasText: 'hello'})).toBeVisible()
   // Something the chat screen needs breaks, as one browser or another sometimes does.
   await anne.evaluate(() => {
-    Intl.Segmenter = class {
-      constructor() {
-        throw new Error('no segmenter here')
+    Object.defineProperty(Intl, 'Segmenter', {
+      value: class {
+        constructor() {
+          throw new Error('no segmenter here')
+        }
       }
-    } as unknown as typeof Intl.Segmenter
+    })
   })
   await send(anne, '🎉')
   await expect(anne.getByText('Something went wrong showing this.')).toBeVisible()
