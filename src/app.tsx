@@ -505,13 +505,21 @@ function Main(props: {
   useEffect(() => {
     if (!hash.startsWith(CHAT_PREFIX)) return setChat(null)
     let cancelled = false
-    void store.getChat(hash.slice(CHAT_PREFIX.length)).then(found => {
-      if (cancelled) return
-      if (found) {
-        setChat(found)
-        void clearNotifications(found).catch(() => {})
-      } else goHome(true)
-    })
+    store
+      .getChat(hash.slice(CHAT_PREFIX.length))
+      .then(found => {
+        if (cancelled) return
+        if (found) {
+          setChat(found)
+          void clearNotifications(found).catch(() => {})
+        } else goHome(true)
+      })
+      // Otherwise the page would stay empty, waiting for a chat that is not coming.
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setNotice(`Couldn't open that chat (${error instanceof Error ? error.message : String(error)}). Try it again from the list.`)
+        goHome(true)
+      })
     return () => {
       cancelled = true
     }

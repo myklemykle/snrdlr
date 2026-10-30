@@ -1788,3 +1788,12 @@ img.bird {
   max-height: 16rem;
   border-radius: 0.6rem;
 }
+
+/* What went wrong, when drawing the app failed (main.tsx). */
+.crash {
+  margin-top: 1.5rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

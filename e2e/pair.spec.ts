@@ -2574,3 +2574,23 @@ test('the snrdlr birds: put in a message from the emoji button, shown as drawing
   await expect(bob.locator('.mine.solo').getByRole('button', {name: 'bird, surprised from Anne'})).toBeVisible()
   await expect(bob.locator('.mine.solo .reactions img.bird')).toHaveCount(1)
 })
+
+test('if drawing a chat fails, the page says so and offers a way on, rather than staying blank', async ({browser}) => {
+  const anne = await newPerson(browser)
+  await startChat(anne, 'Anne', 'Fragile')
+  await send(anne, 'hello')
+  await expect(anne.locator('.mine', {hasText: 'hello'})).toBeVisible()
+  // Something the chat screen needs breaks, as one browser or another sometimes does.
+  await anne.evaluate(() => {
+    Intl.Segmenter = class {
+      constructor() {
+        throw new Error('no segmenter here')
+      }
+    } as unknown as typeof Intl.Segmenter
+  })
+  await send(anne, '🎉')
+  await expect(anne.getByText('Something went wrong showing this.')).toBeVisible()
+  await expect(anne.locator('.crash')).toContainText('no segmenter here')
+  await anne.getByRole('button', {name: 'Go to the chat list'}).click()
+  await expect(chatEntry(anne, 'Fragile')).toBeVisible()
+})

@@ -1,5 +1,5 @@
-import {render} from 'preact'
-import {useEffect, useState} from 'preact/hooks'
+import {render, type ComponentChildren} from 'preact'
+import {useEffect, useErrorBoundary, useState} from 'preact/hooks'
 import {App} from './app'
 import {safariHandoff, SafariHandoff} from './push-view'
 import {setUpInstall} from './install'
@@ -58,6 +58,34 @@ function SteppedAside(props: {onTakeOver: () => void}) {
   )
 }
 
+/**
+ * If drawing the app fails, says so and offers a way on, rather than leaving the page blank. What went
+ * wrong is shown small, so that whoever sees it can pass it on.
+ */
+function Guard(props: {children: ComponentChildren}) {
+  const [error] = useErrorBoundary()
+  if (!error) return <>{props.children}</>
+  const detail = error instanceof Error ? `${error.name}: ${error.message}\n${(error.stack ?? '').split('\n').slice(0, 4).join('\n')}` : String(error)
+  return (
+    <main class="home">
+      <h1>snrdlr</h1>
+      <p class="error">Something went wrong showing this.</p>
+      <div class="row">
+        <button type="button" onClick={() => location.reload()}>
+          Reload
+        </button>
+        <button type="button" onClick={() => (location.href = location.pathname)}>
+          Go to the chat list
+        </button>
+      </div>
+      <pre class="crash">
+        {detail}
+        {'\n'}Version {__BUILD__}
+      </pre>
+    </main>
+  )
+}
+
 /** The app, unless a notification tapped in the iPhone's Home Screen app is on its way to Safari. */
 function Root() {
   const [handoff, setHandoff] = useState(safariHandoff)
@@ -87,4 +115,9 @@ function Root() {
 // The newest tab is the one, unless this tab stepped aside earlier and was only reloaded or brought back.
 if (!steppedAside()) takeOver()
 
-render(<Root />, document.getElementById('app')!)
+render(
+  <Guard>
+    <Root />
+  </Guard>,
+  document.getElementById('app')!
+)
