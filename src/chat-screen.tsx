@@ -7,6 +7,7 @@ import {latestEdits} from './edits'
 import {emojiSize, splitEmoji} from './emoji'
 import {findLinks, leadsHere, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
+import {Emoji, emojiLabel} from './emoji-view'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
 import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {MAX_FILE_BYTES, sealFile} from './files'
@@ -465,6 +466,22 @@ export function ChatScreen(props: {
     setDraft(setAside.current)
     setAside.current = ''
   }
+  /** Puts an emoji from the picker where the cursor was in the message box. */
+  const insertEmoji = (emoji: string) => {
+    setInserting(false)
+    const box = messageBox.current
+    const at = box ? box.selectionStart : draft.length
+    const end = box ? box.selectionEnd : draft.length
+    const next = draft.slice(0, at) + emoji + draft.slice(end)
+    if (next.length > MAX_TEXT_LENGTH) return
+    setDraft(next)
+    // A touch screen would raise its keyboard over the chat, so the box is focused only with a mouse.
+    if (box && matchMedia('(hover: hover) and (pointer: fine)').matches)
+      requestAnimationFrame(() => {
+        box.focus()
+        box.setSelectionRange(at + emoji.length, at + emoji.length)
+      })
+  }
   const editLast = () => {
     const last = [...(messages ?? [])].reverse().find(({author, content}) => author === identity.id && (content.type === 'text' || content.type === 'image'))
     if (last) startEditing(last)
@@ -551,6 +568,8 @@ export function ChatScreen(props: {
   const [menu, setMenu] = useState<string | null>(null)
   // The full emoji picker, open for one message.
   const [picking, setPicking] = useState<MessageRecord | null>(null)
+  // The same picker, open to put an emoji into the message being written: the birds are on no keyboard.
+  const [inserting, setInserting] = useState(false)
   const menuOpenedAt = useRef(0)
   const openMenu = (key: string) => {
     menuOpenedAt.current = Date.now()
@@ -569,6 +588,7 @@ export function ChatScreen(props: {
     if (Date.now() - menuOpenedAt.current <= 400) return
     setMenu(null)
     setPicking(null)
+    setInserting(false)
   }
   // Escape puts a message's menu away. Listening from the moment the menu shows, not a frame later.
   useLayoutEffect(() => {
@@ -627,7 +647,7 @@ export function ChatScreen(props: {
   /** A message's words, with emoji a little larger and web addresses that can be tapped. */
   const withLinks = (text: string) =>
     findLinks(text).map(piece => {
-      const words = splitEmoji(piece.text).map(segment => (segment.emoji ? <span class="emoji">{segment.text}</span> : segment.text))
+      const words = splitEmoji(piece.text).map(segment => (segment.emoji ? <Emoji emoji={segment.text} class="emoji" /> : segment.text))
       if (!piece.href) return words
       return (
         <a
@@ -665,7 +685,7 @@ export function ChatScreen(props: {
   }, [grouping !== null])
 
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || replyingTo !== null || editing !== null || renaming !== null || grouping !== null || profileOf !== null)
+  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || inserting || replyingTo !== null || editing !== null || renaming !== null || grouping !== null || profileOf !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -985,11 +1005,11 @@ export function ChatScreen(props: {
                         key={tally.emoji}
                         type="button"
                         class={tally.by.includes(identity.id) ? 'own' : ''}
-                        aria-label={`${tally.emoji} from ${who}`}
+                        aria-label={`${emojiLabel(tally.emoji)} from ${who}`}
                         title={who}
                         onClick={() => react(message, tally.emoji)}
                       >
-                        {tally.emoji}
+                        <Emoji emoji={tally.emoji} />
                         {tally.by.length > 1 && <span class="count">{tally.by.length}</span>}
                       </button>
                     )
@@ -1018,7 +1038,16 @@ export function ChatScreen(props: {
                       ＋
                     </button>
                   </div>
-                  {tallies && <p class="who">{tallies.map(tally => `${tally.emoji} ${tally.by.map(nameOf).join(', ')}`).join(' · ')}</p>}
+                  {tallies && (
+                    <p class="who">
+                      {tallies.map((tally, index) => (
+                        <>
+                          {index > 0 && ' · '}
+                          <Emoji emoji={tally.emoji} /> {tally.by.map(nameOf).join(', ')}
+                        </>
+                      ))}
+                    </p>
+                  )}
                   <button type="button" class="reply" onClick={() => replyTo(message)}>
                     Reply
                   </button>
@@ -1050,8 +1079,9 @@ export function ChatScreen(props: {
         })}
       </ol>
 
-      {(menu || picking) && <div class="menu-backdrop" onClick={closeMenu} />}
+      {(menu || picking || inserting) && <div class="menu-backdrop" onClick={closeMenu} />}
       {picking && <EmojiPicker onPick={emoji => react(picking, emoji, false)} onClose={() => setPicking(null)} />}
+      {inserting && <EmojiPicker onPick={insertEmoji} onClose={() => setInserting(false)} />}
 
       {viewing && <ImageViewer url={viewing} onClose={() => setViewing(null)} />}
       {profileOf && (
@@ -1143,6 +1173,9 @@ export function ChatScreen(props: {
               <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
               <path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
             </svg>
+          </button>
+          <button type="button" class="add-emoji" aria-label="Add an emoji" disabled={!messages} onClick={() => setInserting(true)}>
+            <Emoji emoji=":bird-look-at-you:" />
           </button>
           <textarea
             ref={messageBox}

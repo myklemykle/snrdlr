@@ -1,12 +1,18 @@
 // A grid of every emoji, for choosing a reaction. Browsers give a page no way to open the system's own
 // emoji keyboard, so the app carries a list (src/emoji-data.json, loaded only when the picker opens).
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
-import {firstEmoji} from './emoji'
+import {BIRDS, firstEmoji, isBird} from './emoji'
+import {Emoji, emojiLabel} from './emoji-view'
 
 type Entry = [emoji: string, name: string, version: number, words?: string]
 type Group = [name: string, emojis: Entry[]]
 
+const BIRD_GROUP = 'snrdlr'
+// The app's own birds come first; every device can draw them.
+const BIRD_ENTRIES: Entry[] = BIRDS.map(([name, words]) => [`:bird-${name}:`, `bird ${name.replace(/-/g, ' ')}`, 0, `snrdlr ${words}`])
+
 const GROUP_ICONS: Record<string, string> = {
+  [BIRD_GROUP]: ':bird-look-at-you:',
   'Smileys & Emotion': '😀',
   'People & Body': '👋',
   'Animals & Nature': '🐻',
@@ -101,7 +107,7 @@ export function EmojiPicker(props: {onPick: (emoji: string) => void; onClose: ()
       if (cancelled) return
       const newest = supportedEmojiVersion()
       const all = module.default as unknown as Group[]
-      setGroups(all.map(([name, emojis]) => [name, emojis.filter(([, , version]) => version <= newest)]))
+      setGroups([[BIRD_GROUP, BIRD_ENTRIES], ...all.map(([name, emojis]): Group => [name, emojis.filter(([, , version]) => version <= newest)])])
     })
     return () => {
       cancelled = true
@@ -158,8 +164,8 @@ export function EmojiPicker(props: {onPick: (emoji: string) => void; onClose: ()
     onPick(emoji)
   }
   const cell = ([emoji, name]: Entry | [string, string]) => (
-    <button key={emoji} type="button" title={name} aria-label={name} onClick={() => pick(emoji)}>
-      {emoji}
+    <button key={emoji} type="button" title={name} aria-label={isBird(emoji) ? emojiLabel(emoji) : name} onClick={() => pick(emoji)}>
+      <Emoji emoji={emoji} />
     </button>
   )
   const jumpTo = (name: string) => grid.current?.querySelector(`[data-group="${name}"]`)?.scrollIntoView({block: 'start'})
@@ -184,7 +190,7 @@ export function EmojiPicker(props: {onPick: (emoji: string) => void; onClose: ()
         <nav class="picker-tabs" aria-label="Emoji groups">
           {groups.map(([name]) => (
             <button key={name} type="button" aria-label={name} title={name} onClick={() => jumpTo(name)}>
-              {GROUP_ICONS[name] ?? name[0]}
+              <Emoji emoji={GROUP_ICONS[name] ?? name[0]} />
             </button>
           ))}
         </nav>

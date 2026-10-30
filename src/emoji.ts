@@ -7,7 +7,29 @@ const START = `(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)${TO
 const JOINED = `\\u200D\\p{Extended_Pictographic}\\uFE0F?${TONE}`
 const FLAG = '[\\u{1F1E6}-\\u{1F1FF}]{2}'
 const KEYCAP = '[#*0-9]\\uFE0F\\u20E3'
-const EMOJI = new RegExp(`(?:${FLAG}|${KEYCAP}|${START}(?:${JOINED})*)+`, 'gu')
+
+/**
+ * The app's own emoji: drawings of the snrdlr bird (src/birds/), written in a message as a code such as
+ * ":bird-nap:". Every copy of the app draws them; one that predates a bird shows its code, which still reads.
+ */
+export const BIRDS: [name: string, words: string][] = [
+  ['puzzled', 'question confused huh'],
+  ['surprised', 'wow shock exclaim'],
+  ['foot-up', 'lift leg step stand'],
+  ['look-left', 'stare see'],
+  ['look-right', 'stare see'],
+  ['look-up', 'stare see sky'],
+  ['look-down', 'stare see ground'],
+  ['look-at-you', 'stare see front face'],
+  ['nap', 'sleep tired zzz']
+]
+const BIRD = `:bird-(?:${BIRDS.map(([name]) => name).join('|')}):`
+const BIRD_ALONE = new RegExp(`^${BIRD}$`)
+// A bird stands alone, so it can be drawn; other emoji next to each other are found as one run.
+const EMOJI = new RegExp(`${BIRD}|(?:${FLAG}|${KEYCAP}|${START}(?:${JOINED})*)+`, 'gu')
+
+/** Whether the text is one of the app's own bird emoji. */
+export const isBird = (text: string) => BIRD_ALONE.test(text)
 
 const MAX_JUMBO_EMOJI = 6
 
@@ -29,7 +51,9 @@ export function splitEmoji(text: string): Segment[] {
 export function emojiOnlyCount(text: string): number {
   const segments = splitEmoji(text)
   if (segments.length === 0 || segments.some(segment => !segment.emoji && segment.text.trim() !== '')) return 0
-  return [...new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(text.replace(/\s/g, ''))].length
+  // A bird's code is one emoji, however many letters it is written with.
+  const counted = text.replace(/\s/g, '').replace(new RegExp(BIRD, 'g'), '🐦')
+  return [...new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(counted)].length
 }
 
 /** The extra size class for an emoji-only message: one emoji is largest, a few are large, many are normal. */
@@ -49,5 +73,6 @@ export function isSingleEmoji(text: string): boolean {
 /** The first emoji in what someone typed, if there is one. */
 export function firstEmoji(text: string): string | null {
   const found = splitEmoji(text).find(segment => segment.emoji)
-  return found ? graphemes(found.text)[0] : null
+  if (!found) return null
+  return isBird(found.text) ? found.text : graphemes(found.text)[0]
 }

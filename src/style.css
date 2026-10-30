@@ -438,6 +438,20 @@ button:disabled {
   vertical-align: baseline;
 }
 
+/* The app's own bird emoji (emoji-view.tsx): a drawing the size of the text around it, as an emoji is. */
+img.bird {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+}
+
+/* Their black lines would vanish on a dark background without a light edge. */
+@media (prefers-color-scheme: dark) {
+  img.bird {
+    filter: drop-shadow(0 0 0.04em #fff) drop-shadow(0 0 0.02em #fff);
+  }
+}
+
 .chats .open .name {
   flex: 1;
   min-width: 0;
@@ -864,6 +878,13 @@ button:disabled {
   align-items: center;
   padding: 0.5rem 0.6rem;
   color: var(--muted);
+}
+
+.composer .add-emoji {
+  display: flex;
+  align-items: center;
+  padding: 0.45rem 0.5rem;
+  font-size: 1.4rem;
 }
 
 .viewer {

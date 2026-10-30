@@ -2534,3 +2534,43 @@ test('a long chat name and a long message leave the message box and Send in view
   await expect(page.getByLabel('Message')).toBeInViewport({ratio: 1})
   await expect(page.getByRole('button', {name: 'Send'})).toBeInViewport({ratio: 1})
 })
+
+test('the snrdlr birds: put in a message from the emoji button, shown as drawings, and used as a reaction', async ({browser}) => {
+  const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
+  const invite = await startChat(anne, 'Anne', 'Birds')
+  await bob.goto(invite)
+  await introduce(bob, 'Bob')
+
+  // Anne writes a few words, then adds a bird from the button beside the box.
+  await anne.getByLabel('Message', {exact: true}).fill('sleepy ')
+  await anne.getByRole('button', {name: 'Add an emoji'}).click()
+  const picker = anne.getByRole('dialog', {name: 'Choose an emoji'})
+  await expect(picker.getByRole('heading', {name: 'snrdlr'})).toBeVisible()
+  await picker.getByRole('button', {name: 'bird, nap'}).click()
+  await expect(picker).toHaveCount(0)
+  await expect(anne.getByLabel('Message', {exact: true})).toHaveValue('sleepy :bird-nap:')
+  await anne.getByLabel('Message', {exact: true}).press('Enter')
+
+  // Both see the drawing, not the code; the words around it stay words.
+  const atBob = bob.locator('.theirs', {hasText: 'sleepy'})
+  await expect(atBob.getByRole('img', {name: 'bird, nap'})).toBeVisible()
+  await expect(atBob).not.toContainText(':bird-nap:')
+  await expect(anne.locator('.mine', {hasText: 'sleepy'}).getByRole('img', {name: 'bird, nap'})).toBeVisible()
+
+  // A bird sent alone is shown large, as one emoji is; searching finds one by its everyday words.
+  await bob.getByRole('button', {name: 'Add an emoji'}).click()
+  await bob.getByRole('dialog', {name: 'Choose an emoji'}).getByLabel('Search emoji').fill('huh')
+  await bob.getByRole('dialog', {name: 'Choose an emoji'}).getByRole('button', {name: 'bird, puzzled'}).click()
+  await bob.getByLabel('Message', {exact: true}).press('Enter')
+  const solo = anne.locator('.theirs.solo')
+  await expect(solo.getByRole('img', {name: 'bird, puzzled'})).toBeVisible()
+  expect((await solo.getByRole('img').boundingBox())!.height).toBeGreaterThan(50)
+
+  // Anne reacts to it with another bird.
+  await solo.hover()
+  await solo.getByRole('button', {name: 'React or copy'}).click()
+  await anne.getByRole('button', {name: 'Another emoji'}).click()
+  await anne.getByRole('dialog', {name: 'Choose an emoji'}).getByRole('button', {name: 'bird, surprised'}).click()
+  await expect(bob.locator('.mine.solo').getByRole('button', {name: 'bird, surprised from Anne'})).toBeVisible()
+  await expect(bob.locator('.mine.solo .reactions img.bird')).toHaveCount(1)
+})

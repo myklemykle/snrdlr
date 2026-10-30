@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {emojiSize, firstEmoji, isSingleEmoji, splitEmoji} from './emoji'
+import {BIRDS, emojiSize, firstEmoji, isBird, isSingleEmoji, splitEmoji} from './emoji'
 
 const emojiParts = (text: string) => splitEmoji(text).filter(segment => segment.emoji).map(segment => segment.text)
 
@@ -65,5 +65,33 @@ describe('firstEmoji', () => {
     expect(firstEmoji('ok 👍🏽 then')).toBe('👍🏽')
     expect(firstEmoji('👨‍👩‍👧!')).toBe('👨‍👩‍👧')
     expect(firstEmoji('no emoji')).toBeNull()
+  })
+})
+
+describe('the birds', () => {
+  it('are found by their codes, each on its own, beside words and other emoji', () => {
+    expect(splitEmoji('hi :bird-nap:🎉:bird-look-up:!')).toEqual([
+      {text: 'hi ', emoji: false},
+      {text: ':bird-nap:', emoji: true},
+      {text: '🎉', emoji: true},
+      {text: ':bird-look-up:', emoji: true},
+      {text: '!', emoji: false}
+    ])
+    // A code for a bird there is no drawing of is only text.
+    expect(emojiParts('a :bird-flying: b :nap:')).toEqual([])
+  })
+
+  it('count as one emoji each', () => {
+    expect(isSingleEmoji(':bird-look-at-you:')).toBe(true)
+    expect(emojiSize(':bird-puzzled:')).toBe('solo')
+    expect(emojiSize(':bird-puzzled: :bird-nap: 👍')).toBe('jumbo')
+    expect(firstEmoji('so :bird-surprised: then')).toBe(':bird-surprised:')
+  })
+
+  it('each have a drawing', async () => {
+    const {readdirSync} = await import('node:fs')
+    const drawn = readdirSync(new URL('./birds/', import.meta.url)).map(file => file.replace(/\.svg$/, ''))
+    expect(drawn.sort()).toEqual(BIRDS.map(([name]) => name).sort())
+    for (const name of drawn) expect(isBird(`:bird-${name}:`)).toBe(true)
   })
 })

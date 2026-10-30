@@ -3,6 +3,7 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {COLORS, CONTACT_KINDS, CONTACT_LABELS, contactLink, fallbackHue, type ContactKind} from './cards'
 import {EmojiPicker} from './emoji-picker'
+import {Emoji} from './emoji-view'
 import {onProfileTakenUp} from './devices'
 import {IMAGE_MIME, MAX_CONTACT_LENGTH, type CardContent, type PictureRef} from './envelope'
 import {cleanName, loadIdentity, MAX_NAME_LENGTH, type Identity} from './identity'
@@ -27,7 +28,12 @@ export function Avatar(props: {card?: CardContent; name: string; id: string; lar
   const url = useBytesUrl(card?.avatar)
   const size = large ? ' large' : ''
   if (url) return <img class={`avatar${size}`} src={url} alt="" draggable={false} />
-  if (card?.icon) return <span class={`avatar emoji${size}`}>{card.icon}</span>
+  if (card?.icon)
+    return (
+      <span class={`avatar emoji${size}`}>
+        <Emoji emoji={card.icon} />
+      </span>
+    )
   return (
     // Drawn by the stylesheet, so the letter is not read or copied as part of the name beside it.
     <span
