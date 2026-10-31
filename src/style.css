@@ -438,8 +438,8 @@ button:disabled {
   vertical-align: baseline;
 }
 
-/* The app's own bird emoji (emoji-view.tsx): a drawing the size of the text around it, as an emoji is. */
-img.bird {
+/* The snerds, the app's own emoji (emoji-view.tsx): a drawing the size of the text around it, as an emoji is. */
+img.snerd {
   width: 1.15em;
   height: 1.15em;
   vertical-align: -0.2em;
@@ -447,7 +447,7 @@ img.bird {
 
 /* Their black lines would vanish on a dark background without a light edge. */
 @media (prefers-color-scheme: dark) {
-  img.bird {
+  img.snerd {
     filter: drop-shadow(0 0 0.04em #fff) drop-shadow(0 0 0.02em #fff);
   }
 }
@@ -641,14 +641,23 @@ img.bird {
 .menu .quick {
   display: flex;
   flex-wrap: wrap;
+  justify-content: space-between;
   gap: 0.15rem;
 }
 
+/* Narrow enough that all of them, and the button for more, fit in one row on a small phone. */
 .menu .quick button {
-  padding: 0.3rem 0.45rem;
+  padding: 0.3rem 0.2rem;
   border-color: transparent;
   font-size: 1.4rem;
   line-height: 1.2;
+}
+
+@media (max-width: 380px) {
+  .menu .quick button {
+    padding: 0.3rem 0.1rem;
+    font-size: 1.2rem;
+  }
 }
 
 .menu .who {
@@ -824,6 +833,36 @@ img.bird {
 .log .image .caption {
   display: block;
   margin: 0.35rem 0.5rem 0;
+}
+
+/* Snerds offered while their code is typed (chat-screen.tsx). */
+.suggestions {
+  flex: none;
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.4rem 0 0;
+  overflow-x: auto;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.suggestions + .composer {
+  border-top: 0;
+}
+
+.suggestions button {
+  padding: 0.25rem 0.4rem;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+/* On a phone the keyboard is the way to emoji, and snerds come up as their code is typed; the button
+   to the picker is for computers. */
+@media not ((hover: hover) and (pointer: fine)) {
+  .composer .add-emoji {
+    display: none;
+  }
 }
 
 .attached {

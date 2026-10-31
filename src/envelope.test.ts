@@ -142,11 +142,11 @@ describe('envelope', () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')
     const target = {author: 'ab'.repeat(32), device: '', seq: 7}
-    for (const emoji of ['👍', '👨‍👩‍👧', ':bird-nap:', '']) {
+    for (const emoji of ['👍', '👨‍👩‍👧', ':snerd-nap:', '']) {
       const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
       expect(await openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).toEqual({...reaction, author: anne.id})
     }
-    for (const emoji of ['nice', '👍👍', '👍 ', ':bird-flying:', ':bird-nap::bird-nap:']) {
+    for (const emoji of ['nice', '👍👍', '👍 ', ':snerd-flying:', ':snerd-nap::snerd-nap:']) {
       const reaction = {...hello, seq: 2, content: {type: 'reaction', target, emoji}} as const
       await expect(openEnvelope(chat, await sealEnvelope(chat, anne, reaction))).rejects.toThrow('bad reaction body')
     }

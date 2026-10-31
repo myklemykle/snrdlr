@@ -3,7 +3,8 @@ import {streamOf, writtenAfter} from './envelope'
 import type {MessageRecord} from './store'
 
 /** Offered at a tap; any other emoji can be typed. */
-export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+// Two of the snerds, the app's own emoji, are among them (emoji.ts).
+export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', ':snerd-look-at-you:', ':snerd-puzzled:']
 
 export type Tally = {emoji: string; by: string[]}
 

@@ -2541,44 +2541,64 @@ test('a long chat name and a long message leave the message box and Send in view
   await expect(page.getByRole('button', {name: 'Send'})).toBeInViewport({ratio: 1})
 })
 
-test('the snrdlr birds: put in a message from the emoji button, shown as drawings, and used as a reaction', async ({browser}) => {
+test('the snerds: offered as their code is typed, picked from the emoji button, drawn, and used as reactions', async ({browser}) => {
   const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
-  const invite = await startChat(anne, 'Anne', 'Birds')
+  const invite = await startChat(anne, 'Anne', 'Snerds')
   await bob.goto(invite)
   await introduce(bob, 'Bob')
+  const box = anne.getByLabel('Message', {exact: true})
 
-  // Anne writes a few words, then adds a bird from the button beside the box.
-  await anne.getByLabel('Message', {exact: true}).fill('sleepy ')
-  await anne.getByRole('button', {name: 'Add an emoji'}).click()
-  const picker = anne.getByRole('dialog', {name: 'Choose an emoji'})
-  await expect(picker.getByRole('heading', {name: 'snrdlr'})).toBeVisible()
-  await picker.getByRole('button', {name: 'bird, nap'}).click()
-  await expect(picker).toHaveCount(0)
-  await expect(anne.getByLabel('Message', {exact: true})).toHaveValue('sleepy :bird-nap:')
-  await anne.getByLabel('Message', {exact: true}).press('Enter')
+  // Typing a colon and a few letters offers the snerds that match; tapping one puts in its code.
+  await box.pressSequentially('sleepy :na')
+  const offered = anne.getByRole('list', {name: 'Snerds'})
+  await expect(offered.getByRole('button')).toHaveCount(1)
+  await offered.getByRole('button', {name: 'snerd, nap'}).click()
+  await expect(offered).toHaveCount(0)
+  await expect(box).toHaveValue('sleepy :snerd-nap: ')
+  await expect(box).toBeFocused()
+  // Tab takes the first one offered, from the keyboard.
+  await box.pressSequentially('and :puz')
+  await box.press('Tab')
+  await expect(box).toHaveValue('sleepy :snerd-nap: and :snerd-puzzled: ')
+  // Nothing is offered for a colon in ordinary writing.
+  await box.pressSequentially('at 10:30')
+  await expect(offered).toHaveCount(0)
+  await box.press('Enter')
 
-  // Both see the drawing, not the code; the words around it stay words.
+  // Both see the drawings, not the codes; the words around them stay words.
   const atBob = bob.locator('.theirs', {hasText: 'sleepy'})
-  await expect(atBob.getByRole('img', {name: 'bird, nap'})).toBeVisible()
-  await expect(atBob).not.toContainText(':bird-nap:')
-  await expect(anne.locator('.mine', {hasText: 'sleepy'}).getByRole('img', {name: 'bird, nap'})).toBeVisible()
+  await expect(atBob.getByRole('img', {name: 'snerd, nap'})).toBeVisible()
+  await expect(atBob.getByRole('img', {name: 'snerd, puzzled'})).toBeVisible()
+  await expect(atBob).not.toContainText(':snerd-')
+  await expect(anne.locator('.mine', {hasText: 'sleepy'}).getByRole('img', {name: 'snerd, nap'})).toBeVisible()
 
-  // A bird sent alone is shown large, as one emoji is; searching finds one by its everyday words.
+  // On a computer, the emoji button opens the picker, snerds first; one sent alone is shown large.
   await bob.getByRole('button', {name: 'Add an emoji'}).click()
-  await bob.getByRole('dialog', {name: 'Choose an emoji'}).getByLabel('Search emoji').fill('huh')
-  await bob.getByRole('dialog', {name: 'Choose an emoji'}).getByRole('button', {name: 'bird, puzzled'}).click()
+  const picker = bob.getByRole('dialog', {name: 'Choose an emoji'})
+  await expect(picker.getByRole('heading', {name: 'Snerds'})).toBeVisible()
+  await picker.getByLabel('Search emoji').fill('wow')
+  await picker.getByRole('button', {name: 'snerd, surprised'}).click()
+  await expect(bob.getByLabel('Message', {exact: true})).toHaveValue(':snerd-surprised:')
   await bob.getByLabel('Message', {exact: true}).press('Enter')
   const solo = anne.locator('.theirs.solo')
-  await expect(solo.getByRole('img', {name: 'bird, puzzled'})).toBeVisible()
+  await expect(solo.getByRole('img', {name: 'snerd, surprised'})).toBeVisible()
   expect((await solo.getByRole('img').boundingBox())!.height).toBeGreaterThan(50)
 
-  // Anne reacts to it with another bird.
+  // Two snerds are among the quick reactions; any other is in the picker.
+  await solo.hover()
+  await solo.getByRole('button', {name: 'React or copy'}).click()
+  await anne.getByRole('button', {name: 'React snerd, look at you'}).click()
+  await expect(bob.locator('.mine.solo').getByRole('button', {name: 'snerd, look at you from Anne'})).toBeVisible()
   await solo.hover()
   await solo.getByRole('button', {name: 'React or copy'}).click()
   await anne.getByRole('button', {name: 'Another emoji'}).click()
-  await anne.getByRole('dialog', {name: 'Choose an emoji'}).getByRole('button', {name: 'bird, surprised'}).click()
-  await expect(bob.locator('.mine.solo').getByRole('button', {name: 'bird, surprised from Anne'})).toBeVisible()
-  await expect(bob.locator('.mine.solo .reactions img.bird')).toHaveCount(1)
+  await anne.getByRole('dialog', {name: 'Choose an emoji'}).getByRole('button', {name: 'snerd, nap'}).click()
+  await expect(bob.locator('.mine.solo').getByRole('button', {name: 'snerd, nap from Anne'})).toBeVisible()
+  await expect(bob.locator('.mine.solo .reactions img.snerd')).toHaveCount(1)
+
+  // A snerd sent on its first day, when the codes said "bird", is still drawn.
+  await send(anne, ':bird-foot-up:')
+  await expect(bob.locator('.theirs').last().getByRole('img', {name: 'snerd, foot up'})).toBeVisible()
 })
 
 test('if drawing a chat fails, the page says so and offers a way on, rather than staying blank', async ({browser}) => {

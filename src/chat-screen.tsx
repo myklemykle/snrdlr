@@ -4,7 +4,7 @@ import {behindWhiteText, latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {loadDraft, saveDraft} from './drafts'
 import {latestEdits} from './edits'
-import {emojiSize, splitEmoji} from './emoji'
+import {emojiSize, snerdsFor, splitEmoji, typedCode} from './emoji'
 import {findLinks, leadsHere, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {Emoji, emojiLabel} from './emoji-view'
@@ -92,6 +92,8 @@ export function ChatScreen(props: {
   const [inviteNote, setInviteNote] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [draft, setDraft] = useState(() => loadDraft(chat.id))
+  // Where the cursor is in the message box, for offering snerds as their code is typed.
+  const [cursor, setCursor] = useState<number | null>(null)
   const session = useRef<Session | null>(null)
   const heard = useRef<((messages: MessageRecord[]) => boolean) | null>(null)
   // Which pictures' files are on this device.
@@ -482,6 +484,31 @@ export function ChatScreen(props: {
         box.setSelectionRange(at + emoji.length, at + emoji.length)
       })
   }
+  // Where to put the cursor once the box shows what was just put in it; set before the next key arrives.
+  const placeCursor = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    if (placeCursor.current === null) return
+    messageBox.current?.setSelectionRange(placeCursor.current, placeCursor.current)
+    placeCursor.current = null
+  }, [draft])
+  // Typing a colon and a few letters offers the snerds that match, since no keyboard has them.
+  const typing = cursor === null ? null : typedCode(draft, cursor)
+  const suggested = typing ? snerdsFor(typing.query) : []
+  const takeSuggestion = (code: string) => {
+    if (!typing) return
+    const end = typing.start + typing.query.length + 1
+    const after = draft.slice(end)
+    const added = after.startsWith(' ') ? code : `${code} `
+    const next = draft.slice(0, typing.start) + added + after
+    if (next.length > MAX_TEXT_LENGTH) return
+    setDraft(next)
+    const at = typing.start + added.length + (after.startsWith(' ') ? 1 : 0)
+    setCursor(at)
+    placeCursor.current = at
+  }
+  const noteCursor = (event: {currentTarget: HTMLTextAreaElement}) =>
+    setCursor(event.currentTarget.selectionStart === event.currentTarget.selectionEnd ? event.currentTarget.selectionStart : null)
+
   const editLast = () => {
     const last = [...(messages ?? [])].reverse().find(({author, content}) => author === identity.id && (content.type === 'text' || content.type === 'image'))
     if (last) startEditing(last)
@@ -568,7 +595,7 @@ export function ChatScreen(props: {
   const [menu, setMenu] = useState<string | null>(null)
   // The full emoji picker, open for one message.
   const [picking, setPicking] = useState<MessageRecord | null>(null)
-  // The same picker, open to put an emoji into the message being written: the birds are on no keyboard.
+  // The same picker, open to put an emoji into the message being written: the snerds are on no keyboard.
   const [inserting, setInserting] = useState(false)
   const menuOpenedAt = useRef(0)
   const openMenu = (key: string) => {
@@ -1023,8 +1050,8 @@ export function ChatScreen(props: {
                 <div class="menu" ref={showMenu}>
                   <div class="quick">
                     {QUICK_REACTIONS.map(emoji => (
-                      <button key={emoji} type="button" class={own === emoji ? 'own' : ''} aria-label={`React ${emoji}`} onClick={() => react(message, emoji)}>
-                        {emoji}
+                      <button key={emoji} type="button" class={own === emoji ? 'own' : ''} aria-label={`React ${emojiLabel(emoji)}`} onClick={() => react(message, emoji)}>
+                        <Emoji emoji={emoji} />
                       </button>
                     ))}
                     <button
@@ -1132,6 +1159,18 @@ export function ChatScreen(props: {
         </ul>
       )}
 
+      {suggested.length > 0 && (
+        <ul class="suggestions" aria-label="Snerds">
+          {suggested.map(code => (
+            <li key={code}>
+              {/* Pressing does not take the focus from the box, so a phone's keyboard stays up. */}
+              <button type="button" aria-label={emojiLabel(code)} onPointerDown={event => event.preventDefault()} onClick={() => takeSuggestion(code)}>
+                <Emoji emoji={code} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <form class="composer" onSubmit={send}>
         {recorder ? (
           <RecordingBar
@@ -1175,15 +1214,25 @@ export function ChatScreen(props: {
             </svg>
           </button>
           <button type="button" class="add-emoji" aria-label="Add an emoji" disabled={!messages} onClick={() => setInserting(true)}>
-            <Emoji emoji=":bird-look-at-you:" />
+            <Emoji emoji=":snerd-look-at-you:" />
           </button>
           <textarea
             ref={messageBox}
             rows={1}
             value={draft}
-            onInput={event => setDraft(event.currentTarget.value)}
+            onInput={event => {
+              setDraft(event.currentTarget.value)
+              noteCursor(event)
+            }}
+            onClick={noteCursor}
+            onKeyUp={noteCursor}
+            onBlur={() => setCursor(null)}
             onKeyDown={event => {
-              if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.isComposing) {
+              // Tab takes the first snerd offered, as in other apps that offer emoji by name.
+              if (event.key === 'Tab' && suggested.length > 0) {
+                event.preventDefault()
+                takeSuggestion(suggested[0])
+              } else if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.isComposing) {
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
               } else if (event.key === 'Escape') editing ? stopEditing() : setReplyingTo(null)

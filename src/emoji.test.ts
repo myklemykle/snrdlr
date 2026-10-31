@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {BIRDS, emojiSize, firstEmoji, isBird, isSingleEmoji, splitEmoji} from './emoji'
+import {emojiSize, firstEmoji, isSingleEmoji, isSnerd, snerdCode, snerdName, SNERDS, snerdsFor, splitEmoji, typedCode} from './emoji'
 
 const emojiParts = (text: string) => splitEmoji(text).filter(segment => segment.emoji).map(segment => segment.text)
 
@@ -68,30 +68,49 @@ describe('firstEmoji', () => {
   })
 })
 
-describe('the birds', () => {
+describe('the snerds', () => {
   it('are found by their codes, each on its own, beside words and other emoji', () => {
-    expect(splitEmoji('hi :bird-nap:🎉:bird-look-up:!')).toEqual([
+    expect(splitEmoji('hi :snerd-nap:🎉:snerd-look-up:!')).toEqual([
       {text: 'hi ', emoji: false},
-      {text: ':bird-nap:', emoji: true},
+      {text: ':snerd-nap:', emoji: true},
       {text: '🎉', emoji: true},
-      {text: ':bird-look-up:', emoji: true},
+      {text: ':snerd-look-up:', emoji: true},
       {text: '!', emoji: false}
     ])
-    // A code for a bird there is no drawing of is only text.
-    expect(emojiParts('a :bird-flying: b :nap:')).toEqual([])
+    // A code for a snerd there is no drawing of is only text.
+    expect(emojiParts('a :snerd-flying: b :nap:')).toEqual([])
   })
 
   it('count as one emoji each', () => {
-    expect(isSingleEmoji(':bird-look-at-you:')).toBe(true)
-    expect(emojiSize(':bird-puzzled:')).toBe('solo')
-    expect(emojiSize(':bird-puzzled: :bird-nap: 👍')).toBe('jumbo')
-    expect(firstEmoji('so :bird-surprised: then')).toBe(':bird-surprised:')
+    expect(isSingleEmoji(':snerd-look-at-you:')).toBe(true)
+    expect(emojiSize(':snerd-puzzled:')).toBe('solo')
+    expect(emojiSize(':snerd-puzzled: :snerd-nap: 👍')).toBe('jumbo')
+    expect(firstEmoji('so :snerd-surprised: then')).toBe(':snerd-surprised:')
+  })
+
+  it('still know the codes of their first day, when they were birds', () => {
+    expect(isSnerd(':bird-nap:')).toBe(true)
+    expect(snerdName(':bird-look-at-you:')).toBe('look-at-you')
+    expect(snerdName(':snerd-look-at-you:')).toBe('look-at-you')
+    expect(snerdName('🎉')).toBeNull()
   })
 
   it('each have a drawing', async () => {
     const {readdirSync} = await import('node:fs')
-    const drawn = readdirSync(new URL('./birds/', import.meta.url)).map(file => file.replace(/\.svg$/, ''))
-    expect(drawn.sort()).toEqual(BIRDS.map(([name]) => name).sort())
-    for (const name of drawn) expect(isBird(`:bird-${name}:`)).toBe(true)
+    const drawn = readdirSync(new URL('./snerds/', import.meta.url)).map(file => file.replace(/\.svg$/, ''))
+    expect(drawn.sort()).toEqual(SNERDS.map(([name]) => name).sort())
+    for (const name of drawn) expect(isSnerd(snerdCode(name))).toBe(true)
+  })
+
+  it('are offered as their code is typed: a colon after a space or at the start, then a letter or more', () => {
+    expect(typedCode('see you :na', 11)).toEqual({start: 8, query: 'na'})
+    expect(typedCode(':PUZ', 4)).toEqual({start: 0, query: 'puz'})
+    expect(typedCode(':na then', 3)).toEqual({start: 0, query: 'na'})
+    for (const [text, cursor] of [['note:na', 7], ['see :', 5], ['ok :)', 5], ['time: 10', 8], [':na ', 4]] as const)
+      expect(typedCode(text, cursor), text).toBeNull()
+    expect(snerdsFor('na')).toEqual([':snerd-nap:'])
+    expect(snerdsFor('sn')).toHaveLength(SNERDS.length)
+    expect(snerdsFor('look-up')).toEqual([':snerd-look-up:'])
+    expect(snerdsFor('zebra')).toEqual([])
   })
 })
