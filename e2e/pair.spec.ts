@@ -2630,3 +2630,27 @@ test('if drawing a chat fails, the page says so and offers a way on, rather than
   await anne.getByRole('button', {name: 'Go to the chat list'}).click()
   await expect(chatEntry(anne, 'Fragile')).toBeVisible()
 })
+
+test('on an iPhone, a Safari tab opened for a notification closes itself once a newer one takes over', async ({browser}) => {
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+  const context = await browser.newContext({userAgent: iphone, permissions: ['clipboard-read', 'clipboard-write']})
+  await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
+  const first = await context.newPage()
+  await startChat(first, 'Anne', 'Tabs')
+  const chat = first.url()
+
+  // Two tabs opened for one chat each, as a tapped notification does: the older closes for the newer.
+  // (A new tab here starts with a blank page to go back to, which one Safari opens for a link has not.)
+  const older = await context.newPage()
+  await older.goto(chat)
+  await (await context.newCDPSession(older)).send('Page.resetNavigationHistory')
+  await expect(older.locator('.chat')).toBeVisible()
+  await expect(first.getByText('snrdlr is open in another tab')).toBeVisible({timeout: 15_000})
+  const newer = await context.newPage()
+  await newer.goto(chat)
+  await expect(newer.locator('.chat')).toBeVisible()
+  await expect.poll(() => older.isClosed(), {timeout: 15_000}).toBe(true)
+  // One that was used for more than one page is not the browser's to close; it waits, as before.
+  expect(first.isClosed()).toBe(false)
+  await expect(first.getByText('snrdlr is open in another tab')).toBeVisible()
+})

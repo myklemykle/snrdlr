@@ -2,7 +2,7 @@ import {render, type ComponentChildren} from 'preact'
 import {useEffect, useErrorBoundary, useState} from 'preact/hooks'
 import {App} from './app'
 import {safariHandoff, SafariHandoff} from './push-view'
-import {setUpInstall} from './install'
+import {installed, onIos, setUpInstall} from './install'
 import {steppedAside, takeOver} from './one-tab'
 import {unlockSound} from './sound'
 import {readDevSwitch} from './standing-invite'
@@ -40,9 +40,18 @@ function SteppedAside(props: {onTakeOver: () => void}) {
     }
     navigator.serviceWorker?.addEventListener('message', onMessage)
     addEventListener('hashchange', onTakeOver)
+    // On an iPhone, every notification tapped in the Home Screen app opens Safari in a new tab, so they
+    // pile up. A tab with nothing to go back to closes itself, now and whenever it is looked at again;
+    // Safari refuses for any other, which then stays here.
+    const close = () => !document.hidden && window.close()
+    if (onIos() && !installed()) {
+      close()
+      document.addEventListener('visibilitychange', close)
+    }
     return () => {
       navigator.serviceWorker?.removeEventListener('message', onMessage)
       removeEventListener('hashchange', onTakeOver)
+      document.removeEventListener('visibilitychange', close)
     }
   }, [])
   return (
