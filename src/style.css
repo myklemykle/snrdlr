@@ -859,7 +859,7 @@ img.snerd {
 
 /* On a phone the keyboard is the way to emoji, and snerds come up as their code is typed; the button
    to the picker is for computers. */
-@media not ((hover: hover) and (pointer: fine)) {
+@media (hover: none), (pointer: coarse) {
   .composer .add-emoji {
     display: none;
   }
