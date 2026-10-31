@@ -2596,6 +2596,15 @@ test('the snerds: offered as their code is typed, picked from the emoji button, 
   await expect(bob.locator('.mine.solo').getByRole('button', {name: 'snerd, nap from Anne'})).toBeVisible()
   await expect(bob.locator('.mine.solo .reactions img.snerd')).toHaveCount(1)
 
+  // On a phone, which has no mouse to hover with, the emoji button gives way to the keyboard.
+  const cdp = await bob.context().newCDPSession(bob)
+  await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: true, maxTouchPoints: 1})
+  await cdp.send('Emulation.setEmitTouchEventsForMouse', {enabled: true, configuration: 'mobile'})
+  await expect(bob.getByRole('button', {name: 'Add an emoji'})).toBeHidden()
+  await cdp.send('Emulation.setEmitTouchEventsForMouse', {enabled: false})
+  await cdp.send('Emulation.setTouchEmulationEnabled', {enabled: false})
+  await expect(bob.getByRole('button', {name: 'Add an emoji'})).toBeVisible()
+
   // A snerd sent on its first day, when the codes said "bird", is still drawn.
   await send(anne, ':bird-foot-up:')
   await expect(bob.locator('.theirs').last().getByRole('img', {name: 'snerd, foot up'})).toBeVisible()

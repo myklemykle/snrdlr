@@ -857,14 +857,6 @@ img.snerd {
   line-height: 1;
 }
 
-/* On a phone the keyboard is the way to emoji, and snerds come up as their code is typed; the button
-   to the picker is for computers. */
-@media (hover: none), (pointer: coarse) {
-  .composer .add-emoji {
-    display: none;
-  }
-}
-
 .attached {
   display: flex;
   gap: 0.5rem;
@@ -924,6 +916,14 @@ img.snerd {
   align-items: center;
   padding: 0.45rem 0.5rem;
   font-size: 1.4rem;
+}
+
+/* On a phone the keyboard is the way to emoji, and snerds come up as their code is typed; the button
+   to the picker is for computers. (After the rule above, which it overrides.) */
+@media (hover: none), (pointer: coarse) {
+  .composer .add-emoji {
+    display: none;
+  }
 }
 
 .viewer {
