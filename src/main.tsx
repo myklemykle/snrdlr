@@ -19,6 +19,25 @@ try {
 watchForUpdates()
 setUpInstall()
 
+// Safari sometimes opens a chat from a notification zoomed far in, and keeps the zoom through a reload,
+// so the page looks blank: all that shows is an empty stretch of it. A page cannot set the zoom, but
+// briefly allowing no zoom above 1 brings Safari back to it; the limit is lifted again at once, so
+// pinching still works. Only as the page loads: someone who zoomed in on purpose keeps it while using it.
+function unzoom() {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=viewport]')
+  if (!meta || !window.visualViewport || window.visualViewport.scale <= 1.01) return
+  const usual = meta.content
+  meta.content = `${usual}, maximum-scale=1`
+  setTimeout(() => (meta.content = usual), 300)
+}
+unzoom()
+addEventListener('load', () => {
+  unzoom()
+  // Safari may apply its zoom a moment after the page has drawn.
+  setTimeout(unzoom, 1000)
+})
+addEventListener('pageshow', event => event.persisted && unzoom())
+
 // Any tap, click or key lets the browser play message sounds from then on. Which moment counts differs:
 // for a finger it is when it lifts, not when it lands (an iPhone is strict about this), and for a mouse
 // it is when the button goes down.
