@@ -14,6 +14,8 @@
 //                                                           but its own, each with who wrote it
 //   node scripts/claude-chat.mjs name <new name>            changes the name it goes by, in every chat
 //   node scripts/claude-chat.mjs chats                      lists its chats
+//   node scripts/claude-chat.mjs call [--seconds <n>]        snrdlephones the other person in a direct chat,
+//                                                            playing .claude-chat/call.wav as its microphone
 //
 // `listen` prints {"at", "text", "pictures": [paths], "edited"?, "replyTo"?} for each message, saving
 // pictures in .claude-chat/inbox/. It only passes on messages from the other member of a direct chat,
@@ -41,6 +43,10 @@ const MAX_TEXT_LENGTH = 4000
 const OUTBOX = join(PROFILE, 'outbox')
 const INBOX = join(PROFILE, 'inbox')
 const LISTENING = join(PROFILE, 'listen.json')
+// What the browser's microphone plays in a call, over and over: a WAV file, if there is one.
+const CALL_SOUND = join(PROFILE, 'call.wav')
+// How long a call that is answered lasts, unless the other person hangs up first.
+const CALL_SECONDS = 60
 // How many rounds (about 1.5 s each) to wait for a picture's file to arrive from another device.
 const PICTURE_ROUNDS = 200
 
@@ -48,7 +54,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 async function open() {
   // bypassCSP: the database helper below builds its work from text, which a page's policy may forbid.
-  const context = await chromium.launchPersistentContext(PROFILE, {headless: true, bypassCSP: true})
+  // A pretend microphone (and no question asked about it), which plays CALL_SOUND if there is one.
+  const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(existsSync(CALL_SOUND) ? [`--use-file-for-fake-audio-capture=${CALL_SOUND}`] : [])]
+  const context = await chromium.launchPersistentContext(PROFILE, {headless: true, bypassCSP: true, args, permissions: ['microphone']})
   const page = context.pages()[0] ?? (await context.newPage())
   return {context, page}
 }
@@ -227,6 +235,35 @@ async function renameAs(name) {
   }
 }
 
+/** Calls from the chat open on the page; says how it went once it is over. */
+async function call(page, seconds) {
+  const button = page.getByRole('button', {name: /^Snrdlephone /})
+  if ((await button.count()) === 0) throw new Error('This is not a direct chat, so there is nobody to snrdlephone.')
+  // Whether the other person's device is connected here: a call needs a direct connection.
+  const connection = async () => ((await page.locator('header .status').textContent().catch(() => '')) ?? '').trim()
+  const before = await connection()
+  await button.click()
+  const panel = page.getByRole('dialog', {name: 'Snrdlephone call'})
+  const note = page.locator('.call-note')
+  // Rings for up to 45 seconds.
+  const answered = await panel.locator('.elapsed').waitFor({timeout: 50_000}).then(() => true, () => false)
+  if (!answered) return `Not answered: ${(await note.textContent().catch(() => null)) ?? 'it stopped ringing'}. Here, before: "${before}"; after: "${await connection()}".`
+  const hungUp = await panel.waitFor({state: 'detached', timeout: seconds * 1000}).then(() => true, () => false)
+  if (!hungUp) await panel.getByRole('button', {name: 'Hang up'}).click()
+  return hungUp ? 'Answered, and they hung up.' : `Answered; hung up after ${seconds} seconds.`
+}
+
+async function placeCall(seconds) {
+  if (listener()) return handOver({call: seconds})
+  const {context, page} = await open()
+  try {
+    await openChat(page, pick(await chatNames(page)))
+    console.log(await call(page, seconds))
+  } finally {
+    await context.close()
+  }
+}
+
 async function say(text, wanted, picture) {
   if (!text.trim() && !picture) throw new Error('Nothing to say.')
   if (picture && !existsSync(picture)) throw new Error(`No such picture: ${picture}`)
@@ -366,8 +403,9 @@ async function listen(wanted, group) {
         const id = file.slice(0, -'.json'.length)
         let reply
         try {
-          const {text, chat: other, picture, name: newName} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
-          if (newName !== undefined) {
+          const {text, chat: other, picture, name: newName, call: seconds} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          if (seconds !== undefined) reply = [`${id}.sent`, await call(page, seconds)]
+          else if (newName !== undefined) {
             // Renaming happens on the front page; the next round goes back into the chat.
             await rename(page, newName)
             reply = [`${id}.sent`, `Now called "${newName}".`]
@@ -401,6 +439,7 @@ try {
     const picture = option('--picture')
     await say(rest.join(' '), chat, picture && resolve(picture))
   } else if (command === 'name') await renameAs(rest.join(' '))
+  else if (command === 'call') await placeCall(Number(option('--seconds') ?? CALL_SECONDS))
   else if (command === 'listen') {
     const group = rest.includes('--group')
     if (group) rest.splice(rest.indexOf('--group'), 1)
@@ -414,7 +453,7 @@ try {
       await context.close()
     }
   } else {
-    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--group] [--chat <name>] | name <new name> | chats")
+    console.error("Usage: claude-chat.mjs join '<invite link>' | say [--chat <name>] <text> | listen [--group] [--chat <name>] | name <new name> | chats | call [--seconds <n>]")
     process.exitCode = 2
   }
 } catch (error) {

@@ -188,7 +188,7 @@ export function CallPanel(props: {name: string; calling: ReturnType<typeof useCa
     <div class="call-panel" role="dialog" aria-label="Snrdlephone call">
       <p class="who">{name}</p>
       {state.phase === 'calling' && <p class="what">Snrdlephoning…</p>}
-      {state.phase === 'ringing' && <p class="what">{state.from ? 'is snrdlephoning you' : 'is snrdlephoning you · connecting…'}</p>}
+      {state.phase === 'ringing' && <p class="what">{state.answering ? 'Answering · connecting…' : state.from ? 'is snrdlephoning you' : 'is snrdlephoning you · connecting…'}</p>}
       {state.phase === 'talking' && (
         <p class="what">
           <Elapsed since={state.since} />
@@ -201,7 +201,7 @@ export function CallPanel(props: {name: string; calling: ReturnType<typeof useCa
             <button type="button" class="decline" onClick={calling.decline}>
               Decline
             </button>
-            <button type="button" class="answer" onClick={calling.answer} disabled={!state.from}>
+            <button type="button" class="answer" onClick={calling.answer} disabled={state.answering}>
               Answer
             </button>
           </>

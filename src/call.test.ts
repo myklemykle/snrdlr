@@ -117,7 +117,7 @@ describe('snrdlephoning', () => {
     const {devices, phase} = threeDevices()
     const ring = record(ANNE, Date.now(), {type: 'call', id: '0123456789abcdef', phase: 'ring'})
     devices.phone.call.messages([ring])
-    expect(devices.phone.states.at(-1)).toEqual({phase: 'ringing', id: '0123456789abcdef', from: null})
+    expect(devices.phone.states.at(-1)).toEqual({phase: 'ringing', id: '0123456789abcdef', from: null, answering: false})
     // Seen again, it does not start over; ended by the caller, it stops.
     devices.phone.call.messages([ring, record(ANNE, Date.now(), {type: 'call', id: '0123456789abcdef', phase: 'end', seconds: 0}, 2)])
     expect(phase('phone')).toBe('idle')
@@ -127,6 +127,17 @@ describe('snrdlephoning', () => {
     // Nor does one that rang long ago.
     devices.laptop.call.messages([record(ANNE, Date.now() - 60_000, {type: 'call', id: '1123456789abcdef', phase: 'ring'})])
     expect(phase('laptop')).toBe('idle')
+  })
+
+  it('takes an answer before the caller has reached this device, and connects once it does', async () => {
+    const {devices, phase} = threeDevices()
+    const id = '0123456789abcdef'
+    devices.phone.call.messages([record(ANNE, Date.now(), {type: 'call', id, phase: 'ring'})])
+    await devices.phone.call.answer()
+    expect(devices.phone.states.at(-1)).toEqual(expect.objectContaining({phase: 'ringing', answering: true, from: null}))
+    // Anne's device, which is calling, reaches the phone.
+    devices.phone.call.heard({id, say: 'ring'}, 'anne')
+    expect(phase('phone')).toBe('talking')
   })
 
   it('reads calls from the log and words them for the chat', () => {

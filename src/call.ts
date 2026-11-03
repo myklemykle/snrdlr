@@ -13,6 +13,9 @@ import {CALL_ID_BYTES, MAX_CALL_SECONDS, RING_MS, type CallContent} from './enve
 import type {CallSignal, CallWire} from './session'
 import type {MessageRecord} from './store'
 
+/** How often a call rings their devices again while it is not answered, in case one did not hear. */
+const RE_RING_MS = 3000
+
 /** A call as the log tells it: when it rang, and how it ended if it has. */
 export type LoggedCall = {id: string; caller: string; rangAt: number; seconds?: number}
 
@@ -57,8 +60,11 @@ export type CallState =
   | {phase: 'idle'}
   /** We are ringing them. */
   | {phase: 'calling'; id: string}
-  /** They are ringing us; `from` is their device, once it has reached us directly. */
-  | {phase: 'ringing'; id: string; from: string | null}
+  /**
+   * They are ringing us; `from` is their device, once it has reached us directly. Answered before it
+   * has (`answering`), the call is taken up as soon as it does.
+   */
+  | {phase: 'ringing'; id: string; from: string | null; answering: boolean}
   /** Talking: since when, to which of their devices, and whether we made the call. */
   | {phase: 'talking'; id: string; peer: string; since: number; muted: boolean; mine: boolean}
 
@@ -106,6 +112,7 @@ export function makeCall(options: CallOptions): Call {
   let state: CallState = {phase: 'idle'}
   let mic: MediaStream | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
+  let ringer: ReturnType<typeof setInterval> | undefined
   // Calls already rung here, or answered or turned down: the log does not start them ringing again.
   const done = new Set<string>()
   // Their devices already rung for the call we are making.
@@ -119,6 +126,7 @@ export function makeCall(options: CallOptions): Call {
 
   function release() {
     clearTimeout(timer)
+    clearInterval(ringer)
     const wire = options.wire()
     if (mic && state.phase === 'talking') wire?.removeStream(mic, state.peer)
     mic?.getTracks().forEach(track => track.stop())
@@ -141,13 +149,30 @@ export function makeCall(options: CallOptions): Call {
     options.onEnd(why)
   }
 
+  /** Rings each of their devices that is connected, again every few seconds in case one did not hear. */
   function ringTheirs() {
     if (state.phase !== 'calling') return
     for (const peerId of theirs()) {
-      if (rung.has(peerId)) continue
       rung.add(peerId)
       tell('ring', state.id, peerId)
     }
+  }
+
+  /** Stops ringing here, without a word to the caller. */
+  function stopRinging() {
+    release()
+    set({phase: 'idle'})
+  }
+
+  /** Takes up the call from their device, the microphone already in hand. */
+  function pickUp(id: string, from: string) {
+    if (!mic) return
+    clearTimeout(timer)
+    set({phase: 'talking', id, peer: from, since: now(), muted: false, mine: false})
+    tell('answer', id, from)
+    options.wire()?.addStream(mic, from)
+    if (early?.peerId === from) options.onSound(early.stream)
+    early = null
   }
 
   const call: Call = {
@@ -166,35 +191,32 @@ export function makeCall(options: CallOptions): Call {
       // Recorded first: that is what wakes their devices that are not connected.
       await options.post({type: 'call', id, phase: 'ring'}).catch(() => {})
       ringTheirs()
+      ringer = setInterval(ringTheirs, RE_RING_MS)
     },
 
     async answer() {
-      if (state.phase !== 'ringing' || !state.from) return
-      const {id, from} = state
+      if (state.phase !== 'ringing' || state.answering) return
+      const {id} = state
+      // Asked for at once, while this is still a tap, even if their device has not reached us yet.
+      set({...state, answering: true})
       try {
         mic = await options.microphone()
       } catch {
-        tell('decline', id, from)
+        if (state.phase === 'ringing' && state.from) tell('decline', id, state.from)
         done.add(id)
-        set({phase: 'idle'})
+        stopRinging()
         options.onEnd('no microphone')
         return
       }
       if (state.phase !== 'ringing' || state.id !== id) return void release()
-      clearTimeout(timer)
-      set({phase: 'talking', id, peer: from, since: now(), muted: false, mine: false})
-      tell('answer', id, from)
-      options.wire()?.addStream(mic, from)
-      if (early?.peerId === from) options.onSound(early.stream)
-      early = null
+      if (state.from) pickUp(id, state.from)
     },
 
     decline() {
       if (state.phase !== 'ringing') return
       if (state.from) tell('decline', state.id, state.from)
       done.add(state.id)
-      clearTimeout(timer)
-      set({phase: 'idle'})
+      stopRinging()
     },
 
     hangUp() {
@@ -218,11 +240,13 @@ export function makeCall(options: CallOptions): Call {
       if (member !== otherId) return
       const {id, say} = signal
       if (say === 'ring') {
-        if (state.phase === 'ringing' && state.id === id && !state.from) set({...state, from: peerId})
-        else if (state.phase === 'idle' && !done.has(id)) {
+        if (state.phase === 'ringing' && state.id === id && !state.from) {
+          set({...state, from: peerId})
+          if (state.answering && mic) pickUp(id, peerId)
+        } else if (state.phase === 'idle' && !done.has(id)) {
           done.add(id)
-          set({phase: 'ringing', id, from: peerId})
-          timer = setTimeout(() => state.phase === 'ringing' && state.id === id && (set({phase: 'idle'}), options.onEnd('no answer')), RING_MS)
+          set({phase: 'ringing', id, from: peerId, answering: false})
+          timer = setTimeout(() => state.phase === 'ringing' && state.id === id && (stopRinging(), options.onEnd('no answer')), RING_MS)
         }
       } else if (say === 'answer') {
         if (state.phase === 'calling' && state.id === id && mic) {
@@ -242,8 +266,7 @@ export function makeCall(options: CallOptions): Call {
         }
       } else if (say === 'taken' || say === 'end') {
         if (state.phase === 'ringing' && state.id === id) {
-          clearTimeout(timer)
-          set({phase: 'idle'})
+          stopRinging()
           if (say === 'taken') options.onEnd('taken')
         } else if (state.phase === 'talking' && state.id === id && state.peer === peerId) finish('ended')
       }
@@ -261,16 +284,13 @@ export function makeCall(options: CallOptions): Call {
       const ringing = ringingCall(messages, selfId, now())
       if (ringing && ringing.caller === otherId && state.phase === 'idle' && !done.has(ringing.id)) {
         done.add(ringing.id)
-        set({phase: 'ringing', id: ringing.id, from: null})
-        timer = setTimeout(() => state.phase === 'ringing' && state.id === ringing.id && set({phase: 'idle'}), Math.max(0, ringing.rangAt + RING_MS - now()))
+        set({phase: 'ringing', id: ringing.id, from: null, answering: false})
+        timer = setTimeout(() => state.phase === 'ringing' && state.id === ringing.id && (stopRinging(), options.onEnd('no answer')), Math.max(0, ringing.rangAt + RING_MS - now()))
       }
       // Ended by the caller before anyone answered here.
       if (state.phase === 'ringing') {
         const {id} = state
-        if (loggedCalls(messages).some(call => call.id === id && call.seconds !== undefined)) {
-          clearTimeout(timer)
-          set({phase: 'idle'})
-        }
+        if (loggedCalls(messages).some(call => call.id === id && call.seconds !== undefined)) stopRinging()
       }
     },
 
