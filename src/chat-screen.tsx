@@ -19,6 +19,7 @@ import {RecordingBar, VoiceMessage, VoicePlayer} from './voice-view'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {mailboxes} from './mailbox'
+import {addInvite, makeRemoteInvite, MAX_LIFETIME_MS, remoteFragment} from './remote-invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
 import {cardFor, loadProfile, nameIn, setInstead, setNameHere, setShownIn, type Alterable, type Instead, type Part} from './profile'
@@ -89,6 +90,27 @@ export function ChatScreen(props: {
   const check = async () => {
     setReport('Checking…')
     setReport(await diagnoseChat(chat, identity, store, mailboxes).catch(error => `The check failed: ${error instanceof Error ? error.message : error}`))
+  }
+  // Developer mode, in a direct chat: a link from afar (remote-invite.ts) to send them some other way.
+  // A direct chat is made from the two people's keys, so if they still have theirs it leads back here,
+  // history and all; if not, it starts a new direct chat with us, as any such link does.
+  const [backLink, setBackLink] = useState<string | null>(null)
+  const [backCopied, setBackCopied] = useState(false)
+  const makeBackLink = async () => {
+    setBackLink('')
+    const made = await makeRemoteInvite(mailboxes, identity, null, MAX_LIFETIME_MS, Date.now()).catch(() => null)
+    if (!made) {
+      setBackLink(null)
+      return setError("The relay couldn't be reached, so no link was made. Try again.")
+    }
+    addInvite({...made, name: `Back to ${chatName}`})
+    setBackLink(location.origin + location.pathname + remoteFragment(made))
+  }
+  const copyBackLink = async () => {
+    if (!backLink) return
+    await navigator.clipboard.writeText(backLink).catch(() => {})
+    setBackCopied(true)
+    setTimeout(() => setBackCopied(false), 2000)
   }
   const [invite, setInvite] = useState<Invite | null>(() => (inviteOnOpen && !direct ? createInvite(identity) : null))
   const [inviteNote, setInviteNote] = useState<string | null>(null)
@@ -891,9 +913,19 @@ export function ChatScreen(props: {
       {devMode() && (
         <section class="diagnosis">
           {report === null ? (
-            <button type="button" onClick={check}>
-              Check what's held
-            </button>
+            <>
+              <button type="button" onClick={check}>
+                Check what's held
+              </button>
+              {direct && (
+                <>
+                  {' '}
+                  <button type="button" disabled={backLink !== null} onClick={() => void makeBackLink()}>
+                    {backLink === '' ? 'Making…' : 'Link back to this chat'}
+                  </button>
+                </>
+              )}
+            </>
           ) : (
             <>
               <pre aria-label="What's held">{report}</pre>
@@ -905,6 +937,26 @@ export function ChatScreen(props: {
               </button>
             </>
           )}
+        </section>
+      )}
+
+      {backLink && (
+        <section class="invite back-link">
+          <p>{`Send this to ${chatName} however you like. If they still have their snrdlr key, it brings them back to this chat; if not, it starts a new direct chat with you. It works once, for 7 days, and can be cancelled from Invites.`}</p>
+          <input readOnly value={backLink} aria-label="Link back to this chat" onFocus={event => event.currentTarget.select()} />
+          <button type="button" onClick={() => void copyBackLink()}>
+            {backCopied ? 'Copied' : 'Copy link'}
+          </button>{' '}
+          {'share' in navigator && (
+            <>
+              <button type="button" onClick={() => void navigator.share({url: backLink}).catch(() => {})}>
+                Share
+              </button>{' '}
+            </>
+          )}
+          <button type="button" onClick={() => setBackLink(null)}>
+            Done
+          </button>
         </section>
       )}
 
@@ -948,7 +1000,15 @@ export function ChatScreen(props: {
           if (message.content.type === 'call') {
             const call = calls.get(message.content.id)
             const line = call && callLine(call, call.caller === identity.id, chatName)
-            return line ? [separator, <li key={key} class="event call">{line}</li>] : [separator]
+            return line
+              ? [
+                  separator,
+                  <li key={key} class="event call">
+                    {line} ·{' '}
+                    <time dateTime={new Date(call.rangAt).toISOString()}>{formatTime(call.rangAt)}</time>
+                  </li>
+                ]
+              : [separator]
           }
           if (message.content.type === 'rename') {
             return [

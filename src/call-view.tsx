@@ -182,6 +182,9 @@ function Level(props: {stream: MediaStream}) {
     } catch {
       return
     }
+    // Made after the tap that answered or called, so a browser may start it paused; it only measures,
+    // so asking it to run plays nothing.
+    if (context.state !== 'running') void context.resume().catch(() => {})
     const meter = context.createAnalyser()
     meter.fftSize = 512
     context.createMediaStreamSource(props.stream).connect(meter)

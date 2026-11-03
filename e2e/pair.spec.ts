@@ -1384,6 +1384,22 @@ test('developer mode: invites from afar let people join with the inviter gone, u
   await fay.goto(direct)
   await expect(fay.getByText(/already used that invite|expired or was cancelled/)).toBeVisible({timeout: 30_000})
 
+  // From inside the chat, Anne makes a link back to it. Erin, who still has her key, opens it and is
+  // back in the same chat; that uses it up, and the link is gone from Anne's list.
+  await sheet.getByRole('button', {name: 'Done'}).click()
+  await chatEntry(anne, 'Erin').click()
+  await anne.getByRole('button', {name: 'Link back to this chat'}).click()
+  const back = await anne.getByLabel('Link back to this chat').inputValue({timeout: 15_000})
+  expect(back).toContain('#r=')
+  await anne.getByRole('button', {name: 'Done'}).click()
+  await erin.goto(back)
+  await expect(erin.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 30_000})
+  await expect(erin.locator('.mine', {hasText: 'hi Anne, found you'})).toBeVisible()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByRole('button', {name: 'Invites'}).click()
+  await expect(sheet.getByText('None right now.')).toBeVisible({timeout: 60_000})
+  await expect(anne.locator('.chats .open')).toHaveCount(3)
+
   // Developer mode is turned off the same way.
   await anne.goto('/?dev=0')
   await openSettings(anne)
@@ -2700,16 +2716,16 @@ test('snrdlephoning: a direct chat calls, is answered, talks, hangs up, and is t
   await bobCall.getByRole('button', {name: 'Hang up'}).click()
   await expect(anneCall).toHaveCount(0)
   await expect(bobCall).toHaveCount(0)
-  await expect(anne.locator('.event.call')).toHaveText([/^You snrdlephoned Bob · \d+ sec$/], {timeout: 15_000})
-  await expect(bob.locator('.event.call')).toHaveText([/^Anne snrdlephoned you · \d+ sec$/], {timeout: 15_000})
+  await expect(anne.locator('.event.call')).toHaveText([/^You snrdlephoned Bob · \d+ sec · \S/], {timeout: 15_000})
+  await expect(bob.locator('.event.call')).toHaveText([/^Anne snrdlephoned you · \d+ sec · \S/], {timeout: 15_000})
   await expect.poll(() => hearing(anne)).toBe(false)
 
   // Bob calls back and Anne turns it down.
   await bob.getByRole('button', {name: 'Snrdlephone Anne'}).click()
   await anneCall.getByRole('button', {name: 'Decline'}).click({timeout: 15_000})
   await expect(bob.getByRole('status')).toHaveText('Busy right now')
-  await expect(bob.locator('.event.call').last()).toHaveText('You snrdlephoned Anne · no answer', {timeout: 15_000})
-  await expect(anne.locator('.event.call').last()).toHaveText('Missed snrdlephone call from Bob', {timeout: 15_000})
+  await expect(bob.locator('.event.call').last()).toHaveText(/^You snrdlephoned Anne · no answer · \S/, {timeout: 15_000})
+  await expect(anne.locator('.event.call').last()).toHaveText(/^Missed snrdlephone call from Bob · \S/, {timeout: 15_000})
 
   // Bob is looking at his list when Anne calls. Opening the chat while it rings, he can answer.
   await bob.getByRole('button', {name: 'Back to chats'}).click()
@@ -2720,7 +2736,7 @@ test('snrdlephoning: a direct chat calls, is answered, talks, hangs up, and is t
   await expect(anneCall.locator('.elapsed')).toBeVisible({timeout: 15_000})
   await anneCall.getByRole('button', {name: 'Hang up'}).click()
   await expect(bobCall).toHaveCount(0)
-  await expect(bob.locator('.event.call').last()).toHaveText(/^Anne snrdlephoned you · \d+ sec$/, {timeout: 15_000})
+  await expect(bob.locator('.event.call').last()).toHaveText(/^Anne snrdlephoned you · \d+ sec · \S/, {timeout: 15_000})
 
   // A group has no phone.
   await anne.getByRole('button', {name: 'Back to chats'}).click()

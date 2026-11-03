@@ -266,7 +266,9 @@ function useJoin(store: Store, identity: Identity, hash: string): [Join, () => v
           const held = chats.find(chat => chat.id === granted.id)
           const others = chats.filter(chat => chat.id !== granted.id).map(chat => chat.name)
           const chat = held ?? (await store.saveChat({...granted, name: uniqueChatName(granted.name, others)}))
-          const answer = opened.kind === 'dm' && !held ? {seed, opened} : undefined
+          // Answered even when we already had the chat, as someone brought back to it by a link does, so
+          // the link is used up and nobody else can start a chat with it.
+          const answer = opened.kind === 'dm' && !opened.used ? {seed, opened} : undefined
           if (!cancelled) setJoin({status: 'joined', chatId: chat.id, answer})
         } catch {
           fail(OVER_INVITE)
