@@ -1335,6 +1335,39 @@ img.snerd {
   text-align: center;
 }
 
+.call-panel .snrdlephone {
+  display: block;
+  width: 5.5rem;
+  height: auto;
+  margin: -0.25rem auto 0.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .call-panel .snrdlephone {
+    filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+  }
+}
+
+/* How loud one's own microphone is (call-view.tsx). */
+.call-panel .level {
+  display: block;
+  height: 0.4rem;
+  margin: -0.4rem auto 0.9rem;
+  width: 70%;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.call-panel .level span {
+  display: block;
+  height: 100%;
+  background: #1a8f3c;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 80ms linear;
+}
+
 .call-panel .who {
   margin: 0;
   font-size: 1.25rem;

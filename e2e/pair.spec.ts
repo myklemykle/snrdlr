@@ -2689,6 +2689,9 @@ test('snrdlephoning: a direct chat calls, is answered, talks, hangs up, and is t
     })
   await expect.poll(() => hearing(anne), {timeout: 15_000}).toBe(true)
   await expect.poll(() => hearing(bob), {timeout: 15_000}).toBe(true)
+  // Each sees how loud they are: the test microphone's tone moves the bar.
+  const level = anneCall.getByRole('img', {name: 'How loud you are'}).locator('span')
+  await expect.poll(() => level.evaluate(bar => getComputedStyle(bar).transform), {timeout: 10_000}).not.toMatch(/^(none|matrix\(0, )/)
   await anneCall.getByRole('button', {name: 'Mute'}).click()
   await expect(anneCall).toContainText('muted')
   await anne.waitForTimeout(1500)

@@ -85,6 +85,8 @@ export type CallOptions = {
   onState: (state: CallState) => void
   /** Their microphone, to play, or null once the call is over. */
   onSound: (stream: MediaStream | null) => void
+  /** Our own microphone while a call has it, for showing how loud we are; null once it is let go. */
+  onMicrophone?: (stream: MediaStream | null) => void
   onEnd: (why: CallEnd) => void
   now?: () => number
 }
@@ -134,6 +136,7 @@ export function makeCall(options: CallOptions): Call {
     early = null
     rung.clear()
     options.onSound(null)
+    options.onMicrophone?.(null)
   }
 
   /** Ends the call here; the caller records how it went. */
@@ -168,6 +171,7 @@ export function makeCall(options: CallOptions): Call {
   function pickUp(id: string, from: string) {
     if (!mic) return
     clearTimeout(timer)
+    options.onMicrophone?.(mic)
     set({phase: 'talking', id, peer: from, since: now(), muted: false, mine: false})
     tell('answer', id, from)
     options.wire()?.addStream(mic, from)
@@ -251,6 +255,7 @@ export function makeCall(options: CallOptions): Call {
       } else if (say === 'answer') {
         if (state.phase === 'calling' && state.id === id && mic) {
           clearTimeout(timer)
+          options.onMicrophone?.(mic)
           set({phase: 'talking', id, peer: peerId, since: now(), muted: false, mine: true})
           options.wire()?.addStream(mic, peerId)
           if (early?.peerId === peerId) options.onSound(early.stream)

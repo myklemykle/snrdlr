@@ -5,6 +5,7 @@ import {microphoneProblem} from './recorder'
 import type {Session} from './session'
 import {audioFor} from './sound'
 import type {MessageRecord} from './store'
+import snrdlephone from './snrdlephone.svg?url'
 
 const END_NOTES: Record<Exclude<CallEnd, 'no microphone'>, string> = {
   'no answer': 'No answer',
@@ -28,6 +29,7 @@ export function useCall(props: {
   const {otherId, selfId, session, peers, messages} = props
   const [state, setState] = useState<CallState>({phase: 'idle'})
   const [sound, setSound] = useState<MediaStream | null>(null)
+  const [microphone, setMicrophone] = useState<MediaStream | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const peersNow = useRef(peers)
   peersNow.current = peers
@@ -56,6 +58,7 @@ export function useCall(props: {
             },
             onState: setState,
             onSound: setSound,
+            onMicrophone: setMicrophone,
             onEnd: why => setNote(why === 'no microphone' ? microphoneProblem(micError.current) : END_NOTES[why])
           })
         : null,
@@ -124,6 +127,7 @@ export function useCall(props: {
   return {
     call,
     state,
+    microphone,
     note,
     busy,
     speaker,
@@ -168,6 +172,42 @@ function ring(): () => void {
   }
 }
 
+/** How loud our own microphone is, as a bar: it shows the call is hearing us, and is still when muted. */
+function Level(props: {stream: MediaStream}) {
+  const bar = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    let context: AudioContext
+    try {
+      context = new AudioContext()
+    } catch {
+      return
+    }
+    const meter = context.createAnalyser()
+    meter.fftSize = 512
+    context.createMediaStreamSource(props.stream).connect(meter)
+    const samples = new Float32Array(meter.fftSize)
+    let frame = 0
+    const draw = () => {
+      meter.getFloatTimeDomainData(samples)
+      const loudness = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length)
+      // Speech sits around 0.02 to 0.2; shown on a rough logarithmic scale so quiet talk still moves it.
+      const share = Math.min(1, Math.max(0, (Math.log10(loudness + 1e-6) + 3) / 2.3))
+      if (bar.current) bar.current.style.transform = `scaleX(${share})`
+      frame = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => {
+      cancelAnimationFrame(frame)
+      void context.close().catch(() => {})
+    }
+  }, [props.stream])
+  return (
+    <span class="level" role="img" aria-label="How loud you are">
+      <span ref={bar} />
+    </span>
+  )
+}
+
 /** Minutes and seconds since the call was answered, ticking. */
 function Elapsed(props: {since: number}) {
   const [now, setNow] = useState(Date.now())
@@ -186,6 +226,7 @@ export function CallPanel(props: {name: string; calling: ReturnType<typeof useCa
   if (state.phase === 'idle') return calling.note ? <p class="call-note" role="status">{calling.note}</p> : null
   return (
     <div class="call-panel" role="dialog" aria-label="Snrdlephone call">
+      <img class="snrdlephone" src={snrdlephone} alt="" />
       <p class="who">{name}</p>
       {state.phase === 'calling' && <p class="what">Snrdlephoning…</p>}
       {state.phase === 'ringing' && <p class="what">{state.answering ? 'Answering · connecting…' : state.from ? 'is snrdlephoning you' : 'is snrdlephoning you · connecting…'}</p>}
@@ -195,6 +236,7 @@ export function CallPanel(props: {name: string; calling: ReturnType<typeof useCa
           {state.muted && ' · muted'}
         </p>
       )}
+      {state.phase === 'talking' && calling.microphone && <Level stream={calling.microphone} />}
       <div class="buttons">
         {state.phase === 'ringing' ? (
           <>
