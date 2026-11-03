@@ -16,9 +16,14 @@ async function newStranger(browser: Browser): Promise<Page> {
   return context.newPage()
 }
 
+/**
+ * Gives a name: at the door, for someone who came without an invite, or in the chat, for someone who
+ * was let in by one as "New Friend".
+ */
 async function introduce(page: Page, name: string) {
   await page.getByLabel('Your name').fill(name)
-  await page.getByRole('button', {name: 'Continue'}).click()
+  await page.getByRole('button', {name: /^(Continue|Save name)$/}).click()
+  await expect(page.getByLabel('Your name')).toHaveCount(0)
 }
 
 /** A chat's row on the home screen. */
@@ -1374,8 +1379,9 @@ test('developer mode: invites from afar let people join with the inviter gone, u
 
   // When Anne is back, her device sees the answer, makes the same chat, and the link is used up.
   await anne.goto('/')
-  await expect(chatEntry(anne, 'Erin')).toBeVisible({timeout: 60_000})
-  await chatEntry(anne, 'Erin').click()
+  // Listed on Anne's side as New Friend, the name Erin had when she answered, until her name arrives.
+  await expect(chatEntry(anne, 'New Friend')).toBeVisible({timeout: 60_000})
+  await chatEntry(anne, 'New Friend').click()
   await expect(anne.locator('.theirs', {hasText: 'hi Anne, found you'})).toBeVisible({timeout: 30_000})
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await anne.getByRole('button', {name: 'Invites'}).click()
@@ -1421,11 +1427,10 @@ test('the app is invite-only: a stranger cannot set up, and gets in by joining t
   await stranger.reload()
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
 
-  // An invite that no longer works does not let them in, even if they had started typing a name.
+  // An invite that no longer works does not let them in.
   const invite = await startChat(anne, 'Anne', 'Club')
   await anne.getByRole('button', {name: 'Stop inviting'}).click()
   await stranger.goto(invite)
-  await expect(stranger.getByLabel('Your name')).toBeVisible()
   await expect(stranger.getByText(CLOSED)).toBeVisible({timeout: 15_000})
   await expect(stranger.getByText('snrdlr is invite-only.')).toBeVisible()
   await expect(stranger.getByLabel('Your name')).toHaveCount(0)
@@ -1449,18 +1454,37 @@ test('the app is invite-only: a stranger cannot set up, and gets in by joining t
   await expect(stranger.getByRole('button', {name: 'Start a group'})).toBeVisible()
 })
 
-test('someone invited who closes the app before giving a name is still in when they return', async ({browser}) => {
+test('someone invited goes straight into the chat as New Friend, and gives a name there, now or later', async ({browser}) => {
   const anne = await newPerson(browser)
   const stranger = await newStranger(browser)
   const invite = await startChat(anne, 'Anne', 'Club')
   await stranger.goto(invite)
-  await expect(stranger.getByLabel('Your name')).toBeVisible()
-  // Joined in the background, before any name was typed.
-  await expect.poll(() => stranger.evaluate(() => localStorage.getItem('snrdlr.invited')), {timeout: 15_000}).toBe('1')
+  // No name asked for at the door: they are in the chat, asked for it there.
+  await expect(stranger.getByRole('heading', {name: 'Club'})).toBeVisible({timeout: 30_000})
+  await expect(stranger.getByText("You're “New Friend” here for now.")).toBeVisible()
+  await expect(anne.getByText('New Friend joined · invited by you')).toBeVisible({timeout: 30_000})
+  await send(stranger, 'hello, who am I')
+  await expect(anne.locator('.theirs', {hasText: 'hello, who am I'})).toContainText('New Friend')
+
+  // Leaving before giving one: still in when they come back, and asked again in the chat.
   await stranger.goto('about:blank')
   await stranger.goto('/')
+  await expect(stranger.getByLabel('Your name')).toHaveCount(0)
+  await chatEntry(stranger, 'Club').click()
   await introduce(stranger, 'Slow')
-  await expect(chatEntry(stranger, 'Club')).toBeVisible()
+  // Everyone sees the name they gave, also where they joined.
+  await expect(anne.getByText('Slow joined · invited by you')).toBeVisible({timeout: 30_000})
+  await expect(anne.locator('.theirs', {hasText: 'hello, who am I'})).toContainText('Slow')
+  await stranger.reload()
+  await expect(stranger.getByLabel('Your name')).toHaveCount(0)
+
+  // "Later" puts it off for good; the name can still be changed in the profile.
+  const other = await newStranger(browser)
+  await other.goto(await copyInvite(anne))
+  await other.getByRole('button', {name: 'Later'}).click()
+  await other.reload()
+  await expect(other.getByRole('heading', {name: 'Club'})).toBeVisible()
+  await expect(other.getByLabel('Your name')).toHaveCount(0)
 })
 
 test('a "chat with me" code and an invite from afar both let a stranger in; developer mode skips the gate', async ({browser}) => {

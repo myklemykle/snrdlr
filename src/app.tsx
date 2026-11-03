@@ -7,7 +7,7 @@ import {claimChat, keepChats, onBackgroundActivity, sweepChats, unclaimChat, typ
 import {ChatScreen} from './chat-screen'
 import {authFor, chatFromGrant, DEFAULT_DM_NAME, directAnswerer, directChat, newGroupChat} from './chats'
 import {admit, isAdmitted} from './gate'
-import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
+import {cleanName, createIdentity, loadIdentity, MAX_NAME_LENGTH, memberId, setNamePending, TEMP_NAME, type Identity} from './identity'
 import {createInvite, inviteFromFragment, inviteToFragment, isInviteFragment, sealJoinRequest, type Invite} from './invite'
 import {getRelaySockets} from 'trystero/nostr'
 import {hostInvite, InviteUnanswered, redeemInvite} from './invite-room'
@@ -523,10 +523,24 @@ function Main(props: {
     onAdmitted()
   }, [join])
 
-  // Once the invite has been dealt with, take it out of the address bar and history. Someone who is
-  // not in yet and whose invite did not work is told so at once, without being asked for a name first.
+  // Someone new who got in by an invite goes straight to the chat as "New Friend", and is asked for
+  // their name there (chat-screen.tsx), rather than stopped at the door for it.
   useEffect(() => {
-    if (join.status === 'failed' && (named || !admitted)) {
+    if (join.status !== 'joined' || named) return
+    void (async () => {
+      const secrets = {name: TEMP_NAME, signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
+      await store.saveIdentity(secrets)
+      setNamePending(true)
+      // Asks the browser not to evict our data under storage pressure; it may say no.
+      void navigator.storage?.persist?.()
+      onIdentity(loadIdentity(secrets))
+    })().catch(() => {})
+  }, [join, named])
+
+  // Once the invite has been dealt with, take it out of the address bar and history. Someone whose
+  // invite did not work is told so at once, without being asked for a name first.
+  useEffect(() => {
+    if (join.status === 'failed') {
       clearJoin()
       setNotice(join.reason ?? STALE_INVITE)
       goHome(true)
@@ -581,7 +595,7 @@ function Main(props: {
       </main>
     )
   }
-  if (!named) return <Welcome store={store} identity={identity} invited={join.status !== 'idle'} onNamed={onIdentity} />
+  if (!named && !redeeming) return <Welcome store={store} identity={identity} notice={notice} onNamed={onIdentity} />
   if (redeeming) {
     return (
       <main class="home">
@@ -604,6 +618,7 @@ function Main(props: {
           store={store}
           inviteOnOpen={inviteOnOpen === current.id}
           onBack={() => goHome()}
+          onIdentity={onIdentity}
           onOpenChat={(id, showInvite) => {
             setInviteOnOpen(showInvite ? id : null)
             openChat(id)
@@ -639,8 +654,8 @@ function Main(props: {
   )
 }
 
-function Welcome(props: {store: Store; identity: Identity; invited: boolean; onNamed: (identity: Identity) => void}) {
-  const {store, identity, invited, onNamed} = props
+function Welcome(props: {store: Store; identity: Identity; notice: string | null; onNamed: (identity: Identity) => void}) {
+  const {store, identity, notice, onNamed} = props
   const [name, setName] = useState('')
   const create = async (event: Event) => {
     event.preventDefault()
@@ -653,7 +668,8 @@ function Welcome(props: {store: Store; identity: Identity; invited: boolean; onN
   return (
     <main class="home">
       <h1>snrdlr</h1>
-      <p>{invited ? 'You have been invited to a chat. What should people call you?' : 'What should people call you?'}</p>
+      {notice && <p class="error">{notice}</p>}
+      <p>What should people call you?</p>
       <form onSubmit={create}>
         <input
           value={name}

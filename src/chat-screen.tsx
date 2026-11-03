@@ -11,7 +11,7 @@ import {findLinks, leadsHere, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {Emoji, emojiLabel} from './emoji-view'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
-import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
+import {cleanName, loadIdentity, MAX_NAME_LENGTH, memberId, namePending, setNamePending, type Identity} from './identity'
 import {MAX_FILE_BYTES, sealFile} from './files'
 import {prepareImage, type PreparedImage} from './image'
 import {canRecord, microphoneProblem, startRecording, type Recorder, type Recording} from './recorder'
@@ -76,8 +76,9 @@ export function ChatScreen(props: {
   onBack: () => void
   /** Go to another chat, optionally with its invite code showing. */
   onOpenChat: (id: string, showInvite: boolean) => void
+  onIdentity: (identity: Identity) => void
 }) {
-  const {chat, identity, store, inviteOnOpen, onBack, onOpenChat} = props
+  const {chat, identity, store, inviteOnOpen, onBack, onOpenChat, onIdentity} = props
   const direct = chat.kind === 'dm'
   const [chatName, setChatName] = useState(chat.name)
   const [messages, setMessages] = useState<MessageRecord[] | null>(null)
@@ -119,6 +120,9 @@ export function ChatScreen(props: {
   // Where the cursor is in the message box, for offering snerds as their code is typed.
   const [cursor, setCursor] = useState<number | null>(null)
   const session = useRef<Session | null>(null)
+  // Our name as it is now; the session was opened with the one we had then.
+  const calledNow = useRef(identity.name)
+  calledNow.current = identity.name
   const heard = useRef<((messages: MessageRecord[]) => boolean) | null>(null)
   // The chat's call, for the session to tell what it hears about calls (call-view.tsx).
   const callNow = useRef<ReturnType<typeof useCall>['call']>(null)
@@ -164,7 +168,11 @@ export function ChatScreen(props: {
         }
       })
       if (cancelled) void opened.close()
-      else session.current = opened
+      else {
+        session.current = opened
+        // A name given while the chat was still opening (a newcomer's, say) is sent now.
+        if (calledNow.current !== identity.name) void opened.callMe(nameIn(loadProfile(), chat.id, calledNow.current)).catch(() => {})
+      }
     })().catch(() => !cancelled && setError("This chat couldn't be opened."))
     return () => {
       cancelled = true
@@ -295,6 +303,29 @@ export function ChatScreen(props: {
     const profile = setNameHere(chat.id, name)
     setOwnProfile(profile)
     await session.current?.callMe(nameIn(profile, chat.id, identity.name)).catch(() => setError('Your name could not be sent.'))
+  }
+  // Someone who came in by an invite is "New Friend" until they say otherwise (app.tsx); asked here,
+  // once they can see the chat they are in. Their other chats hear the new name when next opened.
+  const [askName, setAskName] = useState(namePending)
+  const [newName, setNewName] = useState('')
+  const saveName = async (event: Event) => {
+    event.preventDefault()
+    const called = cleanName(newName)
+    if (!called) return
+    const secrets = {name: called, signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
+    try {
+      await store.saveIdentity(secrets)
+    } catch {
+      return setError("Your name couldn't be saved. Try again.")
+    }
+    setNamePending(false)
+    setAskName(false)
+    onIdentity(loadIdentity(secrets))
+    await session.current?.callMe(nameIn(loadProfile(), chat.id, called)).catch(() => setError('Your name could not be sent.'))
+  }
+  const putOffName = () => {
+    setNamePending(false)
+    setAskName(false)
   }
   const insteadHere = async (part: Alterable, value: Instead | null) => {
     setOwnProfile(setInstead(chat.id, part, value))
@@ -960,6 +991,32 @@ export function ChatScreen(props: {
         </section>
       )}
 
+      {askName && (
+        <form class="name-prompt" onSubmit={saveName}>
+          <p>{`You're “${identity.name}” here for now. What should people call you?`}</p>
+          <div class="actions">
+            <input
+              value={newName}
+              onInput={event => setNewName(event.currentTarget.value)}
+              placeholder="Your name"
+              maxLength={MAX_NAME_LENGTH}
+              aria-label="Your name"
+              // So a phone can offer the first name from its owner's contact card.
+              name="given-name"
+              autocomplete="given-name"
+              autocapitalize="words"
+            />
+            <button type="submit" disabled={!cleanName(newName)}>
+              Save name
+            </button>
+            <button type="button" onClick={putOffName}>
+              Later
+            </button>
+          </div>
+          <p class="note">Your name and keys stay on this device. There is no account, so they can't be recovered if you clear this site's data.</p>
+        </form>
+      )}
+
       {inviteNote && <p class="note">{inviteNote}</p>}
 
       {invite && (
@@ -991,9 +1048,10 @@ export function ChatScreen(props: {
             return [
               separator,
               <li key={key} class="event">
+                {/* By the name they go by now: someone who came in as "New Friend" may have given theirs since. */}
                 {message.author === founderId
-                  ? `${message.content.name} started this chat`
-                  : `${message.content.name} joined${inviter ? ` · ${invitedLine(inviter)}` : ''}`}
+                  ? `${names.get(message.author) ?? message.content.name} started this chat`
+                  : `${names.get(message.author) ?? message.content.name} joined${inviter ? ` · ${invitedLine(inviter)}` : ''}`}
               </li>
             ]
           }

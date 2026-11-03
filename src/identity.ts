@@ -36,6 +36,28 @@ export function loadIdentity(secrets: IdentitySecrets): Identity {
   return {...secrets, device: secrets.device ?? '', id: memberId(signPublic), signPublic, dhPublic: x25519.getPublicKey(secrets.dhSecret)}
 }
 
+// Someone who arrives by an invite is let straight into the chat under this name, and asked for theirs
+// there; until they give it (or put it off), this device remembers to ask.
+export const TEMP_NAME = 'New Friend'
+const NAME_PENDING = 'snrdlr.namePending'
+
+export function namePending(): boolean {
+  try {
+    return localStorage.getItem(NAME_PENDING) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function setNamePending(pending: boolean): void {
+  try {
+    if (pending) localStorage.setItem(NAME_PENDING, '1')
+    else localStorage.removeItem(NAME_PENDING)
+  } catch {
+    // Then the person is not asked again; their name can still be changed in their profile.
+  }
+}
+
 export function createIdentity(name = ''): Identity {
   return loadIdentity({
     name: cleanName(name),
