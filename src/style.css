@@ -1319,6 +1319,8 @@ img.snerd {
 
 /* Snrdlephoning (call-view.tsx): over the bottom of the chat while a call lasts. */
 .call-panel {
+  -webkit-user-select: none;
+  user-select: none;
   position: fixed;
   left: 50%;
   bottom: max(1rem, env(safe-area-inset-bottom));
@@ -1353,6 +1355,11 @@ img.snerd {
 }
 
 .call-panel .buttons button {
+  /* A quick second tap is another press, not a double tap that selects the word or zooms. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   flex: 1;
   max-width: 9rem;
   padding: 0.7rem 0.5rem;

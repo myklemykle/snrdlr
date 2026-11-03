@@ -55,7 +55,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function open() {
   // bypassCSP: the database helper below builds its work from text, which a page's policy may forbid.
   // A pretend microphone (and no question asked about it), which plays CALL_SOUND if there is one.
-  const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(existsSync(CALL_SOUND) ? [`--use-file-for-fake-audio-capture=${CALL_SOUND}`] : [])]
+  const args = ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...(existsSync(CALL_SOUND) ? [`--use-file-for-fake-audio-capture=${CALL_SOUND}`] : [])]
   const context = await chromium.launchPersistentContext(PROFILE, {headless: true, bypassCSP: true, args, permissions: ['microphone']})
   const page = context.pages()[0] ?? (await context.newPage())
   return {context, page}
@@ -247,10 +247,62 @@ async function call(page, seconds) {
   const note = page.locator('.call-note')
   // Rings for up to 45 seconds.
   const answered = await panel.locator('.elapsed').waitFor({timeout: 50_000}).then(() => true, () => false)
-  if (!answered) return `Not answered: ${(await note.textContent().catch(() => null)) ?? 'it stopped ringing'}. Here, before: "${before}"; after: "${await connection()}".`
+  // Whether this browser got TURN servers (src/turn.ts), without which it reaches only devices it can connect to directly.
+  const turn = await page.evaluate(() => (sessionStorage.getItem('snrdlr.turn') ? 'has TURN' : sessionStorage.getItem('snrdlr.turn.failed') ? 'TURN failed' : 'no TURN asked for'))
+  if (!answered) return `Not answered: ${(await note.textContent().catch(() => null)) ?? 'it stopped ringing'}. Here, before: "${before}"; after: "${await connection()}"; ${turn}.`
+  // What comes from their side is recorded, and how loud it is noted twice a second.
+  await page.evaluate(() => {
+    const listen = () => {
+      // The call's own player; voice messages in the chat have players too.
+      const stream = [...document.querySelectorAll('audio')].find(element => element.srcObject instanceof MediaStream)?.srcObject
+      if (!(stream instanceof MediaStream) || stream.getAudioTracks().length === 0) return void setTimeout(listen, 200)
+      const context = new AudioContext()
+      const meter = context.createAnalyser()
+      context.createMediaStreamSource(stream).connect(meter)
+      const samples = new Float32Array(meter.fftSize)
+      const heard = {levels: [], chunks: [], recorder: new MediaRecorder(stream)}
+      heard.recorder.ondataavailable = event => event.data.size > 0 && heard.chunks.push(event.data)
+      heard.recorder.start(1000)
+      heard.timer = setInterval(() => {
+        meter.getFloatTimeDomainData(samples)
+        heard.levels.push(Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length))
+      }, 500)
+      window.__heard = heard
+    }
+    listen()
+  })
   const hungUp = await panel.waitFor({state: 'detached', timeout: seconds * 1000}).then(() => true, () => false)
   if (!hungUp) await panel.getByRole('button', {name: 'Hang up'}).click()
-  return hungUp ? 'Answered, and they hung up.' : `Answered; hung up after ${seconds} seconds.`
+  const heard = await page.evaluate(async () => {
+    const heard = window.__heard
+    if (!heard) return null
+    clearInterval(heard.timer)
+    if (heard.recorder.state !== 'inactive') {
+      await new Promise(resolve => {
+        heard.recorder.onstop = resolve
+        heard.recorder.stop()
+      })
+    }
+    const blob = new Blob(heard.chunks, {type: heard.recorder.mimeType})
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    let binary = ''
+    for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+    delete window.__heard
+    return {levels: heard.levels, audio: btoa(binary), type: heard.recorder.mimeType}
+  })
+  let report = ''
+  if (heard) {
+    // One mark per second, from silence to loud.
+    const marks = []
+    for (let at = 0; at < heard.levels.length; at += 2) {
+      const level = Math.max(...heard.levels.slice(at, at + 2))
+      marks.push(level < 0.003 ? '·' : level < 0.02 ? '▁' : level < 0.06 ? '▃' : level < 0.15 ? '▅' : '▇')
+    }
+    const path = join(INBOX, `call-${new Date().toISOString().replace(/[:.]/g, '-')}.${heard.type.includes('ogg') ? 'ogg' : 'webm'}`)
+    writeFileSync(path, Buffer.from(heard.audio, 'base64'))
+    report = ` Heard from them, a mark a second (· silent … ▇ loud): ${marks.join('') || '(nothing)'}. Recording: ${path}`
+  }
+  return (hungUp ? 'Answered, and they hung up.' : `Answered; hung up after ${seconds} seconds.`) + report
 }
 
 async function placeCall(seconds) {
