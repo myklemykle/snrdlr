@@ -1466,10 +1466,12 @@ test('someone invited goes straight into the chat as New Friend, and gives a nam
   await send(stranger, 'hello, who am I')
   await expect(anne.locator('.theirs', {hasText: 'hello, who am I'})).toContainText('New Friend')
 
-  // Leaving before giving one: still in when they come back, and asked again in the chat.
+  // Leaving before giving one: still in when they come back, and asked again, on the front page and
+  // in the chat. There is no name screen to get past.
   await stranger.goto('about:blank')
   await stranger.goto('/')
-  await expect(stranger.getByLabel('Your name')).toHaveCount(0)
+  await expect(stranger.getByText('Hello, New Friend.')).toBeVisible()
+  await expect(stranger.getByLabel('Your name')).toBeVisible()
   await chatEntry(stranger, 'Club').click()
   await introduce(stranger, 'Slow')
   // Everyone sees the name they gave, also where they joined.
@@ -1485,11 +1487,22 @@ test('someone invited goes straight into the chat as New Friend, and gives a nam
   await other.reload()
   await expect(other.getByRole('heading', {name: 'Club'})).toBeVisible()
   await expect(other.getByLabel('Your name')).toHaveCount(0)
+
+  // With chats of its own, this browser can't become someone else's snrdlr: Settings says so, and the
+  // front page doesn't offer it.
+  await other.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(other.getByRole('button', {name: 'Add this browser to my snrdlr'})).toHaveCount(0)
+  await openSettings(other)
+  await expect(other.getByText('has chats of its own')).toBeVisible()
 })
 
 test('a "chat with me" code and an invite from afar both let a stranger in; developer mode skips the gate', async ({browser}) => {
   const anne = await newPerson(browser)
   await anne.goto('/?dev=1')
+  // A browser with nothing in it yet: on the front page as New Friend, offered to become a snrdlr
+  // used elsewhere, and asked for a name.
+  await expect(anne.getByText('Hello, New Friend.')).toBeVisible()
+  await expect(anne.getByRole('button', {name: 'Add this browser to my snrdlr'})).toBeVisible()
   await introduce(anne, 'Anne')
 
   const viaCode = await newStranger(browser)

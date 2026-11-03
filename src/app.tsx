@@ -34,6 +34,7 @@ import {installed, onIos, useInstall} from './install'
 import {mailboxes} from './mailbox'
 import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
 import {DeviceCode, OpenedDeviceLink} from './link-view'
+import {NamePrompt} from './name-prompt'
 import {JoinByCode} from './scanner'
 import {Avatar, ProfileEditor} from './profile-view'
 import {Sheet} from './sheet'
@@ -523,10 +524,13 @@ function Main(props: {
     onAdmitted()
   }, [join])
 
-  // Someone new who got in by an invite goes straight to the chat as "New Friend", and is asked for
-  // their name there (chat-screen.tsx), rather than stopped at the door for it.
+  // Nobody is stopped at the door for a name. Someone new who got in by an invite goes straight to the
+  // chat as "New Friend", and anyone else let in without a name (developer mode, say) to the front
+  // page; either way they are asked for it there (name-prompt.tsx). Not before the join has worked, so
+  // a stranger whose invite fails is still outside.
+  const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isRemoteFragment(hash)
   useEffect(() => {
-    if (join.status !== 'joined' || named) return
+    if (named || !(join.status === 'joined' || (admitted && !redeeming))) return
     void (async () => {
       const secrets = {name: TEMP_NAME, signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
       await store.saveIdentity(secrets)
@@ -535,7 +539,7 @@ function Main(props: {
       void navigator.storage?.persist?.()
       onIdentity(loadIdentity(secrets))
     })().catch(() => {})
-  }, [join, named])
+  }, [join, named, admitted, redeeming])
 
   // Once the invite has been dealt with, take it out of the address bar and history. Someone whose
   // invite did not work is told so at once, without being asked for a name first.
@@ -581,7 +585,6 @@ function Main(props: {
     if (link) return <OpenedDeviceLink key={hash} link={link} store={store} identity={identity} onClose={() => goHome(true)} />
   }
 
-  const redeeming = join.status !== 'idle' || isInviteFragment(hash) || isRemoteFragment(hash)
   if (!admitted && !redeeming) {
     return (
       <main class="home">
@@ -595,7 +598,8 @@ function Main(props: {
       </main>
     )
   }
-  if (!named && !redeeming) return <Welcome store={store} identity={identity} notice={notice} onNamed={onIdentity} />
+  // Only for a moment, while "New Friend" is saved.
+  if (!named && !redeeming) return <main class="home"><h1>snrdlr</h1></main>
   if (redeeming) {
     return (
       <main class="home">
@@ -651,44 +655,6 @@ function Main(props: {
       onIdentity={onIdentity}
     />
     </>
-  )
-}
-
-function Welcome(props: {store: Store; identity: Identity; notice: string | null; onNamed: (identity: Identity) => void}) {
-  const {store, identity, notice, onNamed} = props
-  const [name, setName] = useState('')
-  const create = async (event: Event) => {
-    event.preventDefault()
-    const secrets = {name: cleanName(name), signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
-    await store.saveIdentity(secrets)
-    // Asks the browser not to evict our data under storage pressure; it may say no.
-    void navigator.storage?.persist?.()
-    onNamed(loadIdentity(secrets))
-  }
-  return (
-    <main class="home">
-      <h1>snrdlr</h1>
-      {notice && <p class="error">{notice}</p>}
-      <p>What should people call you?</p>
-      <form onSubmit={create}>
-        <input
-          value={name}
-          onInput={event => setName(event.currentTarget.value)}
-          placeholder="Your name"
-          maxLength={MAX_NAME_LENGTH}
-          aria-label="Your name"
-          // So a phone can offer the first name from its owner's contact card.
-          name="given-name"
-          autocomplete="given-name"
-          autocapitalize="words"
-        />
-        <button type="submit" disabled={!cleanName(name)}>
-          Continue
-        </button>
-      </form>
-      <p class="note">Your name and keys stay on this device. There is no account, so they can't be recovered if you clear this site's data.</p>
-      <AddThisBrowser store={store} identity={identity} />
-    </main>
   )
 }
 
@@ -990,6 +956,10 @@ function Home(props: {
           </svg>
         </button>
       </p>
+      <NamePrompt store={store} identity={identity} onIdentity={onIdentity} />
+      {/* For a browser with nothing in it yet: the person may already use snrdlr elsewhere. Once it
+          has chats it can't become them (link-view.tsx), and the offer is only in Settings. */}
+      {chats?.length === 0 && <AddThisBrowser store={store} identity={identity} />}
       {settingsOpen && (
         <Settings onClose={() => setSettingsOpen(false)}>
           <NotificationSettings store={store} identity={identity} />
@@ -1022,6 +992,16 @@ function Home(props: {
                   Add a device
                 </button>
               </>
+            )}
+            {!addingDevice && chats !== null && (
+              chats.length === 0 ? (
+                <AddThisBrowser store={store} identity={identity} />
+              ) : (
+                <p class="note">
+                  Already use snrdlr on another device? This {installed() ? 'app' : 'browser'} has chats of its own, so it can't be added to it. To use
+                  one snrdlr everywhere, add new devices from the one you use most.
+                </p>
+              )
             )}
           </section>
 

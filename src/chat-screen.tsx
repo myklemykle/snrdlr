@@ -11,7 +11,7 @@ import {findLinks, leadsHere, pictureLink, showsLinkPictures} from './links'
 import {EmojiPicker} from './emoji-picker'
 import {Emoji, emojiLabel} from './emoji-view'
 import {IMAGE_MIME, MAX_TEXT_LENGTH, type AudioContent, type ImageContent, type MessageRef} from './envelope'
-import {cleanName, loadIdentity, MAX_NAME_LENGTH, memberId, namePending, setNamePending, type Identity} from './identity'
+import {cleanName, MAX_NAME_LENGTH, memberId, type Identity} from './identity'
 import {MAX_FILE_BYTES, sealFile} from './files'
 import {prepareImage, type PreparedImage} from './image'
 import {canRecord, microphoneProblem, startRecording, type Recorder, type Recording} from './recorder'
@@ -19,6 +19,7 @@ import {RecordingBar, VoiceMessage, VoicePlayer} from './voice-view'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
 import {mailboxes} from './mailbox'
+import {NamePrompt} from './name-prompt'
 import {addInvite, makeRemoteInvite, MAX_LIFETIME_MS, remoteFragment} from './remote-invite'
 import {hostInvite} from './invite-room'
 import {openCert} from './membership'
@@ -303,29 +304,6 @@ export function ChatScreen(props: {
     const profile = setNameHere(chat.id, name)
     setOwnProfile(profile)
     await session.current?.callMe(nameIn(profile, chat.id, identity.name)).catch(() => setError('Your name could not be sent.'))
-  }
-  // Someone who came in by an invite is "New Friend" until they say otherwise (app.tsx); asked here,
-  // once they can see the chat they are in. Their other chats hear the new name when next opened.
-  const [askName, setAskName] = useState(namePending)
-  const [newName, setNewName] = useState('')
-  const saveName = async (event: Event) => {
-    event.preventDefault()
-    const called = cleanName(newName)
-    if (!called) return
-    const secrets = {name: called, signSecret: identity.signSecret, dhSecret: identity.dhSecret, ...(identity.device ? {device: identity.device} : {})}
-    try {
-      await store.saveIdentity(secrets)
-    } catch {
-      return setError("Your name couldn't be saved. Try again.")
-    }
-    setNamePending(false)
-    setAskName(false)
-    onIdentity(loadIdentity(secrets))
-    await session.current?.callMe(nameIn(loadProfile(), chat.id, called)).catch(() => setError('Your name could not be sent.'))
-  }
-  const putOffName = () => {
-    setNamePending(false)
-    setAskName(false)
   }
   const insteadHere = async (part: Alterable, value: Instead | null) => {
     setOwnProfile(setInstead(chat.id, part, value))
@@ -991,31 +969,13 @@ export function ChatScreen(props: {
         </section>
       )}
 
-      {askName && (
-        <form class="name-prompt" onSubmit={saveName}>
-          <p>{`You're “${identity.name}” here for now. What should people call you?`}</p>
-          <div class="actions">
-            <input
-              value={newName}
-              onInput={event => setNewName(event.currentTarget.value)}
-              placeholder="Your name"
-              maxLength={MAX_NAME_LENGTH}
-              aria-label="Your name"
-              // So a phone can offer the first name from its owner's contact card.
-              name="given-name"
-              autocomplete="given-name"
-              autocapitalize="words"
-            />
-            <button type="submit" disabled={!cleanName(newName)}>
-              Save name
-            </button>
-            <button type="button" onClick={putOffName}>
-              Later
-            </button>
-          </div>
-          <p class="note">Your name and keys stay on this device. There is no account, so they can't be recovered if you clear this site's data.</p>
-        </form>
-      )}
+      {/* Someone who came in by an invite is asked their name here, in the chat they are in. */}
+      <NamePrompt
+        store={store}
+        identity={identity}
+        onIdentity={onIdentity}
+        onSaved={name => void session.current?.callMe(nameIn(loadProfile(), chat.id, name)).catch(() => setError('Your name could not be sent.'))}
+      />
 
       {inviteNote && <p class="note">{inviteNote}</p>}
 
