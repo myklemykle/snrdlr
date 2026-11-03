@@ -303,6 +303,11 @@ Cheapest thing to do early: settle the final address before there are users to s
   - If a browser does discard the tab, options are a pinned or separate window, a silent audio trick, or going straight to the bot.
   - The chat on screen is not rejoined on a timer, so a chat left open for more than four hours may be using expired relay credentials for new connections.
   - Nothing tells other members that an always-on device exists, or which one it is.
+- **Ideas from iroh (asked 2026-11-03, not to build yet).** The owner was shown iroh (docs.iroh.computer), a Rust networking stack built the same way as snrdlr: devices known by public key, relays for finding each other and as a fallback, then hole punching to a direct path, all over QUIC. Decision: not for the web app. A web page cannot send raw UDP in any browser, so iroh in a browser goes through its relay with no direct path (its own docs say so), which is worse than the direct WebRTC connections we have now; calls also need WebRTC's echo cancellation and smoothing for uneven audio. Worth taking:
+  - **Keep a connection through a network change.** A phone moving from wifi to cellular drops our connection and it starts over; WebRTC can restart in place (ICE restart, `restartIce()`), which nothing in snrdlr does yet. Matters most for calls.
+  - **Smarter history sync.** iroh-docs works out which messages each side is missing without either side listing everything it has (range-based set reconciliation). Worth it once chats are long.
+  - **Large files.** iroh-blobs checks a file piece by piece as it arrives (BLAKE3) and can resume a transfer that was cut off; it could help pictures and voice messages on poor connections.
+  - **A native app.** If snrdlr is ever a native iPhone or Android app, iroh is a real option there, where it does get direct QUIC connections.
 
 ## From the first Android run (moto g power 2021, Chrome 131, 12 October 2026)
 
