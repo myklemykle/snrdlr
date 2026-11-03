@@ -51,6 +51,27 @@ describe('one person on several devices', () => {
     await Promise.all([phone.stop(), computer.stop()])
   })
 
+  it('passes on a chat renamed on one device to the others, once', async () => {
+    const network = makeNetwork()
+    const anne = createIdentity('Anne')
+    const bob = createIdentity('Bob')
+    const phone = await device(network, anne)
+    // Made before Bob's name arrived, and told to the computer by that name.
+    const chat = await phone.store.saveChat(directChat(anne, bob, 'Direct chat', Date.now()))
+    const computer = await device(network, {...anne, device: '0123456789abcdef'})
+    await vi.waitFor(() => expect(computer.names()).resolves.toEqual(['Direct chat']))
+    await phone.store.renameChat(chat.id, 'Bob')
+    await vi.waitFor(() => expect(computer.names()).resolves.toEqual(['Bob']))
+    // Taking it up is not news to pass back: the phone said it once, and nobody says it again.
+    await new Promise(resolve => setTimeout(resolve, 300))
+    const said = async (where: typeof phone) =>
+      (await where.store.listMessages(selfChat(anne).id)).filter(message => message.content.type === 'chat-held').length
+    expect(await said(phone)).toBe(2)
+    expect(await said(computer)).toBe(2)
+    expect(await phone.names()).toEqual(['Bob'])
+    await Promise.all([phone.stop(), computer.stop()])
+  })
+
   it('catches up on what was said while it was away', async () => {
     const network = makeNetwork()
     const anne = createIdentity('Anne')

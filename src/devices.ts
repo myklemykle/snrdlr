@@ -121,6 +121,14 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
       if (!chat) continue
       local.set(id, await store.saveChat(chat))
       changed = true
+    } else if (note.type === 'chat-held' && here && note.name !== here.name && message.sentAt > (here.namedAt ?? here.createdAt)) {
+      // Renamed on another device since it was named here: take up that name. Marked as named when that
+      // device said so, so this device does not pass it back as news.
+      const others = [...local.values()].filter(chat => chat.id !== id).map(chat => chat.name)
+      const name = uniqueChatName(note.name, others)
+      await store.renameChat(id, name, message.sentAt)
+      local.set(id, {...here, name, namedAt: message.sentAt})
+      changed = true
     } else if (note.type === 'chat-left' && here && here.createdAt <= message.sentAt) {
       // Left on another device. A chat on screen here is let go once it is closed.
       if (isOnScreen(id)) continue
@@ -134,10 +142,10 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
       changed = true
     }
   }
-  // Ours that the others have not heard of, or were told some time ago.
+  // Ours that the others have not heard of, were told some time ago, or have renamed since.
   for (const chat of local.values()) {
     const said = latest.get(chat.id)
-    if (!said || said.note.type === 'chat-left' || now - said.message.sentAt > REFRESH_MS) await say(noteFor(chat))
+    if (!said || said.note.type === 'chat-left' || now - said.message.sentAt > REFRESH_MS || (chat.namedAt ?? 0) > said.message.sentAt) await say(noteFor(chat))
   }
   // How far each chat has been read, here and on the others.
   const reads = latestReads(messages, identity.id)

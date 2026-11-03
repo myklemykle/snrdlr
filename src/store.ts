@@ -22,6 +22,11 @@ export type ChatRecord = {
   peer?: {signPublic: Uint8Array; dhPublic: Uint8Array}
   name: string
   createdAt: number
+  /**
+   * When this device last changed the chat's name, or took up a newer one from another of the person's
+   * devices (devices.ts). A name changed here is passed on to them; theirs is taken up if newer.
+   */
+  namedAt?: number
   /** When this chat was last looked at; messages received after it count as unread. */
   readAt?: number
   /**
@@ -164,10 +169,10 @@ function wrap(db: IDBPDatabase<Schema>) {
     /** When this device left a chat, if it did and has not rejoined since. */
     leftAt: async (id: string) => (await db.get('left', id))?.leftAt,
 
-    async renameChat(id: string, name: string): Promise<void> {
+    async renameChat(id: string, name: string, at = Date.now()): Promise<void> {
       const tx = db.transaction('chats', 'readwrite')
       const chat = await tx.store.get(id)
-      if (chat && chat.name !== name) await tx.store.put({...chat, name})
+      if (chat && chat.name !== name) await tx.store.put({...chat, name, namedAt: at})
       await tx.done
     },
     /** Records how far this chat's dealings with the message-keeping relay have got. Only ever moves forward. */
