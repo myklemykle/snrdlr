@@ -121,14 +121,16 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
       if (!chat) continue
       local.set(id, await store.saveChat(chat))
       changed = true
-    } else if (note.type === 'chat-held' && here && note.name !== here.name && message.sentAt > (here.namedAt ?? here.createdAt)) {
+    } else if (note.type === 'chat-held' && here && message.device !== (identity.device ?? '') && note.name !== here.name && message.sentAt > (here.namedAt ?? here.createdAt)) {
       // Renamed on another device since it was named here: take up that name. Marked as named when that
-      // device said so, so this device does not pass it back as news.
+      // device said so, so this device does not pass it back as news. What this device said itself is
+      // never newer than its own name, though a name given before names were dated would look older.
       const others = [...local.values()].filter(chat => chat.id !== id).map(chat => chat.name)
       const name = uniqueChatName(note.name, others)
-      await store.renameChat(id, name, message.sentAt)
-      local.set(id, {...here, name, namedAt: message.sentAt})
-      changed = true
+      if (await store.renameChat(id, name, message.sentAt)) {
+        local.set(id, {...here, name, namedAt: message.sentAt})
+        changed = true
+      }
     } else if (note.type === 'chat-left' && here && here.createdAt <= message.sentAt) {
       // Left on another device. A chat on screen here is let go once it is closed.
       if (isOnScreen(id)) continue

@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto'
+import {openDB} from 'idb'
 import {describe, expect, it, vi} from 'vitest'
 import {directChat, newGroupChat} from './chats'
 import {chatFromNote, noteFor, selfChat, startSelfSync} from './devices'
@@ -10,12 +11,13 @@ let counter = 0
 
 /** One person's device: their shared keys, its own tag, its own storage, and the hidden chat kept in step. */
 async function device(network: ReturnType<typeof makeNetwork>, identity: Identity) {
-  const store = await openStore(`devices-${counter++}`)
+  const dbName = `devices-${counter++}`
+  const store = await openStore(dbName)
   await store.saveIdentity(identity)
   const peerId = identity.device ? `${identity.id}.${identity.device}` : identity.id
   const stop = startSelfSync({store, identity, connectFor: () => network.connect(peerId), pollMs: 40})
   const names = async () => (await store.listChats()).map(chat => chat.name).sort()
-  return {store, stop, names}
+  return {store, stop, names, dbName}
 }
 
 describe('one person on several devices', () => {
@@ -70,6 +72,23 @@ describe('one person on several devices', () => {
     expect(await said(computer)).toBe(2)
     expect(await phone.names()).toEqual(['Bob'])
     await Promise.all([phone.stop(), computer.stop()])
+  })
+
+  it("keeps a name given here before names were dated, over what this device said earlier", async () => {
+    const network = makeNetwork()
+    const anne = createIdentity('Anne')
+    const phone = await device(network, anne)
+    const chat = await phone.store.saveChat(directChat(anne, createIdentity('Bob'), 'Direct chat', Date.now()))
+    await vi.waitFor(async () => expect((await phone.store.listMessages(selfChat(anne).id)).some(message => message.content.type === 'chat-held')).toBe(true))
+    // Renamed the way it was before a rename was dated.
+    const db = await openDB(phone.dbName)
+    await db.put('chats', {...(await db.get('chats', chat.id)), name: 'Bob'})
+    db.close()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(await phone.names()).toEqual(['Bob'])
+    // And a name from elsewhere older than this device's own is not taken.
+    expect(await phone.store.renameChat(chat.id, 'Old', 1)).toBe(false)
+    await phone.stop()
   })
 
   it('catches up on what was said while it was away', async () => {

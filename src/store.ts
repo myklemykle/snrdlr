@@ -169,11 +169,17 @@ function wrap(db: IDBPDatabase<Schema>) {
     /** When this device left a chat, if it did and has not rejoined since. */
     leftAt: async (id: string) => (await db.get('left', id))?.leftAt,
 
-    async renameChat(id: string, name: string, at = Date.now()): Promise<void> {
+    /**
+     * Names a chat. A name another device gave it at `from` is taken only if newer than this device's,
+     * which may have changed since that was read. Returns whether the name changed.
+     */
+    async renameChat(id: string, name: string, from?: number): Promise<boolean> {
       const tx = db.transaction('chats', 'readwrite')
       const chat = await tx.store.get(id)
-      if (chat && chat.name !== name) await tx.store.put({...chat, name, namedAt: at})
+      const taken = !!chat && chat.name !== name && (from === undefined || from > (chat.namedAt ?? chat.createdAt))
+      if (taken) await tx.store.put({...chat, name, namedAt: from ?? Date.now()})
       await tx.done
+      return taken
     },
     /** Records how far this chat's dealings with the message-keeping relay have got. Only ever moves forward. */
     async noteMailbox(id: string, progress: {storedSeq?: number; caughtUpAt?: number; proofsFor?: string}): Promise<void> {
