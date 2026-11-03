@@ -105,6 +105,16 @@ Still open:
 - A waveform picture; hold-to-talk as a shortcut; playing one message after another.
 - A recording in a format this device cannot play says nothing useful yet.
 
+### Snrdlephoning (voice calls): built 3 November 2026
+
+Asked for by the owner on 3 November 2026 ("phone-style chat"), and named by them: "Mykle is snrdlephoning you." Decided with the owner: direct chats first, groups later; voice now, video later; every device of the person called rings. Built: a phone button in a direct chat's header; ringing on every connected device of the other person, and a push to the rest (the relay's `r` tag lets a ring through while the person is using the app, and past the five-second gap); a banner when it rings while another chat or the list is on screen; Answer, Decline, Mute, Hang up, a running clock; the first device to answer gets the call and the others are told it was taken; a line in the chat afterwards ("You snrdlephoned Bob · 4 min", "Missed snrdlephone call from Anne"); the screen kept awake. The relay learns that a call was rung in a chat, and when, but nothing of it. Needs the relay deployed with the `r` tag (done with this release).
+
+Open, and to test on real phones:
+- **iPhone:** a web app's microphone stops when it leaves the screen or the phone locks, so a call lasts only while snrdlr is open. It cannot ring like a phone call (no CallKit) or ring with the app closed except by notification. Whether the ring tone plays when the app is opened from a notification (no tap yet) and whether the other side comes out of the earpiece or the speaker are untested; a web page has no switch between them.
+- **No notifications, app open on another screen:** a call to someone who has not turned on notifications reaches them only if they are in that chat, or open it while it rings (45 seconds).
+- Groups (a few people, each sending to each), video, a speaker switch where browsers allow one, and calls through the "stay connected" computer are later.
+- An app version from before this one keeps call messages as unknown and shows nothing for them.
+
 ### Audio: to do
 
 - Audio formats: iPhones and Android/desktop browsers record differently; test on real devices that each can play the other's.

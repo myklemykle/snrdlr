@@ -2654,3 +2654,75 @@ test('on an iPhone, a Safari tab opened for a notification closes itself once a 
   expect(first.isClosed()).toBe(false)
   await expect(first.getByText('snrdlr is open in another tab')).toBeVisible()
 })
+
+test('snrdlephoning: a direct chat calls, is answered, talks, hangs up, and is turned down', async ({browser}) => {
+  const withMicrophone = async () => {
+    const context = await browser.newContext({permissions: ['clipboard-read', 'clipboard-write', 'microphone']})
+    await context.addInitScript(() => localStorage.getItem('snrdlr.invited') ?? localStorage.setItem('snrdlr.invited', '1'))
+    return context.newPage()
+  }
+  const [anne, bob] = [await withMicrophone(), await withMicrophone()]
+  await anne.goto('/')
+  await introduce(anne, 'Anne')
+  await bob.goto('/')
+  await introduce(bob, 'Bob')
+  await anne.getByRole('button', {name: 'Chat with one person'}).click()
+  await anne.getByRole('button', {name: 'Copy link'}).click()
+  await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
+  await expect(anne.locator('.status.on')).toHaveText(/Connected to 1/, {timeout: 30_000})
+
+  // Anne calls; Bob's phone rings.
+  await anne.getByRole('button', {name: 'Snrdlephone Bob'}).click()
+  const anneCall = anne.getByRole('dialog', {name: 'Snrdlephone call'})
+  const bobCall = bob.getByRole('dialog', {name: 'Snrdlephone call'})
+  await expect(anneCall).toContainText('Snrdlephoning…')
+  await expect(bobCall).toContainText('Anneis snrdlephoning you', {timeout: 15_000})
+  await bobCall.getByRole('button', {name: 'Answer'}).click()
+
+  // Talking: the clock runs on both, and each plays the other's microphone.
+  await expect(anneCall.locator('.elapsed')).toHaveText(/^0:0\d$/, {timeout: 15_000})
+  await expect(bobCall.locator('.elapsed')).toBeVisible()
+  const hearing = (page: Page) =>
+    page.evaluate(() => {
+      const tracks = (document.querySelector('audio')?.srcObject as MediaStream | null)?.getAudioTracks() ?? []
+      return tracks.some(track => track.readyState === 'live')
+    })
+  await expect.poll(() => hearing(anne), {timeout: 15_000}).toBe(true)
+  await expect.poll(() => hearing(bob), {timeout: 15_000}).toBe(true)
+  await anneCall.getByRole('button', {name: 'Mute'}).click()
+  await expect(anneCall).toContainText('muted')
+  await anne.waitForTimeout(1500)
+
+  // Bob hangs up; the call is in both logs, once.
+  await bobCall.getByRole('button', {name: 'Hang up'}).click()
+  await expect(anneCall).toHaveCount(0)
+  await expect(bobCall).toHaveCount(0)
+  await expect(anne.locator('.event.call')).toHaveText([/^You snrdlephoned Bob · \d+ sec$/], {timeout: 15_000})
+  await expect(bob.locator('.event.call')).toHaveText([/^Anne snrdlephoned you · \d+ sec$/], {timeout: 15_000})
+  await expect.poll(() => hearing(anne)).toBe(false)
+
+  // Bob calls back and Anne turns it down.
+  await bob.getByRole('button', {name: 'Snrdlephone Anne'}).click()
+  await anneCall.getByRole('button', {name: 'Decline'}).click({timeout: 15_000})
+  await expect(bob.getByRole('status')).toHaveText('Busy right now')
+  await expect(bob.locator('.event.call').last()).toHaveText('You snrdlephoned Anne · no answer', {timeout: 15_000})
+  await expect(anne.locator('.event.call').last()).toHaveText('Missed snrdlephone call from Bob', {timeout: 15_000})
+
+  // Bob is looking at his list when Anne calls. Opening the chat while it rings, he can answer.
+  await bob.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByRole('button', {name: 'Snrdlephone Bob'}).click()
+  await expect(anneCall).toContainText('Snrdlephoning…')
+  await chatEntry(bob, 'Anne').click()
+  await bobCall.getByRole('button', {name: 'Answer'}).click({timeout: 20_000})
+  await expect(anneCall.locator('.elapsed')).toBeVisible({timeout: 15_000})
+  await anneCall.getByRole('button', {name: 'Hang up'}).click()
+  await expect(bobCall).toHaveCount(0)
+  await expect(bob.locator('.event.call').last()).toHaveText(/^Anne snrdlephoned you · \d+ sec$/, {timeout: 15_000})
+
+  // A group has no phone.
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await anne.getByLabel('Chat name').fill('Picnic')
+  await anne.getByRole('button', {name: 'Start a group'}).click()
+  await expect(anne.getByRole('heading', {name: 'Picnic'})).toBeVisible()
+  await expect(anne.getByRole('button', {name: /^Snrdlephone/})).toHaveCount(0)
+})

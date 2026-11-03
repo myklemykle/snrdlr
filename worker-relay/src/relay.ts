@@ -88,8 +88,12 @@ export type PushBook = {
   forget: (endpoint: string) => void
   /** The person with each tag is using the app, for `seconds` from now (0: no longer). */
   awake: (topics: PushTopic[], seconds: number) => void
-  /** A message worth a notification was stored under `topic` by someone whose tag there is `me`. */
-  stored: (topic: string, me: string) => Promise<void>
+  /**
+   * A message worth a notification was stored under `topic` by someone whose tag there is `me`. A call
+   * ringing (`ring`) wakes everyone else even while they are using the app, and however recently they
+   * were last woken.
+   */
+  stored: (topic: string, me: string, ring?: boolean) => Promise<void>
 }
 
 /** Push services that browsers use. The relay posts to nowhere else, so it cannot be aimed at other sites. */
@@ -375,7 +379,8 @@ export class Relay {
       reply('OK', event.id, true, '')
       this.deliver(event, topics)
       const notify = event.tags.find(tag => tag[0] === 'n')?.[1]
-      if (kept && this.pushes && typeof notify === 'string' && HEX_32.test(notify)) await this.pushes.stored(topics[0], notify).catch(() => {})
+      const ring = event.tags.some(tag => tag[0] === 'r' && tag[1] === '1')
+      if (kept && this.pushes && typeof notify === 'string' && HEX_32.test(notify)) await this.pushes.stored(topics[0], notify, ring).catch(() => {})
     } else if (type === 'REQ') {
       const [subId, ...filters] = rest
       if (typeof subId !== 'string' || subId.length === 0 || subId.length > 64) return reply('NOTICE', 'invalid: subscription id')

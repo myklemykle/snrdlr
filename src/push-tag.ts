@@ -2,6 +2,7 @@
 // without pulling in the browser's push machinery.
 import {sha256} from '@noble/hashes/sha2.js'
 import {concatBytes, toHex, utf8} from './bytes'
+import {RING_MS} from './envelope'
 import type {Identity} from './identity'
 import type {ChatRecord, MessageRecord} from './store'
 
@@ -16,6 +17,10 @@ const NEWS_MS = 15 * 60_000
 export const pushTag = (chat: Pick<ChatRecord, 'secret'>, identity: Pick<Identity, 'signPublic'>) =>
   toHex(sha256(concatBytes(utf8('snrdlr/v1/push-tag'), chat.secret, identity.signPublic)).slice(0, 16))
 
-/** Whether a message is something a person would want to be woken for: words or a picture, just written. */
+/** Whether a message is something a person would want to be woken for: words or a picture, just written, or a call still ringing. */
 export const worthNotifying = (record: Pick<MessageRecord, 'content' | 'sentAt'>, now = Date.now()) =>
-  (record.content.type === 'text' || record.content.type === 'image' || record.content.type === 'audio') && now - record.sentAt < NEWS_MS
+  isRinging(record, now) || ((record.content.type === 'text' || record.content.type === 'image' || record.content.type === 'audio') && now - record.sentAt < NEWS_MS)
+
+/** A call that has just started ringing; it wakes people even while they use the app (see the relay). */
+export const isRinging = (record: Pick<MessageRecord, 'content' | 'sentAt'>, now = Date.now()) =>
+  record.content.type === 'call' && record.content.phase === 'ring' && now - record.sentAt < RING_MS

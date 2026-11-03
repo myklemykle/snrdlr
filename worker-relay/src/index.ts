@@ -81,15 +81,18 @@ export function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise
         sql.exec('INSERT OR REPLACE INTO push_awake (topic, me, until) VALUES (?, ?, ?)', topic, me, now + seconds * 1000)
       }
     },
-    async stored(topic, me) {
+    async stored(topic, me, ring = false) {
       const now = Date.now()
+      // A call rings even someone using the app, whose open chat may be another, and however recently
+      // they were woken.
       const targets = sql
         .exec(
           `SELECT t.endpoint, t.p256dh, t.auth FROM push_topics p JOIN push_targets t ON t.endpoint = p.endpoint
-           WHERE p.topic = ? AND p.me != ? AND p.last_at < ?
-           AND NOT EXISTS (SELECT 1 FROM push_awake a WHERE a.topic = p.topic AND a.me = p.me AND a.until > ?)`,
+           WHERE p.topic = ? AND p.me != ? AND (? OR (p.last_at < ?
+           AND NOT EXISTS (SELECT 1 FROM push_awake a WHERE a.topic = p.topic AND a.me = p.me AND a.until > ?)))`,
           topic,
           me,
+          ring ? 1 : 0,
           now - PUSH_GAP_MS,
           now
         )
@@ -101,7 +104,7 @@ export function sqlPushes(sql: Sql, vapidJson: string, waitUntil: (work: Promise
       waitUntil(
         Promise.all(
           targets.map(async target => {
-            const outcome = await sendPush(target, {t: topic}, {vapid, subject: PUSH_SUBJECT, collapse: topic.slice(0, 32)})
+            const outcome = await sendPush(target, ring ? {t: topic, r: 1} : {t: topic}, {vapid, subject: PUSH_SUBJECT, collapse: topic.slice(0, 32)})
             stats.count(outcome === 'sent' ? 'push_sent' : outcome === 'gone' ? 'push_gone' : 'push_failed')
             if (outcome === 'gone') forget(target.endpoint)
           })

@@ -179,6 +179,18 @@ describe('envelope', () => {
     }
   })
 
+  it('round-trips a call ringing and ending, and refuses one with no proper id or length', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    for (const content of [{type: 'call', id: '0123456789abcdef', phase: 'ring'}, {type: 'call', id: '0123456789abcdef', phase: 'end', seconds: 254}] as const) {
+      const call = {...hello, seq: 2, content}
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, call))).toEqual({...call, author: anne.id})
+    }
+    for (const content of [{type: 'call', id: '0123', phase: 'ring'}, {type: 'call', id: '0123456789abcdef', phase: 'end', seconds: 90_000}] as const) {
+      await expect(openEnvelope(chat, await sealEnvelope(chat, anne, {...hello, seq: 2, content}))).rejects.toThrow('bad call body')
+    }
+  })
+
   it("round-trips how far one of a person's devices has read a chat, and refuses marks that name no writer", async () => {
     const chat = await makeChat()
     const anne = createIdentity('Anne')

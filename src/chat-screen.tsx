@@ -1,5 +1,7 @@
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {claimChat, heardNews, unclaimChat} from './background'
+import {callLine, loggedCalls} from './call'
+import {CallPanel, useCall} from './call-view'
 import {behindWhiteText, latestCards} from './cards'
 import {admit, authFor, chatFromGroupInvite, groupFromDirect} from './chats'
 import {loadDraft, saveDraft} from './drafts'
@@ -96,6 +98,8 @@ export function ChatScreen(props: {
   const [cursor, setCursor] = useState<number | null>(null)
   const session = useRef<Session | null>(null)
   const heard = useRef<((messages: MessageRecord[]) => boolean) | null>(null)
+  // The chat's call, for the session to tell what it hears about calls (call-view.tsx).
+  const callNow = useRef<ReturnType<typeof useCall>['call']>(null)
   // Which pictures' files are on this device.
   const [files, setFiles] = useState<ReadonlySet<string>>(new Set())
 
@@ -132,7 +136,9 @@ export function ChatScreen(props: {
             if (peerIds.length > 0) setError(null)
           },
           onError: message => !cancelled && setError(message),
-          onFiles: held => !cancelled && setFiles(held)
+          onFiles: held => !cancelled && setFiles(held),
+          onCallSignal: (signal, peerId) => !cancelled && callNow.current?.heard(signal, peerId),
+          onStream: (stream, peerId) => !cancelled && callNow.current?.stream(stream, peerId)
         }
       })
       if (cancelled) void opened.close()
@@ -236,6 +242,7 @@ export function ChatScreen(props: {
     }
     return first
   }, [messages])
+  const calls = useMemo(() => new Map(loggedCalls(messages ?? []).map(call => [call.id, call])), [messages])
   // The messages that get a line of their own. Certificates show through the "joined" lines, reactions
   // on the message they are about, and unknown kinds wait for a newer version of the app.
   const shown = useMemo(
@@ -243,6 +250,8 @@ export function ChatScreen(props: {
       (messages ?? []).filter(message => {
         const {type} = message.content
         if (type === 'profile') return message.author !== identity.id && firstProfiles.has(message)
+        // A call shows once, where it rang, when it is over.
+        if (type === 'call') return message.content.phase === 'ring' && calls.has(message.content.id)
         return type === 'text' || type === 'image' || type === 'audio' || type === 'group-invite' || type === 'rename'
       }),
     [messages]
@@ -270,6 +279,8 @@ export function ChatScreen(props: {
     await session.current?.shareCard(await cardFor(chat.id, store)).catch(() => setError('Your profile could not be sent.'))
   }
   const peerId = chat.peer ? memberId(chat.peer.signPublic) : null
+  const calling = useCall({otherId: direct ? peerId : null, selfId: identity.id, session, peers, messages})
+  callNow.current = calling.call
   /** What a message says now: its words or its caption, as last edited. */
   const wordsOf = (message: MessageRecord) => {
     const {content} = message
@@ -712,7 +723,7 @@ export function ChatScreen(props: {
   }, [grouping !== null])
 
   // Anything half done here would be lost if the tab reloaded to update itself.
-  useUpdateHold(draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || inserting || replyingTo !== null || editing !== null || renaming !== null || grouping !== null || profileOf !== null)
+  useUpdateHold(calling.busy || draft.trim() !== '' || attached.length > 0 || preparing > 0 || invite !== null || viewing !== null || menu !== null || picking !== null || inserting || replyingTo !== null || editing !== null || renaming !== null || grouping !== null || profileOf !== null)
 
   const connected = peers.length > 0
   const routeSummary = describeRoutes(routes)
@@ -807,6 +818,13 @@ export function ChatScreen(props: {
               </button>
             )}
             <h1 title={chatName}>{chatName}</h1>
+            {calling.call && (
+              <button type="button" class="phone" aria-label={`Snrdlephone ${chatName}`} disabled={!messages || calling.busy} onClick={calling.start}>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+                  <path d="M5 3.5h3.5l1.8 4.6-2.3 1.5a11 11 0 0 0 6.4 6.4l1.5-2.3 4.6 1.8V19a1.6 1.6 0 0 1-1.7 1.6A16.5 16.5 0 0 1 3.4 5.2 1.6 1.6 0 0 1 5 3.5z" />
+                </svg>
+              </button>
+            )}
             {!direct && (
               <button type="button" class="pencil" aria-label="Rename chat" disabled={!messages} onClick={() => setRenaming(chatName)}>
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
@@ -926,6 +944,11 @@ export function ChatScreen(props: {
                   : `${message.content.name} joined${inviter ? ` · ${invitedLine(inviter)}` : ''}`}
               </li>
             ]
+          }
+          if (message.content.type === 'call') {
+            const call = calls.get(message.content.id)
+            const line = call && callLine(call, call.caller === identity.id, chatName)
+            return line ? [separator, <li key={key} class="event call">{line}</li>] : [separator]
           }
           if (message.content.type === 'rename') {
             return [
@@ -1272,6 +1295,8 @@ export function ChatScreen(props: {
           </>
         )}
       </form>
+      {calling.call && <CallPanel name={chatName} calling={calling} />}
+      {calling.call && <audio ref={calling.speaker} autoplay hidden />}
     </main>
   )
 }

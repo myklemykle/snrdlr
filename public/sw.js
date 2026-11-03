@@ -68,13 +68,26 @@ async function labels() {
   return {safari: false, chats: {}}
 }
 
-async function notify(topic) {
+async function notify(topic, ring) {
   const {chats} = await labels()
   const chat = chats[topic]
+  const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true})
+  // A call ringing (src/call.ts) is told to the app wherever it is open, so it can ring there too.
+  if (ring && chat) windows.forEach(client => client.postMessage({ring: chat.id}))
   // Someone looking at the app already hears and sees what arrives. An iPhone insists on a
   // notification for every push, so it gets one regardless.
-  const windows = await self.clients.matchAll({type: 'window', includeUncontrolled: true})
   if (!onIos && windows.some(client => client.visibilityState === 'visible' && client.focused)) return
+  if (ring) {
+    await self.registration.showNotification(chat ? `${chat.name} is snrdlephoning you` : 'Someone is snrdlephoning you', {
+      body: 'Tap to answer',
+      tag: `${topic || 'snrdlr'}-call`,
+      renotify: true,
+      requireInteraction: true,
+      icon: 'bird-192.png',
+      data: {id: chat?.id ?? null}
+    })
+    return
+  }
   // One notification per chat, replaced by the next. It does not count messages: what was read, here
   // or on another device (on an iPhone, in Safari), is never known here, so a count only ever grew.
   await self.registration.showNotification(chat ? chat.name : 'snrdlr', {
@@ -88,12 +101,15 @@ async function notify(topic) {
 
 self.addEventListener('push', event => {
   let topic = ''
+  let ring = false
   try {
-    topic = event.data?.json()?.t ?? ''
+    const data = event.data?.json()
+    topic = data?.t ?? ''
+    ring = data?.r === 1
   } catch {
     // A push with nothing readable still says something arrived.
   }
-  event.waitUntil(notify(topic))
+  event.waitUntil(notify(topic, ring))
 })
 
 async function open(id) {

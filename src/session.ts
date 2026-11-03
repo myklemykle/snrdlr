@@ -8,14 +8,14 @@
 // certificates in their own "joined" message, so a message can arrive before the proof that its author
 // belongs; it is held until then, and never stored, shown or passed on if the proof does not come.
 import {latestCards, sameCard} from './cards'
-import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type AudioContent, type ChatHeldContent, type ChatReadContent, type Content, type FilePartContent, type ImageContent, type InvitesHeldContent, type Message, type MessageRef} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, streamOf, type CardContent, type ChatContext, type AudioContent, type CallContent, type ChatHeldContent, type ChatReadContent, type Content, type FilePartContent, type ImageContent, type InvitesHeldContent, type Message, type MessageRef} from './envelope'
 import {fileHash, MAX_FILE_BYTES} from './files'
 import {memberId, type Identity} from './identity'
 import {openAsMember, sealForMembers, type Recipient} from './store-seal'
 import {chatKeys, policyOf} from './chats'
 import type {ChatKeys} from './keys'
 import {KEEP_SECONDS, type Mailbox, type OpenMailbox} from './mailbox'
-import {pushTag, worthNotifying} from './push-tag'
+import {isRinging, pushTag, worthNotifying} from './push-tag'
 import {loadProfile, nameIn} from './profile'
 import {fetchFile, leaveFile} from './file-store'
 import {makeRoster} from './membership'
@@ -38,6 +38,22 @@ export type WireHandlers = {
   onFile: (hash: string, data: Uint8Array | null, peerId: string) => void
   /** Whether a file a peer is about to send is one we asked that peer for; anything else is not downloaded. */
   expectsFile: (hash: string, byteLength: number, peerId: string) => boolean
+  /** A member's device says something about a call (call.ts). */
+  onCallSignal?: (signal: CallSignal, peerId: string) => void
+  /** A member's device sends its microphone. */
+  onStream?: (stream: MediaStream, peerId: string) => void
+}
+
+/** What one device tells another about a call, straight across their connection; never stored. */
+export type CallSignal = {id: string; say: 'ring' | 'answer' | 'taken' | 'decline' | 'end'}
+
+/** The part of a connection that carries calls. Only verified members are ever reached. */
+export type CallWire = {
+  signal: (signal: CallSignal, peerId: string) => Promise<void>
+  addStream: (stream: MediaStream, peerId: string) => void
+  removeStream: (stream: MediaStream, peerId: string) => void
+  /** Whose device a connected peer is, by member ID; null if it is not a member. */
+  memberOf: (peerId: string) => string | null
 }
 
 export type Wire = {
@@ -52,6 +68,8 @@ export type Wire = {
   ping: (peerId: string) => Promise<void>
   routes: () => Promise<Route[]>
   leave: () => Promise<void>
+  /** Absent where calls cannot be made, as in tests without a browser. */
+  call?: CallWire
 }
 
 /**
@@ -71,6 +89,9 @@ export type SessionHandlers = {
   onDelivered?: (messages: MessageRecord[]) => void
   /** The hashes of the files held for this chat, whenever that changes. */
   onFiles?: (held: ReadonlySet<string>) => void
+  /** A member's device says something about a call, or sends its microphone (call.ts). */
+  onCallSignal?: (signal: CallSignal, peerId: string) => void
+  onStream?: (stream: MediaStream, peerId: string) => void
 }
 
 /** A card to show in a chat, with the encrypted file of its photo if it has one. */
@@ -100,6 +121,10 @@ export type Session = {
   postImage: (image: ImageContent, file: Uint8Array) => Promise<void>
   /** Sends a voice message, the same way. */
   postAudio: (audio: AudioContent, file: Uint8Array) => Promise<void>
+  /** Records a call ringing or ending in the chat's log (call.ts); a ring wakes the other person's devices. */
+  postCall: (content: CallContent) => Promise<void>
+  /** What carries calls on the current connection, if there is one. */
+  callWire: () => CallWire | null
   /** Call when the app returns to the foreground or the network comes back, with how long it was away. */
   resume: (awayMs: number) => Promise<void>
   routes: () => Promise<Route[]>
@@ -392,8 +417,9 @@ export async function openSession(options: {
     if (tracked) shelving.add(record.seq)
     // A message just written here wakes the other members' devices; anything else waits until they look.
     const notify = tracked && chat.kind !== 'self' && worthNotifying(record) ? pushTag(chat, identity) : undefined
+    const ring = notify !== undefined && isRinging(record)
     void sealForMembers(chat.id, record.envelope, recipients())
-      .then(locked => mailbox.post(locked, record.sentAt, notify))
+      .then(locked => mailbox.post(locked, record.sentAt, notify, ring ? {ring} : undefined))
       .catch(() => false)
       .then(kept => {
       if (!tracked) return
@@ -579,6 +605,12 @@ export async function openSession(options: {
       expectsFile: (hash, byteLength, peerId) => live() && asked.get(hash)?.peerId === peerId && missingFiles().get(hash)?.size === byteLength,
       onError: message => {
         if (live()) reportUnlessSomeoneConnects(message)
+      },
+      onCallSignal: (signal, peerId) => {
+        if (live()) handlers.onCallSignal?.(signal, peerId)
+      },
+      onStream: (stream, peerId) => {
+        if (live()) handlers.onStream?.(stream, peerId)
       }
     })
     if (!live()) return void opened.leave().catch(() => {})
@@ -691,6 +723,8 @@ export async function openSession(options: {
       } else await reconnect()
     },
     routes: async () => (await wire?.routes()) ?? [],
+    postCall: content => post(content),
+    callWire: () => wire?.call ?? null,
     async close() {
       closed = true
       clearInterval(resync)

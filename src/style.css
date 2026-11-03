@@ -1304,12 +1304,94 @@ img.snerd {
   min-width: 0;
 }
 
-.pencil {
+.pencil,
+.chat header .phone {
   flex: none;
   display: flex;
   padding: 0.35rem;
   border-color: transparent;
   color: var(--muted);
+}
+
+.chat header .phone:not(:disabled) {
+  color: var(--accent);
+}
+
+/* Snrdlephoning (call-view.tsx): over the bottom of the chat while a call lasts. */
+.call-panel {
+  position: fixed;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(22rem, calc(100% - 2rem));
+  z-index: 20;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--bg);
+  box-shadow: 0 0.5rem 2rem rgb(0 0 0 / 0.25);
+  text-align: center;
+}
+
+.call-panel .who {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.call-panel .what {
+  margin: 0.25rem 0 0.9rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.call-panel .buttons {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.call-panel .buttons button {
+  flex: 1;
+  max-width: 9rem;
+  padding: 0.7rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.call-panel .answer {
+  background: #1a8f3c;
+  border-color: #1a8f3c;
+  color: #fff;
+}
+
+.call-panel .decline,
+.call-panel .hang-up {
+  background: #c8322f;
+  border-color: #c8322f;
+  color: #fff;
+}
+
+.call-panel .mute[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.call-note {
+  position: fixed;
+  left: 50%;
+  bottom: max(5rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 2rem);
+  z-index: 20;
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.75rem;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 0.9rem;
 }
 
 .chat header .rename {
@@ -1835,4 +1917,21 @@ img.snerd {
   color: var(--muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A call ringing in a chat that is not on screen (app.tsx). */
+.ring-banner {
+  position: fixed;
+  top: max(0.5rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(24rem, calc(100% - 2rem));
+  z-index: 30;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 0.9rem;
+  background: #1a8f3c;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.25);
 }

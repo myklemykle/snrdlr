@@ -6,7 +6,7 @@ import {MAX_ENVELOPE_BYTES} from './envelope'
 import {MAX_FILE_BYTES} from './files'
 import type {ChatKeys} from './keys'
 import {routeFromStats} from './route'
-import type {VersionVector, Wire, WireHandlers} from './session'
+import type {CallSignal, VersionVector, Wire, WireHandlers} from './session'
 
 export const APP_ID = 'snrdlr-v2'
 const MAX_SYNC_BYTES = 128 * 1024
@@ -62,6 +62,8 @@ type PeerState = {
 export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: TurnServerConfig[], auth: ChatAuth, passive = false): Wire {
   const joined = new Set<string>()
   const members = new Set<string>()
+  // Whose device each verified peer is.
+  const memberIds = new Map<string, string>()
   const states = new Map<string, PeerState>()
   const room = joinRoom({appId: APP_ID, password: keys.sdpPassword, turnConfig: turnServers, relayConfig, ...(passive ? {passive: true} : {})}, keys.roomId, {
     // Trystero's error text is aimed at developers; keep it in the console.
@@ -135,6 +137,15 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     }
   })
 
+  const SAYS = ['ring', 'answer', 'taken', 'decline', 'end']
+  const calls = room.makeAction<{i: string; s: string}>('call', {
+    onMessage: (data, {peerId}) => {
+      const {i, s} = (data ?? {}) as {i?: unknown; s?: unknown}
+      if (!members.has(peerId) || typeof i !== 'string' || !/^[0-9a-f]{16}$/.test(i) || typeof s !== 'string' || !SAYS.includes(s)) return
+      handlers.onCallSignal?.({id: i, say: s as CallSignal['say']}, peerId)
+    }
+  })
+
   function stateFor(peerId: string): PeerState {
     let state = states.get(peerId)
     if (!state) {
@@ -185,7 +196,9 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     const prints = fingerprints(peerId)
     if (!prints) return refuse(peerId, 'connection has no fingerprint to bind to')
     const binding = proofBinding({nonce: state.theirNonce, fingerprint: prints.theirs}, {nonce: state.ourNonce, fingerprint: prints.ours})
-    if (!auth.verify(proof, binding)) return refuse(peerId, 'not a member')
+    const member = auth.verify(proof, binding)
+    if (!member) return refuse(peerId, 'not a member')
+    memberIds.set(peerId, member)
     state.settled = true
     clearTimeout(state.timer)
     members.add(peerId)
@@ -207,7 +220,14 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     joined.delete(peerId)
     clearTimeout(states.get(peerId)?.timer)
     states.delete(peerId)
+    memberIds.delete(peerId)
     if (members.delete(peerId)) handlers.onPeersChange([...members])
+  }
+  // A microphone is sent over the same verified connection, encrypted by its DTLS-SRTP; adding one
+  // renegotiates that connection but keeps its certificate, so the membership proof still holds.
+  room.onPeerStream = (stream, peerId) => {
+    if (members.has(peerId)) handlers.onStream?.(stream, peerId)
+    else stream.getTracks().forEach(track => track.stop())
   }
 
   /** Everyone verified, or one verified peer; never anyone unverified. */
@@ -248,6 +268,18 @@ export function joinChat(keys: ChatKeys, handlers: WireHandlers, turnServers: Tu
     leave: () => {
       states.forEach(state => clearTimeout(state.timer))
       return room.leave()
+    },
+    call: {
+      signal: async (signal, peerId) => {
+        if (members.has(peerId)) await calls.send({i: signal.id, s: signal.say}, {target: peerId})
+      },
+      addStream: (stream, peerId) => {
+        if (members.has(peerId)) room.addStream(stream, {target: peerId}).forEach(sent => void sent.catch(() => {}))
+      },
+      removeStream: (stream, peerId) => {
+        if (joined.has(peerId)) room.removeStream(stream, {target: peerId})
+      },
+      memberOf: peerId => memberIds.get(peerId) ?? null
     }
   }
 }

@@ -46,7 +46,7 @@ export type OpenMailbox = (topic: string, collectedAt: number | undefined, handl
  * For what is kept differently from a chat message: until `expiresAt` rather than for KEEP_SECONDS,
  * and, with `forget` (the SHA-256 of a key, in hex), deleted early by whoever shows that key (FORGET).
  */
-export type PostOptions = {expiresAt?: number; forget?: string}
+export type PostOptions = {expiresAt?: number; forget?: string; ring?: boolean}
 
 export type NostrEvent = {id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string}
 
@@ -59,7 +59,9 @@ export function wrapEnvelope(topic: string, envelope: Uint8Array, sentAt: number
     ['x', topic],
     ['expiration', String(options.expiresAt === undefined ? created_at + KEEP_SECONDS : Math.floor(options.expiresAt / 1000))],
     ...(notify ? [['n', notify]] : []),
-    ...(options.forget ? [['f', options.forget]] : [])
+    ...(options.forget ? [['f', options.forget]] : []),
+    // A call ringing: the relay wakes the others even while they use the app.
+    ...(options.ring ? [['r', '1']] : [])
   ]
   const content = toBase64Url(envelope)
   const id = sha256(utf8(JSON.stringify([0, pubkey, created_at, STORED_KIND, tags, content])))

@@ -321,22 +321,22 @@ describe('Relay', () => {
     const BOB = 'b2'.repeat(16)
     const device = (name: string): PushTarget => ({endpoint: `https://web.push.apple.com/${name}`, p256dh: 'B'.repeat(87), auth: 'A'.repeat(22)})
     /** A sealed message, marked as worth a notification when `notify` is given. */
-    const sealed = (notify?: string) => {
+    const sealed = (notify?: string, ring = false) => {
       const pubkey = hex(schnorr.getPublicKey(secretKey))
-      const tags = [['x', CHAT], ...(notify ? [['n', notify]] : [])]
+      const tags = [['x', CHAT], ...(notify ? [['n', notify]] : []), ...(ring ? [['r', '1']] : [])]
       const content = `sealed ${serial++}`
       const id = sha256(new TextEncoder().encode(JSON.stringify([0, pubkey, 1_790_000_000, STORED_KIND, tags, content])))
       return {kind: STORED_KIND, tags, created_at: 1_790_000_000, content, pubkey, id: hex(id), sig: hex(schnorr.sign(id, secretKey))}
     }
     const book = () => {
       const registered = new Map<string, PushTopic[]>()
-      const stored: [string, string][] = []
+      const stored: [string, string, boolean?][] = []
       const awake: [PushTopic[], number][] = []
       const pushes: PushBook = {
         awake: (topics, seconds) => void awake.push([topics, seconds]),
         register: (target, topics) => void registered.set(target.endpoint, topics),
         forget: endpoint => void registered.delete(endpoint),
-        stored: async (topic, me) => void stored.push([topic, me])
+        stored: async (topic, me, ring) => void stored.push([topic, me, ring])
       }
       return {pushes, registered, stored, awake}
     }
@@ -377,12 +377,15 @@ describe('Relay', () => {
       await bob.say('EVENT', sealed('not hex'))
       // A short-lived event is never stored, so it wakes nobody whatever it carries.
       await bob.say('EVENT', {...event(), tags: [['x', CHAT], ['n', BOB]]})
-      expect(stored).toEqual([[CHAT, BOB]])
+      expect(stored).toEqual([[CHAT, BOB, false]])
       // The same message again is a duplicate, and does not push twice.
       const again = sealed(BOB)
       await bob.say('EVENT', again)
       await bob.say('EVENT', again)
       expect(stored).toHaveLength(2)
+      // A call ringing says so.
+      await bob.say('EVENT', sealed(BOB, true))
+      expect(stored[2]).toEqual([CHAT, BOB, true])
     })
 
     it('hears that a person is using the app, for a while, and checks what it is told', async () => {

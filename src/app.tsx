@@ -40,7 +40,7 @@ import {Sheet} from './sheet'
 import {setShowsLinkPictures, showsLinkPictures} from './links'
 import {saveDraft} from './drafts'
 import {latestCards} from './cards'
-import type {CardContent} from './envelope'
+import {RING_MS, type CardContent} from './envelope'
 import {openStore, type ChatRecord, type Store} from './store'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
@@ -443,6 +443,40 @@ function Main(props: {
     }
   }, [named])
 
+  // A call ringing in a chat that is not on screen (the relay wakes the app for it, public/sw.js): said
+  // across the top until it stops, and a tap opens the chat, where it can be answered.
+  const [ringIn, setRingIn] = useState<{id: string; name: string} | null>(null)
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onMessage = (event: MessageEvent) => {
+      const ring = (event.data as {ring?: unknown} | null)?.ring
+      if (typeof ring !== 'string') return
+      void store.getChat(ring).then(found => {
+        if (!found || found.kind !== 'dm') return
+        clearTimeout(timer)
+        setRingIn({id: found.id, name: found.name})
+        timer = setTimeout(() => setRingIn(null), RING_MS)
+      })
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage)
+    return () => {
+      clearTimeout(timer)
+      navigator.serviceWorker?.removeEventListener('message', onMessage)
+    }
+  }, [])
+  const ringBanner = ringIn && hash !== CHAT_PREFIX + ringIn.id && (
+    <button
+      type="button"
+      class="ring-banner"
+      onClick={() => {
+        setRingIn(null)
+        openChat(ringIn.id)
+      }}
+    >
+      {ringIn.name} is snrdlephoning you · Open
+    </button>
+  )
+
   // A notification tapped while the app is open: its chat, or the chat list.
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -559,6 +593,8 @@ function Main(props: {
     const current = chat?.id === hash.slice(CHAT_PREFIX.length) ? chat : null
     return (
       current && (
+        <>
+        {ringBanner}
         <ChatScreen
           key={current.id}
           chat={current}
@@ -571,10 +607,13 @@ function Main(props: {
             openChat(id)
           }}
         />
+        </>
       )
     )
   }
   return (
+    <>
+    {ringBanner}
     <Home
       store={store}
       identity={identity}
@@ -594,6 +633,7 @@ function Main(props: {
       }}
       onIdentity={onIdentity}
     />
+    </>
   )
 }
 

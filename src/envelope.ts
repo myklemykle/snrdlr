@@ -45,6 +45,12 @@ export type Content =
   | {type: 'edit'; target: {device: string; seq: number}; text: string}
   /** A new name for a group chat. Any member may give one; the latest is the chat's name. */
   | {type: 'rename'; name: string}
+  /**
+   * A voice call ("snrdlephoning", call.ts), as the caller records it: once when it starts ringing, which
+   * also wakes the other person's devices, and once when it ends, with how long it was talked for (0 if
+   * nobody answered). The call itself never passes through the chat's log.
+   */
+  | CallContent
   | CardContent
   /** Only in a person's own hidden chat (see devices.ts): one of their devices holds this chat, with what is needed to open it. */
   | ChatHeldContent
@@ -59,6 +65,14 @@ export type Content =
   | FilePartContent
   /** A genuine message of a kind this version of the app does not understand; kept for a later version. */
   | {type: 'unknown'; kind: string}
+
+export type CallContent = {type: 'call'; id: string; phase: 'ring' | 'end'; seconds?: number}
+/** Bytes in a call's id. */
+export const CALL_ID_BYTES = 8
+/** How long a call rings before it is given up as unanswered. */
+export const RING_MS = 45_000
+/** The longest call the log will record; anything longer is recorded as this. */
+export const MAX_CALL_SECONDS = 24 * 3600
 
 /** Points at another message in the same chat, by its author, the device it was written on, and that device's numbering. */
 export type MessageRef = {author: string; device: string; seq: number}
@@ -298,6 +312,8 @@ function encodeContent(content: Content): [string, unknown] {
       return ['file-part', {h: fromHex(content.hash), i: content.index, n: content.count, d: content.data}]
     case 'edit':
       return ['edit', {s: content.target.seq, t: content.text, ...(content.target.device ? {d: fromHex(content.target.device)} : {})}]
+    case 'call':
+      return ['call', {i: fromHex(content.id), p: content.phase === 'ring' ? 'r' : 'e', ...(content.phase === 'end' ? {s: content.seconds ?? 0} : {})}]
     case 'unknown':
       throw new Error('cannot send a message of unknown type')
   }
@@ -453,6 +469,13 @@ function decodeContent(type: unknown, body: unknown): Content {
     if (!isBytes(h, 32) || !isBytes(k, FILE_KEY_BYTES) || !isCount(z) || z === 0 || z > MAX_FILE_BYTES) throw new Error('bad audio body')
     if (!isCount(d) || d > MAX_AUDIO_MS) throw new Error('bad audio body')
     return {type, mime: m as AudioType, hash: toHex(h), key: new Uint8Array(k), size: z, duration: d, ...(r !== undefined ? {replyTo: decodeRef(r)} : {})}
+  }
+  if (type === 'call') {
+    const {i, p, s} = (body ?? {}) as Record<string, unknown>
+    if (!(i instanceof Uint8Array) || i.length !== CALL_ID_BYTES || (p !== 'r' && p !== 'e')) throw new Error('bad call body')
+    if (p === 'r') return {type, id: toHex(i), phase: 'ring'}
+    if (!isCount(s) || s > MAX_CALL_SECONDS) throw new Error('bad call body')
+    return {type, id: toHex(i), phase: 'end', seconds: s}
   }
   // Signed and decrypted correctly, so it is real; a newer app version sent something we cannot read yet.
   if (typeof type === 'string' && type.length > 0 && type.length <= 64) return {type: 'unknown', kind: type}
