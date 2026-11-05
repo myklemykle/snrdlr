@@ -35,6 +35,24 @@ function timeLeft(ms: number): string {
 
 const linkTo = (invite: RemoteInvite) => location.origin + location.pathname + remoteFragment(invite)
 
+/**
+ * Copies text that is not known yet. Safari lets a tap copy only during the tap, which is over by the
+ * time the relay has answered, but it accepts a promise of the text, handed over during the tap.
+ */
+async function copyWhenReady(text: Promise<string>): Promise<boolean> {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({'text/plain': text.then(words => new Blob([words], {type: 'text/plain'}))})])
+    return true
+  } catch {
+    try {
+      await navigator.clipboard.writeText(await text)
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
 export function InvitesSheet(props: {identity: Identity; chats: ChatRecord[]; onClose: () => void}) {
   const {identity, chats, onClose} = props
   const groups = chats.filter(chat => chat.kind === 'group')
@@ -53,17 +71,22 @@ export function InvitesSheet(props: {identity: Identity; chats: ChatRecord[]; on
   const [unit, setUnit] = useState<Unit>('days')
   const [making, setMaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState<string | null>(null)
 
   const asked = Number(amount) * UNITS[unit]
   const lifetime = Number.isFinite(asked) && asked > 0 ? Math.min(MAX_LIFETIME_MS, Math.max(MIN_LIFETIME_MS, asked)) : null
 
+  const showCopied = (invite: RemoteInvite) => {
+    setCopied(invite.seed)
+    setTimeout(() => setCopied(current => (current === invite.seed ? null : current)), 2000)
+  }
   const copy = async (invite: RemoteInvite) => {
+    setNote(null)
     try {
       await navigator.clipboard.writeText(linkTo(invite))
-      setCopied(invite.seed)
-      setTimeout(() => setCopied(current => (current === invite.seed ? null : current)), 2000)
+      showCopied(invite)
     } catch {
       setError("The link couldn't be copied. Try again.")
     }
@@ -74,12 +97,21 @@ export function InvitesSheet(props: {identity: Identity; chats: ChatRecord[]; on
     if (lifetime === null) return
     setMaking(true)
     setError(null)
+    setNote(null)
     const group = groups.find(chat => chat.id === target) ?? null
-    const invite = await makeRemoteInvite(mailboxes, identity, group, lifetime, Date.now()).catch(() => null)
+    const made = makeRemoteInvite(mailboxes, identity, group, lifetime, Date.now()).catch(() => null)
+    const copying = copyWhenReady(
+      made.then(invite => {
+        if (!invite) throw new Error('no invite')
+        return linkTo(invite)
+      })
+    )
+    const invite = await made
     setMaking(false)
     if (!invite) return setError("The relay couldn't be reached, so no invite was made. Try again.")
     addInvite(invite)
-    await copy(invite)
+    if (await copying) showCopied(invite)
+    else setNote('Your invite is ready. Tap Copy link to copy it.')
   }
 
   const cancel = async (invite: RemoteInvite) => {
@@ -137,6 +169,7 @@ export function InvitesSheet(props: {identity: Identity; chats: ChatRecord[]; on
       </section>
 
       {error && <p class="error">{error}</p>}
+      {note && <p class="note">{note}</p>}
 
       <section>
         <h3>Open invites</h3>
