@@ -1,5 +1,6 @@
 // Profiles on screen: the small icon beside a name, the card that pops up for a person, and the
 // editor for one's own.
+import {outward} from './install'
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {COLORS, CONTACT_KINDS, CONTACT_LABELS, contactLink, fallbackHue, type ContactKind} from './cards'
 import {EmojiPicker} from './emoji-picker'
@@ -52,7 +53,7 @@ function Contact(props: {contact: NonNullable<CardContent['contact']>}) {
     <p class="contact">
       <span class="kind">{CONTACT_LABELS[contact.kind]}</span>{' '}
       {link ? (
-        <a href={link} target="_blank" rel="noopener noreferrer">
+        <a href={outward(link)} target="_blank" rel="noopener noreferrer">
           {contact.value}
         </a>
       ) : (

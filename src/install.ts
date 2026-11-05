@@ -14,6 +14,13 @@ export const installed = () =>
 /** iPhones and iPads, where the installed app keeps its own storage, apart from the browser's. */
 export const onIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
+/**
+ * Where a link to another site should go. The iPhone's Home Screen app opens such links in a small
+ * browser of its own, with a Done button; an `x-safari-` address opens them in Safari itself instead,
+ * where the person's logins and tabs are.
+ */
+export const outward = (href: string) => (/^https?:/i.test(href) && onIos() && installed() ? `x-safari-${href}` : href)
+
 /** Call once at startup: registers the service worker and listens for the browser's offer to install. */
 export function setUpInstall(): void {
   if (import.meta.env.PROD && 'serviceWorker' in navigator) {

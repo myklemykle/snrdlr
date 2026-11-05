@@ -18,6 +18,7 @@ import {canRecord, microphoneProblem, startRecording, type Recorder, type Record
 import {RecordingBar, VoiceMessage, VoicePlayer} from './voice-view'
 import {ImageView, ImageViewer, useImageUrl} from './image-view'
 import {createInvite, inviteToFragment, type Invite} from './invite'
+import {outward} from './install'
 import {mailboxes} from './mailbox'
 import {NamePrompt} from './name-prompt'
 import {addInvite, makeRemoteInvite, MAX_LIFETIME_MS, remoteFragment} from './remote-invite'
@@ -720,7 +721,7 @@ export function ChatScreen(props: {
       if (!piece.href) return words
       return (
         <a
-          href={piece.href}
+          href={leadsHere(piece.href, location.href) ? piece.href : outward(piece.href)}
           target={leadsHere(piece.href, location.href) ? undefined : '_blank'}
           rel="noopener noreferrer"
           // The tap that ends a long press opens the menu, not the link.
@@ -1384,7 +1385,7 @@ function LinkPicture(props: {href: string; onOpen: (event: MouseEvent) => void})
   const [failed, setFailed] = useState(false)
   if (failed) return null
   return (
-    <a class="link-picture" href={props.href} target="_blank" rel="noopener noreferrer" onClick={props.onOpen}>
+    <a class="link-picture" href={outward(props.href)} target="_blank" rel="noopener noreferrer" onClick={props.onOpen}>
       <img src={props.href} alt="" loading="lazy" referrerpolicy="no-referrer" onError={() => setFailed(true)} />
     </a>
   )
