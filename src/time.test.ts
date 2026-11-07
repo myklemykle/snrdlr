@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {dayKey, formatDay, formatTime} from './time'
+import {dayKey, formatDay, formatTime, formatWhen} from './time'
 
 // Built from local-time parts, so the tests hold in any time zone.
 const at = (year: number, month: number, day: number, hour = 12, minute = 0) => new Date(year, month - 1, day, hour, minute).getTime()
@@ -39,6 +39,17 @@ describe('formatTime', () => {
 
   it('shows nothing for a timestamp no calendar can represent', () => {
     // A member's device can claim any send time, including one past the end of the calendar.
-    for (const format of [formatTime, formatDay, dayKey]) expect(format(Number.MAX_SAFE_INTEGER)).toBe('')
+    for (const format of [formatTime, formatDay, dayKey, formatWhen]) expect(format(Number.MAX_SAFE_INTEGER)).toBe('')
+  })
+})
+
+describe('formatWhen', () => {
+  const now = at(2026, 11, 6, 15, 0)
+  it('shows the time today, then the day this past week, then the date', () => {
+    expect(formatWhen(at(2026, 11, 6, 9, 5), now, 'en-US')).toMatch(/^9:05\sAM$/)
+    expect(formatWhen(at(2026, 11, 5, 23, 0), now, 'en-US')).toBe('Yesterday')
+    expect(formatWhen(at(2026, 11, 2, 12, 0), now, 'en-US')).toBe('Mon')
+    expect(formatWhen(at(2026, 10, 30, 12, 0), now, 'en-US')).toBe('Oct 30')
+    expect(formatWhen(at(2025, 12, 30, 12, 0), now, 'en-US')).toBe('Dec 30, 2025')
   })
 })

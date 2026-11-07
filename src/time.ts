@@ -33,3 +33,14 @@ export function formatDay(timestamp: number, now = Date.now(), locale?: string):
     ...(sameYear ? {} : {year: 'numeric'})
   }).format(timestamp)
 }
+
+/** When a chat last had a message, as its row in the list says it: "9:05 PM", "Yesterday", "Tue", "3 Nov". */
+export function formatWhen(timestamp: number, now = Date.now(), locale?: string): string {
+  if (!isValid(timestamp)) return ''
+  const daysAgo = Math.round((startOfDay(now) - startOfDay(timestamp)) / 86_400_000)
+  if (daysAgo <= 0) return formatTime(timestamp, locale)
+  if (daysAgo === 1) return 'Yesterday'
+  if (daysAgo < 7) return new Intl.DateTimeFormat(locale, {weekday: 'short'}).format(timestamp)
+  const sameYear = new Date(timestamp).getFullYear() === new Date(now).getFullYear()
+  return new Intl.DateTimeFormat(locale, {day: 'numeric', month: 'short', ...(sameYear ? {} : {year: 'numeric'})}).format(timestamp)
+}

@@ -263,12 +263,12 @@ test('chats get distinct names, show in the page title, and can be left', async 
     await page.getByRole('button', {name: 'Back to chats'}).click()
   }
   await expect(page).toHaveTitle('snrdlr')
-  await expect(page.locator('.chats .open')).toHaveText(['Chat 2', 'Chat'])
+  await expect(page.locator('.chats .open .name')).toHaveText(['Chat 2', 'Chat'])
   // The chat with the latest message comes first.
   await chatEntry(page, 'Chat').filter({hasNotText: 'Chat 2'}).click()
   await send(page, 'Still here')
   await page.getByRole('button', {name: 'Back to chats'}).click()
-  await expect(page.locator('.chats .open')).toHaveText(['Chat', 'Chat 2'])
+  await expect(page.locator('.chats .open .name')).toHaveText(['Chat', 'Chat 2'])
 
   // Leaving asks first, and cancelling keeps the chat.
   await page.getByRole('button', {name: 'Leave Chat 2'}).click()
@@ -279,9 +279,9 @@ test('chats get distinct names, show in the page title, and can be left', async 
   await page.getByRole('button', {name: 'Leave chat', exact: true}).click()
   // The confirmation row goes away once the chat has actually been deleted.
   await expect(page.locator('.chats .confirm')).toHaveCount(0)
-  await expect(page.locator('.chats .open')).toHaveText(['Chat'])
+  await expect(page.locator('.chats .open .name')).toHaveText(['Chat'])
   await page.reload()
-  await expect(page.locator('.chats .open')).toHaveText(['Chat'])
+  await expect(page.locator('.chats .open .name')).toHaveText(['Chat'])
 })
 
 test('the header shows connection progress, and emoji are shown larger', async ({browser}) => {
@@ -437,7 +437,9 @@ test('two people start a direct chat from a "chat with me" code, and it cannot b
   await expect(anne.locator('.theirs', {hasText: 'yes'})).toBeVisible({timeout: 15_000})
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.locator('.chats .open')).toHaveCount(1)
-  await expect(chatEntry(anne, 'Bob')).toContainText('direct')
+  // Marked as direct by Bob's icon; like every row, it says when it last had a message.
+  await expect(chatEntry(anne, 'Bob').locator('.avatar')).toBeVisible()
+  await expect(chatEntry(anne, 'Bob').locator('time.when')).toHaveText(/^\d{1,2}:\d{2}\s?(AM|PM)?$/)
   // Bob, who was showing the code this time, is taken to the same chat.
   await expect(bob.locator('.mine', {hasText: 'yes'})).toBeVisible()
 })
@@ -2218,7 +2220,7 @@ test('one snrdlr tab at a time: the newest takes over, and an old one steps asid
   expect(invite).toContain('#i=')
 })
 
-test('the chat list shows direct chats first, each with the other person\'s icon and colour', async ({browser}) => {
+test('the chat list shows direct chats and groups together, latest first, a direct chat with the other person\'s icon and colour', async ({browser}) => {
   const [anne, bob] = [await newPerson(browser), await newPerson(browser)]
   await anne.goto('/')
   await introduce(anne, 'Anne')
@@ -2232,10 +2234,14 @@ test('the chat list shows direct chats first, each with the other person\'s icon
   await bob.goto(await anne.evaluate(() => navigator.clipboard.readText()))
   await expect(anne.getByRole('heading', {name: 'Bob'})).toBeVisible({timeout: 15_000})
   await expect(bob.getByRole('heading', {name: 'Anne'})).toBeVisible({timeout: 15_000})
-  // A group started after it would come first by age; direct chats come first anyway.
+  // A group started after it comes first; a message in the direct chat puts that back on top.
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await anne.getByLabel('Chat name').fill('Picnic')
   await anne.getByRole('button', {name: 'Start a group'}).click()
+  await anne.getByRole('button', {name: 'Back to chats'}).click()
+  await expect(anne.locator('.chats .open .name')).toHaveText(['Picnic', 'Bob'])
+  await chatEntry(anne, 'Bob').click()
+  await send(anne, 'picnic later?')
   await anne.getByRole('button', {name: 'Back to chats'}).click()
   await expect(anne.locator('.chats .open .name')).toHaveText(['Bob', 'Picnic'])
   const entry = chatEntry(anne, 'Bob')

@@ -34,6 +34,7 @@ import {installed, onIos, useInstall} from './install'
 import {mailboxes} from './mailbox'
 import {isDeviceFragment, linkFromFragment, newDeviceTag} from './link-device'
 import {DeviceCode, OpenedDeviceLink} from './link-view'
+import {formatWhen} from './time'
 import {NamePrompt} from './name-prompt'
 import {JoinByCode} from './scanner'
 import {Avatar, ProfileEditor} from './profile-view'
@@ -813,6 +814,8 @@ function Home(props: {
   const [desktop] = useState(() => matchMedia('(hover: hover) and (pointer: fine)').matches)
   const [chats, setChats] = useState<ChatRecord[] | null>(null)
   const [unread, setUnread] = useState<Record<string, number>>({})
+  // When each chat last had a message, shown on its row.
+  const [lastAt, setLastAt] = useState<Record<string, number>>({})
   // For each direct chat, the other person's card as they show it there: their icon and colour.
   const [cards, setCards] = useState<Record<string, CardContent | undefined>>({})
   const [name, setName] = useState('')
@@ -891,10 +894,11 @@ function Home(props: {
   }
 
   const refresh = async () => {
-    // Direct chats first, then groups, each with the latest message first.
+    // Direct chats and groups together, the latest message first.
     const listed = await store.listChats()
     const activity = new Map(await Promise.all(listed.map(async chat => [chat.id, await store.lastActivity(chat)] as const)))
-    const stored = listed.sort((a, b) => Number(a.kind !== 'dm') - Number(b.kind !== 'dm') || activity.get(b.id)! - activity.get(a.id)!)
+    const stored = listed.sort((a, b) => activity.get(b.id)! - activity.get(a.id)!)
+    setLastAt(Object.fromEntries(activity))
     const counts = await Promise.all(stored.map(chat => store.unreadCount(chat, identity.id)))
     const shown = await Promise.all(
       stored.map(async chat => [chat.id, chat.kind === 'dm' && chat.peer ? latestCards(await store.listMessages(chat.id)).get(memberId(chat.peer.signPublic)) : undefined] as const)
@@ -1129,7 +1133,13 @@ function Home(props: {
                 >
                   {chat.kind === 'dm' && chat.peer && <Avatar card={cards[chat.id]} name={chat.name} id={memberId(chat.peer.signPublic)} />}
                   <span class="name">{chat.name}</span>
-                  {chat.kind === 'dm' && <span class="tag">direct</span>}
+                  {/* A direct chat is told by the other person's icon; every row says when it last had a message. */}
+                  {/* A member's device can claim any send time, even one no calendar has; that shows nothing. */}
+                  {formatWhen(lastAt[chat.id] ?? NaN) && (
+                    <time class="tag when" dateTime={new Date(lastAt[chat.id]).toISOString()}>
+                      {formatWhen(lastAt[chat.id])}
+                    </time>
+                  )}
                   {unread[chat.id] > 0 && (
                     <span class="unread" aria-label={`${unread[chat.id]} unread`}>
                       {unread[chat.id]}
