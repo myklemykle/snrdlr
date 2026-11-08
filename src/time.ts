@@ -44,3 +44,16 @@ export function formatWhen(timestamp: number, now = Date.now(), locale?: string)
   const sameYear = new Date(timestamp).getFullYear() === new Date(now).getFullYear()
   return new Intl.DateTimeFormat(locale, {day: 'numeric', month: 'short', ...(sameYear ? {} : {year: 'numeric'})}).format(timestamp)
 }
+
+/**
+ * A message's time, saying the day too once it is not today, so that scrolling back through a chat
+ * never makes an old message look new: "9:05 PM", "Yesterday 9:05 PM", "Mon 9:05 PM", "Oct 30, 9:05 PM".
+ */
+export function formatStamp(timestamp: number, now = Date.now(), locale?: string): string {
+  const time = formatTime(timestamp, locale)
+  if (!time) return ''
+  const daysAgo = Math.round((startOfDay(now) - startOfDay(timestamp)) / 86_400_000)
+  if (daysAgo <= 0) return time
+  if (daysAgo < 7) return `${formatWhen(timestamp, now, locale)} ${time}`
+  return `${formatWhen(timestamp, now, locale)}, ${time}`
+}

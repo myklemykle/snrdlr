@@ -35,7 +35,7 @@ import {playSound} from './sound'
 import {devMode} from './standing-invite'
 import {diagnoseChat} from './diagnose'
 import type {ChatRecord, MessageRecord, Store} from './store'
-import {dayKey, formatDay, formatTime} from './time'
+import {dayKey, formatDay, formatStamp} from './time'
 import {joinChat} from './transport'
 import {fetchTurnServers} from './turn'
 import {useUpdateHold} from './update'
@@ -1024,7 +1024,7 @@ export function ChatScreen(props: {
                   separator,
                   <li key={key} class="event call">
                     {line} ·{' '}
-                    <time dateTime={new Date(call.rangAt).toISOString()}>{formatTime(call.rangAt)}</time>
+                    <time dateTime={new Date(call.rangAt).toISOString()}>{formatStamp(call.rangAt)}</time>
                   </li>
                 ]
               : [separator]
@@ -1123,7 +1123,7 @@ export function ChatScreen(props: {
               )}
               <time class="time" dateTime={new Date(message.sentAt).toISOString()}>
                 {edited && 'edited · '}
-                {formatTime(message.sentAt)}
+                {formatStamp(message.sentAt)}
               </time>
               {tallies && (
                 <span class="reactions">
