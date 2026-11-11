@@ -44,6 +44,26 @@ describe('store', () => {
     expect(loadIdentity((await second.getIdentity())!).id).toBe(anne.id)
   })
 
+  it('opens the storage again after the browser closes it', async () => {
+    // Keep hold of each connection the store opens, as the browser would, so one can be closed under it.
+    const connections: IDBDatabase[] = []
+    const factory = indexedDB.open.bind(indexedDB)
+    indexedDB.open = (...args: Parameters<IDBFactory['open']>) => {
+      const request = factory(...args)
+      request.addEventListener('success', () => connections.push(request.result))
+      return request
+    }
+    try {
+      const store = await openStore(freshName())
+      await store.saveChat(chat({id: 'kept'}))
+      connections[0].close()
+      expect((await store.getChat('kept'))?.id).toBe('kept')
+      expect(connections).toHaveLength(2)
+    } finally {
+      indexedDB.open = factory
+    }
+  })
+
   it('saves chats once and lists the newest first', async () => {
     const store = await openStore(freshName())
     await store.saveChat(chat({id: 'old', name: 'Old', createdAt: 1}))

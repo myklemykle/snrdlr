@@ -87,13 +87,49 @@ export type StoreHooks = {
 }
 
 export async function openStore(name = 'snrdlr', hooks: StoreHooks = {}) {
-  const db = await openDB<Schema>(name, 6, {
+  // Set once the storage is closed on purpose, for a newer version or by `close`; it is not reopened then.
+  let closed = false
+  let opening: Promise<Store> | undefined
+  const open = () =>
+    (opening ??= connect(name, hooks, () => (closed = true), () => (opening = undefined)).catch(error => {
+      opening = undefined
+      throw error
+    }))
+  await open()
+  // A browser may close the storage under a page that is still running: Chrome does this to a page left
+  // in the background, for one. Each call then finds it open again, retrying once if it was cut off just
+  // before the call could start.
+  const store = {} as Store
+  for (const key of Object.keys(await open()) as (keyof Store)[]) {
+    if (key === 'close') continue
+    ;(store as Record<string, unknown>)[key] = async (...args: unknown[]) => {
+      const call = async () => ((await open())[key] as (...args: unknown[]) => unknown)(...args)
+      try {
+        return await call()
+      } catch (error) {
+        if (closed || !(error instanceof DOMException && error.name === 'InvalidStateError')) throw error
+        opening = undefined
+        return await call()
+      }
+    }
+  }
+  store.close = () => {
+    closed = true
+    void opening?.then(opened => opened.close())
+  }
+  return store
+}
+
+function connect(name: string, hooks: StoreHooks, onClosed: () => void, onTerminated: () => void) {
+  return openDB<Schema>(name, 6, {
     blocked: () => hooks.onBlocked?.(),
     // Without this, a tab left open on an old version would stop every newer tab from starting.
     blocking(_current, _blocked, event) {
+      onClosed()
       ;(event.target as IDBDatabase).close()
       hooks.onOutdated?.()
     },
+    terminated: onTerminated,
     upgrade(db, oldVersion, _newVersion, upgrade) {
       if (oldVersion < 1) {
         db.createObjectStore('identity')
@@ -117,8 +153,7 @@ export async function openStore(name = 'snrdlr', hooks: StoreHooks = {}) {
         })
       } else if (oldVersion < 6) makeMessages(db)
     }
-  })
-  return wrap(db)
+  }).then(wrap)
 }
 
 function makeMessages(db: IDBPDatabase<Schema>) {
