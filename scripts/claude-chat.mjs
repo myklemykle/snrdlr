@@ -126,6 +126,18 @@ const withDb = (page, work, arg) =>
 /** How far this device's messages in a chat are known to be with the relay. */
 const storedSeq = (page, name) => withDb(page, async (get, name) => (await get('chats')).find(chat => chat.name === name)?.storedSeq ?? 0, name)
 
+/**
+ * Waits until the relay keeps something of ours in the chat, such as the line saying we joined. Until
+ * then nobody away from this browser knows we are there, and leaving the chat at once stops it going.
+ */
+async function untilStored(page, name) {
+  const deadline = Date.now() + 60_000
+  while ((await storedSeq(page, name)) < 1) {
+    if (Date.now() > deadline) throw new Error(`The relay did not confirm keeping anything of ours in "${name}" within a minute.`)
+    await sleep(500)
+  }
+}
+
 /** Splits a long message at paragraph or line breaks, so each part fits in one message. */
 function parts(text) {
   const out = []
@@ -193,7 +205,9 @@ async function joinOn(page, invite) {
       await named.fill(NAME)
       await page.getByRole('button', {name: 'Save name'}).click()
     }
-    return `Joined "${(await page.locator('h1').first().textContent())?.trim()}".`
+    const chat = (await page.locator('h1').first().textContent())?.trim()
+    await untilStored(page, chat)
+    return `Joined "${chat}".`
   } catch (error) {
     const shown = await page.locator('.error').allTextContents().catch(() => [])
     throw new Error(`Could not join. ${shown.join(' ')} ${error.message}`)
@@ -463,8 +477,16 @@ async function listen(wanted, group) {
         const id = file.slice(0, -'.json'.length)
         let reply
         try {
-          const {text, chat: other, picture, name: newName, call: seconds, invite} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
-          if (invite !== undefined) {
+          const {text, chat: other, picture, name: newName, call: seconds, invite, visit} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          if (visit !== undefined) {
+            // Opens another chat until what we have written there is with the relay, then comes back.
+            await chatNames(page)
+            await openChat(page, visit)
+            await untilStored(page, visit)
+            await chatNames(page)
+            await openChat(page, name)
+            reply = [`${id}.sent`, `Caught up in "${visit}".`]
+          } else if (invite !== undefined) {
             // Joining leaves the page in the new chat. Back to this one at once, or the next reply would go there.
             const joined = await joinOn(page, invite)
             await chatNames(page)
@@ -512,6 +534,7 @@ try {
     if (group) rest.splice(rest.indexOf('--group'), 1)
     await listen(option('--chat'), group)
   }
+  else if (command === 'visit' && rest[0] && listener()) await handOver({visit: rest.join(' ')})
   else if (command === 'chats') {
     const {context, page} = await open()
     try {
