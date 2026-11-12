@@ -172,23 +172,31 @@ async function rename(page, name) {
 }
 
 async function joinChat(invite) {
+  // The listener has the profile open; a second browser on it would see nothing.
+  if (listener()) return handOver({invite})
   const {context, page} = await open()
   try {
+    console.log(await joinOn(page, invite))
+  } finally {
+    await context.close()
+  }
+}
+
+/** Follows an invite in this page. Someone new arrives in the chat as "New Friend" and is named there. */
+async function joinOn(page, invite) {
+  try {
     await page.goto(invite)
-    const named = page.getByLabel('Your name')
     const back = page.getByRole('button', {name: 'Back to chats'})
-    await Promise.race([named.waitFor({timeout: 60_000}), back.waitFor({timeout: 60_000})])
+    await back.waitFor({timeout: 60_000})
+    const named = page.getByLabel('Your name')
     if (await named.isVisible()) {
       await named.fill(NAME)
-      await page.getByRole('button', {name: 'Continue'}).click()
+      await page.getByRole('button', {name: 'Save name'}).click()
     }
-    await back.waitFor({timeout: 60_000})
-    console.log(`Joined "${(await page.locator('h1').first().textContent())?.trim()}".`)
+    return `Joined "${(await page.locator('h1').first().textContent())?.trim()}".`
   } catch (error) {
     const shown = await page.locator('.error').allTextContents().catch(() => [])
     throw new Error(`Could not join. ${shown.join(' ')} ${error.message}`)
-  } finally {
-    await context.close()
   }
 }
 
@@ -455,8 +463,15 @@ async function listen(wanted, group) {
         const id = file.slice(0, -'.json'.length)
         let reply
         try {
-          const {text, chat: other, picture, name: newName, call: seconds} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
-          if (seconds !== undefined) reply = [`${id}.sent`, await call(page, seconds)]
+          const {text, chat: other, picture, name: newName, call: seconds, invite} = JSON.parse(readFileSync(join(OUTBOX, file), 'utf8'))
+          if (invite !== undefined) {
+            // Joining leaves the page in the new chat. Back to this one at once, or the next reply would go there.
+            const joined = await joinOn(page, invite)
+            await chatNames(page)
+            await openChat(page, name)
+            reply = [`${id}.sent`, joined]
+          }
+          else if (seconds !== undefined) reply = [`${id}.sent`, await call(page, seconds)]
           else if (newName !== undefined) {
             // Renaming happens on the front page; the next round goes back into the chat.
             await rename(page, newName)
