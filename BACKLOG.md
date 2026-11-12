@@ -94,6 +94,7 @@ Still open:
 - **iPhone storage.** Safari can clear a site's data after seven days without a visit unless the app is installed to the home screen (Phase 3). Pictures make that loss more noticeable.
 - **A device that never gets the file** keeps asking every half minute while connected. Fine for now; a file nobody has any more should eventually show as gone.
 - **Sending is all-at-once per picture**; a connection that drops midway starts that picture again.
+- **SVGs stay converted to JPEG: decided 12 November 2026.** Sending them as they are was considered: an SVG can carry scripts, links that fetch from other servers (revealing the viewer's address) and editor metadata (usernames, folder paths), so it would need cleaning on the way out and showing only through `<img>`. Mykle chose not to: too much attack surface for the gain. Artwork such as Ilan's snerds comes in as files, not through chat.
 
 ### Voice messages: built 17 October 2026
 
