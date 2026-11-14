@@ -53,6 +53,34 @@ describe('one person on several devices', () => {
     await Promise.all([phone.stop(), computer.stop()])
   })
 
+  it('keeps a chat left on one device gone when another, which has not heard yet, comes back weeks later', async () => {
+    vi.useFakeTimers({toFake: ['Date']})
+    try {
+      const network = makeNetwork()
+      const anne = createIdentity('Anne')
+      const phone = await device(network, anne)
+      const picnic = await phone.store.saveChat(newGroupChat(anne, 'Picnic', [], Date.now()))
+      const desk = {...anne, device: '0123456789abcdef'}
+      const computer = await device(network, desk)
+      await vi.waitFor(() => expect(computer.names()).resolves.toEqual(['Picnic']))
+      await computer.stop()
+
+      // Three weeks on, the phone leaves while the computer is shut.
+      vi.setSystemTime(Date.now() + 21 * 24 * 3600_000)
+      await phone.store.deleteChat(picnic.id, anne)
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      // The computer is opened again, still holding the chat.
+      const again = startSelfSync({store: computer.store, identity: desk, connectFor: () => network.connect(`${desk.id}.${desk.device}`), pollMs: 40})
+      await new Promise(resolve => setTimeout(resolve, 600))
+      expect(await phone.names()).toEqual([])
+      expect(await computer.names()).toEqual([])
+      await Promise.all([phone.stop(), again()])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('passes on a chat renamed on one device to the others, once', async () => {
     const network = makeNetwork()
     const anne = createIdentity('Anne')

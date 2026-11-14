@@ -141,6 +141,11 @@ export type ChatHeldContent = {
   chain: Uint8Array[]
   peer?: {signPublic: Uint8Array; dhPublic: Uint8Array}
   name: string
+  /**
+   * When the device saying so got the chat. A device that left the chat after then knows this one has
+   * not heard yet, rather than having joined again since (devices.ts). Missing from older app versions.
+   */
+  since?: number
 }
 
 /** For each writer's device in a chat (as streamOf names it), the number of the latest of its messages shown. */
@@ -297,7 +302,8 @@ function encodeContent(content: Content): [string, unknown] {
           x: content.context,
           c: content.chain,
           n: content.name,
-          ...(content.peer ? {p: [content.peer.signPublic, content.peer.dhPublic]} : {})
+          ...(content.peer ? {p: [content.peer.signPublic, content.peer.dhPublic]} : {}),
+          ...(content.since !== undefined ? {t: content.since} : {})
         }
       ]
     case 'chat-left':
@@ -361,7 +367,7 @@ function decodeContent(type: unknown, body: unknown): Content {
     return {type, name: body}
   }
   if (type === 'chat-held') {
-    const {k, s, x, c, n, p} = (body ?? {}) as Record<string, unknown>
+    const {k, s, x, c, n, p, t} = (body ?? {}) as Record<string, unknown>
     const isBytes = (value: unknown, length: number): value is Uint8Array => value instanceof Uint8Array && value.length === length
     if (k !== 'g' && k !== 'd') throw new Error('bad chat body')
     if (!isBytes(s, 32) || !isBytes(x, k === 'd' ? 64 : 32) || !isChain(c)) throw new Error('bad chat body')
@@ -375,7 +381,8 @@ function decodeContent(type: unknown, body: unknown): Content {
       context: new Uint8Array(x),
       chain: c.map(cert => new Uint8Array(cert)),
       name: n,
-      ...(k === 'd' ? {peer: {signPublic: new Uint8Array(sign as Uint8Array), dhPublic: new Uint8Array(dh as Uint8Array)}} : {})
+      ...(k === 'd' ? {peer: {signPublic: new Uint8Array(sign as Uint8Array), dhPublic: new Uint8Array(dh as Uint8Array)}} : {}),
+      ...(typeof t === 'number' && Number.isFinite(t) ? {since: t} : {})
     }
   }
   if (type === 'chat-left') {

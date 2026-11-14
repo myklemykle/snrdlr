@@ -47,7 +47,8 @@ export function noteFor(chat: ChatRecord): ChatHeldContent {
     context: chat.context,
     chain: chat.chain,
     name: chat.name,
-    ...(chat.peer ? {peer: chat.peer} : {})
+    ...(chat.peer ? {peer: chat.peer} : {}),
+    since: chat.createdAt
   }
 }
 
@@ -111,9 +112,11 @@ export async function tendChats(store: Store, identity: Identity, messages: Mess
   for (const [id, {message, note}] of latest) {
     const here = local.get(id)
     if (note.type === 'chat-held' && !here) {
-      // Left here since another device last spoke of it: tell them.
+      // Left here since another device last spoke of it, or since that device got the chat: tell them.
+      // A device that was away can speak of a chat again before it has heard it was left (it repeats
+      // what it holds every few weeks); one that got the chat after it was left here has joined again.
       const leftAt = await store.leftAt(id)
-      if (leftAt !== undefined && leftAt > message.sentAt) {
+      if (leftAt !== undefined && (leftAt > message.sentAt || leftAt > (note.since ?? 0))) {
         await say({type: 'chat-left', id})
         continue
       }

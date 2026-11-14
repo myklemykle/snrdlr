@@ -2,7 +2,7 @@ import {ed25519} from '@noble/curves/ed25519.js'
 import {decode, encode} from 'cbor-x'
 import {describe, expect, it} from 'vitest'
 import {concatBytes, fromHex, utf8} from './bytes'
-import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type Message} from './envelope'
+import {importMsgKey, openEnvelope, sealEnvelope, type ChatContext, type ChatHeldContent, type Message} from './envelope'
 import {createIdentity} from './identity'
 import {deriveChatKeys, generateGroupSecret} from './keys'
 
@@ -201,6 +201,16 @@ describe('envelope', () => {
     for (const bad of [{__proto__x: 1}, {[anne.id]: -1}, {[anne.id]: 1.5}, {[`${anne.id}.12`]: 1}]) {
       const wrong = {...hello, seq: 2, content: {type: 'chat-read', id, seen: bad}} as const
       await expect(openEnvelope(chat, await sealEnvelope(chat, anne, wrong))).rejects.toThrow('bad chat body')
+    }
+  })
+
+  it('round-trips a chat one of a person\'s devices holds, with or without when it got it', async () => {
+    const chat = await makeChat()
+    const anne = createIdentity('Anne')
+    const held: ChatHeldContent = {type: 'chat-held', kind: 'group', secret: new Uint8Array(32).fill(7), context: new Uint8Array(32).fill(8), chain: [], name: 'Picnic'}
+    for (const content of [held, {...held, since: 1_760_000_000_000}]) {
+      const message = {...hello, content}
+      expect(await openEnvelope(chat, await sealEnvelope(chat, anne, message))).toEqual({...message, author: anne.id})
     }
   })
 
